@@ -1,0 +1,6 @@
+.intermediate/
+_build/
+dist/
+/_tbuild
+/build
+/__pycache__

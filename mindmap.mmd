@@ -1,0 +1,146 @@
+﻿mindmap
+  root((关于通用包管理机制的思考))
+    我们需要什么
+      可以管理任何代码项目
+        因为 c++ 没有一个合适的包管理模式。
+        因为 ai 的发展，程序的具体代码已经可以随便转换了。比如 c++ 项目可以转换成 js ts java python C# 等等语言实现。
+      可以生成不同的建造系统，比如cmake ninja sln
+      从设计上看，是通过数据结构来表达行为，也就是类似于行为树的设计。
+        因为是行为树，所以也就不需要任何脚本系统了，他自己就能描述逻辑。
+      包管理过程应该需要支持 meta 元编程相关功能，类似于 qt 的 moc uic 这些功能。
+        也需要支持类似 qrc 多语言翻译 等必要的功能。
+        所以需要这个包管理模式能轻松的扩展。
+      支持项目模板。
+        比如 c++ mian 函数的 helloworld 程序模板。
+        允许用户添加自己的自定义模板。
+      多语言支持
+        up.exe up-gui.exe 都支持多语言显示，也就是根据当前操作系统的默认语言设置判断，如果是中文就显示中文，如果不是就都显示为英文。
+        支持文件内容为中文，也就是支持 unicode utf8 utf16 等等编码。
+        但是，文件路径不支持多语言，因为编译器不可能都支持中文路径。
+          即便 up 能支持中文路径，生成的代码能支持gcc中文路径编译吗？
+          所以在配置的时候就明确给出路径错误的信息。
+    up命令设计
+      工作模式
+        configure
+          配置包的依赖关系，生成具体的建造系统文件，比如 cmake。
+        build
+          调用建造系统，比如 cmake 生成的具体编译脚本，比如 makefile ninja sln 。
+        run
+          运行具体被编译完成的目标文件。比如 exe
+        test
+          运行具体的单元测试文件。如果没有参数设置就是运行全部单元测试。
+        pack
+          打包编译的结果，为目标形式，比如自动安装程序，apk，等等。
+        project
+          升级当前cwd中已有的代码项目，为 package.xml 与各目标子目录中的 target.xml 文件。
+          从外部文件生成项目。
+            A模式
+              指定一个外部源码目录，在包根生成 package.xml，并为各目标创建子目录各写一个 target.xml。
+            B模式
+              只有一个下载地址，自动下载到 中间目录里的 download 目录中。
+              然后解压到 unzip 目录。然后执行 A模式的逻辑。
+            C模式
+              只有 git svn ftp 下载数据。然后执行 A模式。
+    包文件设计
+      package.xml
+        只包含一个 package 对象。
+          包依赖关系列表
+      target 描述文件
+        每个文件只包含一个 target 根元素。
+        固定文件名 target.xml
+          同一目录下只能有一个 target.xml 多目标须分目录。
+          例如 hello_demo/foo/target.xml 与 hello_demo/hello_demo/target.xml。
+        sources 路径
+          相对于该 target.xml 所在目录。
+        文件组管理 规划中
+          头文件
+          体文件，也就是实现。
+          脚本文件，没有头也没有体的文件。
+          编译资源文件，比如要嵌入程序的资源。
+          复制文件，也就是直接复制，不需要处理的文件。
+        目标属性
+          可执行程序，库，文件。
+        目标依赖关系。
+      包名称空间设计。
+        package_name:target_name
+        包空间是没有层级关系的，所有包名称都是同一个级别。
+      配置开关和变量。
+        允许用户设置一些变量，并且保存到缓冲文件中。类似于 cmake cache 文件的功能。
+    测试与示例仓库
+      test_projects 目录
+        每个一级子目录是一个独立测试包 根目录 package.xml。
+        hello_demo 示例
+          foo hello_demo hello_demo_test 各为子目录 每目录一个 target.xml。
+          单元测试与 CTest。
+    宿主工具开发与分发 Python
+      不参与包内行为树逻辑 仅构建安装打包 up 与 up-gui。
+      build.py
+        只 cmake build 目标 up 与 up-gui。
+      install.py
+        只 cmake install 分量 up_runtime。
+      package.py
+        将 up 与 up-gui 打成 zip 或 tar.gz 归档。
+      与 test_projects 无编译交集。
+    工作原理
+      使用 up.exe 命令行（必须是c++实现，静态crt连接。）
+        还可以提供一个 up-gui.exe 外壳（只能使用本地窗口系统）
+          这个程序可以类似于 cmake-gui 的界面。
+          支持 win32。 linux 下的 xlib ，macos下的cocoa。
+          目标界面结构
+            最上方是菜单栏。
+              然后是工具栏。
+            第一行显示输入路径，后面加上打开目录按钮。
+            第二行显示所有可设置的变量列表。
+            第三行是各种按钮。
+            第四行是输出信息窗口。
+            最后是状态栏。
+          当前参考实现 win32
+            菜单栏 工具栏 CWD ScanDir Option（支持分组树） 附加参数 运行目标下拉 单元测试下拉 日志 状态栏 调用同目录 up.exe。
+            编译环境设置窗口（菜单/工具栏入口）
+              Tab: 本地环境 / Android 环境 / emsdk 环境
+              本地环境：建造系统/vcvars/编译器命中列表（表格：工具 路径 来源）
+                PATH 命中优先，再补充常见安装路径扫描；支持多命中并点选当前项。
+                vcvars 搜索 vcvars64/vcvars32/VsDevCmd；选择后运行 up.exe 前先 call 对应脚本。
+              Android 环境：SDK 路径 / NDK 路径（自动搜索）
+                NDK 来源：ANDROID_NDK_ROOT/HOME -> SDK 下 ndk 与 ndk-bundle -> 常见 SDK 路径。
+                多版本 NDK 保留全部命中，推荐值按版本号与修改时间选取。
+              emsdk 环境：emsdk 路径（自动搜索）
+                先 EMSDK 与常见路径，未命中再做各盘根一级兜底（如 C:\emsdk）。
+              自动回填：SDK/NDK/emsdk 输入框展示当前推荐命中路径（已有且仍命中则保留）。
+              自动搜索状态：显示命中数量与关键未命中项，不展示冗长检测文本。
+      configure 过程，扫描依赖关系，生成直接编译的文件，比如 cmake
+        这个过程可以设置扫描路径，不管设置不设置，都会默认搜索当前cwd目录。
+        扫描到 package.xml 与各子目录中的 target.xml 每目录至多一个。建立 package 关系图并打印树状图。
+        扫描到 package 就作为当前包，其下子目录中的 target 作为子节点。每个 target 须落在 package 目录树内。
+        扫描完成后，会生成具体的后端文件。在 .intermediate/build 目录中。
+        这个过程是可以生成一个设置结果文件的，这里是保存了用户输入的开关和变量信息。类似于 cmake cache 文件的作用。
+        up_cache 规划
+          文件名可定为 up_cache.txt 或待定。
+          建议放在 .intermediate/build 下与 arch 或生成根并列 具体由实现定。
+          configure 时加载 更新 写入。
+      build 启动编译过程。
+        编译生成的cmake项目，采用内编译方式，并安装到 .intermediate/install 目录中。
+      run 运行指定的目标。
+      test 执行测试用例。
+      pack 打包程序。
+      当前实现要点 参考
+        单包生成顶层 CMake 同包多 target 库先于可执行体链接。
+        CTest 注册每个 executable install 仅首个可执行体。
+        arch 目录名已采用组合标签（例如 windows_x86_64_cmake_msvc_dynamic_release）。
+        Option 键名：UP_TARGET_DYNAMIC_LIBRARY / UP_TARGET_CRT / UP_TARGET_DEBUG / UP_TARGET_BUILD_SYSTEM。
+        UP_CMAKE_GENERATOR 仅在 UP_TARGET_BUILD_SYSTEM=cmake 时生效。
+    目录关系
+      执行 up.exe 会在当前 cwd 目录里产生一个中间文件目录
+      中间目录（这是个真实存在的目录叫做 .intermediate）包含几个子目录
+        build
+          先产生当前 arch 目录；cmake 模式生成 CMakeLists，ninja 模式在 out 目录生成 build.ninja。
+        install
+          这里是各个 arch 的目录。里面是 bin include 等文件。
+        pack
+          这里是按 arch 分目录的安装包存放目录。
+      arch 是 操作系统+cpu架构+编译环境关键字+动态静态+静态crt+debug/relese 这些的组合关系。
+        比如 windows_x86_64_cmake_msvc_static_static-crt_debug
+        windows_x86_64_ninja_msvc_dynamic_release
+    文档
+      DESIGN.md 与本文档同步迭代
+      README 构建与试用说明

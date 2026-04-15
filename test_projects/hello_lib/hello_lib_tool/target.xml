@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<target name="hello_lib_tool" type="executable">
+  <sources>
+    <file>main.cpp</file>
+  </sources>
+</target>

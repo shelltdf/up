@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<target name="foo" type="static_library">
+  <sources>
+    <file>foo.cpp</file>
+  </sources>
+  <includes>
+    <dir>.</dir>
+  </includes>
+</target>

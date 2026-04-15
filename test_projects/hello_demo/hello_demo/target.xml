@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<target name="hello_demo" type="executable">
+  <sources>
+    <file>main.cpp</file>
+  </sources>
+  <dependency name="foo"/>
+  <dependency name="hello_lib:hello_lib"/>
+</target>
