@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<target name="hello_parent_child_child_lib" type="static_library">
+  <sources>
+    <file>hello_parent_child_child_lib.cpp</file>
+  </sources>
+  <includes>
+    <dir from="." to="hello_parent_child_child"/>
+  </includes>
+</target>

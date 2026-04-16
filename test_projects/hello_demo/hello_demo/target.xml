@@ -5,6 +5,7 @@
   </sources>
   <dependency name="hello_foo"/>
   <dependency name="hello_simple_lib:hello_simple_lib"/>
+  <dependency name="hello_parent_child:parent_lib"/>
   <dependency name="rock_stack:rockBase"/>
   <dependency name="rock_stack:rockNet"/>
   <dependency name="rock_stack:rockBus"/>

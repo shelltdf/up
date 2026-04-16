@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<target name="hello_parent_child_app" type="executable">
+  <sources>
+    <file>main.cpp</file>
+  </sources>
+  <dependency name="hello_parent_child_child:hello_parent_child_child_lib"/>
+</target>

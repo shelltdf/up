@@ -9,8 +9,9 @@
 | 子目录 | 一句话 |
 |--------|--------|
 | [hello_simple_lib/](hello_simple_lib/) | 最简单独立静态库包：`hello_simple_lib`、`hello_simple_lib_tool`、`hello_simple_lib_test`。 |
-| [hello_demo/](hello_demo/) | 演示本包 `hello_foo` + 跨包 `hello_simple_lib`、`rock_stack` 的联合调用与测试。 |
+| [hello_demo/](hello_demo/) | 演示本包 `hello_foo` + 跨包 `hello_simple_lib`、`rock_stack`、`hello_parent_child` 的联合调用与测试。 |
 | [rock_stack/](rock_stack/) | 演示 `include/src/app/test` 布局及 `includes` 的 `dir/file/glob` 三种 `from/to` 写法。 |
+| [hello_parent_child/](hello_parent_child/) | 演示父子嵌套包（父包依赖子包）与跨包目标引用 `pkg:target`。 |
 
 ### 包依赖关系
 
@@ -19,13 +20,19 @@ flowchart LR
   hello_simple_lib["hello_simple_lib"]
   hello_demo["hello_demo"]
   rock_stack["rock_stack"]
+  hello_parent_child["hello_parent_child"]
+  hello_parent_child_child["hello_parent_child_child"]
   hello_demo --> hello_simple_lib
   hello_demo --> rock_stack
+  hello_demo --> hello_parent_child
+  hello_parent_child --> hello_parent_child_child
 ```
 
 - `hello_simple_lib`：无包级依赖。
 - `rock_stack`：无包级依赖。
-- `hello_demo`：依赖 `hello_simple_lib`、`rock_stack`（另有可选占位 `none`）。
+- `hello_demo`：依赖 `hello_simple_lib`、`rock_stack`、`hello_parent_child`（另有可选占位 `none`）。
+- `hello_parent_child_child`：无包级依赖（子包）。
+- `hello_parent_child`：依赖 `hello_parent_child_child`（父包）。
 
 ---
 
@@ -48,10 +55,10 @@ flowchart LR
 定位：演示包内多目标 + 跨包依赖调用。
 
 - 包名：`hello_demo`
-- 依赖包：`hello_simple_lib`、`rock_stack`（及可选占位 `none`）
+- 依赖包：`hello_simple_lib`、`rock_stack`、`hello_parent_child`（及可选占位 `none`）
 - 目标：
   - `hello_foo`（本包静态库）
-  - `hello_demo`（主程序，调用 `hello_foo` + `hello_simple_lib` + `rock_stack`）
+  - `hello_demo`（主程序，调用 `hello_foo` + `hello_simple_lib` + `hello_parent_child:parent_lib` + `rock_stack`）
   - `hello_foo_test`（本包单测）
 
 ---
@@ -73,6 +80,20 @@ flowchart LR
 
 ---
 
+## hello_parent_child
+
+定位：演示“父目录与子目录都含 `package.xml`”的嵌套包关系，以及父包依赖子包并链接子包目标。
+
+- 父包：`hello_parent_child`
+- 子包：`hello_parent_child_child`（位于 `hello_parent_child/child_pkg/`）
+- 父包目标：`hello_parent_child_app`（`executable`）、`parent_lib`（`static_library`）
+- 子包目标：`hello_parent_child_child_lib`（`static_library`）
+- 依赖关系：
+  - 父包通过 `<dependency name="hello_parent_child_child:hello_parent_child_child_lib"/>` 调用子包库 API
+  - 外部包（如 `hello_demo`）可通过 `<dependency name="hello_parent_child:parent_lib"/>` 复用父包导出库
+
+---
+
 ## 在仓库根目录执行（已构建 `up.exe`）
 
 ```powershell
@@ -80,6 +101,16 @@ flowchart LR
 .\_build\Release\up.exe build
 .\_build\Release\up.exe test
 .\_build\Release\up.exe run hello_demo
+```
+
+仅验证父子包示例（在 `test_projects` 目录内）：
+
+```powershell
+Set-Location test_projects\hello_parent_child
+..\..\_build\Release\up.exe configure
+..\..\_build\Release\up.exe build
+..\..\_build\Release\up.exe test
+..\..\_build\Release\up.exe run hello_parent_child_app
 ```
 
 单独运行 `hello_simple_lib` 包内工具：

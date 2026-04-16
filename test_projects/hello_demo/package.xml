@@ -3,5 +3,6 @@
   <!-- 每个子目录至多一个 target.xml，且须在本 package 目录树内；依赖示例 -->
   <dependency name="none" optional="true"/>
   <dependency name="hello_simple_lib"/>
+  <dependency name="hello_parent_child"/>
   <dependency name="rock_stack"/>
 </package>

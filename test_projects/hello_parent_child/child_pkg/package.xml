@@ -1,0 +1,4 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<package name="hello_parent_child_child" version="0.1.0">
+  <!-- nested child package for parent-child test -->
+</package>
