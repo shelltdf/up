@@ -14,6 +14,7 @@
 | [hello_parent_child/](hello_parent_child/) | 演示父子嵌套包（父包依赖子包）与跨包目标引用 `pkg:target`。 |
 | [hello_data_files/](hello_data_files/) | 演示 `xml/json/svg` 数据文件随安装产物落盘并由可执行程序启动加载。 |
 | [meta_codegen/](meta_codegen/) | 演示 `moc/uic/rc` 风格代码生成工具：`.h -> .meta.cpp`、`.ui -> .h+.cpp`、`.rc -> .h+.cpp`。 |
+| [plugin_runtime/](plugin_runtime/) | 演示插件共享库动态加载：默认导出 `init/update/shutdown/info` 并由测试程序运行。 |
 
 ### 包依赖关系
 
@@ -26,6 +27,7 @@ flowchart LR
   hello_parent_child_child["hello_parent_child_child"]
   hello_data_files["hello_data_files"]
   meta_codegen["meta_codegen"]
+  plugin_runtime["plugin_runtime"]
   hello_demo --> hello_simple_lib
   hello_demo --> rock_stack
   hello_demo --> hello_parent_child
@@ -39,6 +41,7 @@ flowchart LR
 - `hello_parent_child`：依赖 `hello_parent_child_child`（父包）。
 - `hello_data_files`：无包级依赖（资源文件安装与运行时加载示例）。
 - `meta_codegen`：无包级依赖（代码生成工具示例）。
+- `plugin_runtime`：无包级依赖（插件动态加载示例）。
 
 ---
 
@@ -114,15 +117,25 @@ flowchart LR
 
 ## meta_codegen
 
-定位：演示元编程/代码生成工具链。包含 4 个可执行程序：
+定位：演示元编程/代码生成工具链。包含 3 个可执行程序：
 
-- `moc`：输入 `.h`，输出对应 `.meta.cpp`
-- `uic`：输入 `.ui`，输出对应 `.h` + `.cpp`
-- `rc`：输入 `.rc`，输出对应 `.h` + `.cpp`
-- `meta_codegen_demo`：校验生成文件存在且含预期符号（端到端 smoke test）
+- `moc`：输入 `.h`，输出对应 `.meta.cpp`（默认输出到 `.intermediate/generated/`）
+- `uic`：输入 `.ui`，输出对应 `.h` + `.cpp`（默认输出到 `.intermediate/generated/`）
+- `rc`：输入 `.rc`，输出对应 `.h` + `.cpp`（默认输出到 `.intermediate/generated/`）
 
 示例输入位于：`meta_codegen/samples/`
 工具目录已合并为：`meta_codegen/meta_tool/{moc,uic,rc}/`
+
+---
+
+## plugin_runtime
+
+定位：演示“插件是特殊共享库”的运行时加载场景。插件默认导出 4 个动态加载函数：`init`、`update`、`shutdown`、`info`。
+
+- 包名：`plugin_runtime`
+- 插件目标：`plugin_lib`（`shared_library`）
+- 测试目标：`plugin_loader_test`（`executable`）
+- 验证方式：测试程序在运行时加载插件并查找上述 4 个导出函数，调用后打印结果
 
 ---
 
@@ -150,10 +163,19 @@ Set-Location test_projects
 Set-Location test_projects
 ..\_build\Release\up.exe configure --scan .
 ..\_build\Release\up.exe build
-..\_build\Release\up.exe run moc .\meta_codegen\samples\widget.h .\meta_codegen\samples\widget.meta.cpp
-..\_build\Release\up.exe run uic .\meta_codegen\samples\main_panel.ui .\meta_codegen\samples\ui_main_panel.h .\meta_codegen\samples\ui_main_panel.cpp
-..\_build\Release\up.exe run rc .\meta_codegen\samples\app.rc .\meta_codegen\samples\rc_app.h .\meta_codegen\samples\rc_app.cpp
-..\_build\Release\up.exe run meta_codegen_demo
+..\_build\Release\up.exe run moc
+..\_build\Release\up.exe run uic
+..\_build\Release\up.exe run rc
+```
+
+单独验证插件加载示例（在 `test_projects` 目录内）：
+
+```powershell
+Set-Location test_projects\plugin_runtime
+..\..\_build\Release\up.exe configure
+..\..\_build\Release\up.exe build
+..\..\_build\Release\up.exe run plugin_loader_test
+..\..\_build\Release\up.exe test
 ```
 
 仅验证父子包示例（在 `test_projects` 目录内）：

@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="UTF-8"?>
-<target name="meta_codegen_demo" type="executable">
+<target name="plugin_loader_test" type="executable">
   <sources>
     <file>main.cpp</file>
   </sources>

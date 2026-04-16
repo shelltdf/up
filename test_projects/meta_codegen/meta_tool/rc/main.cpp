@@ -27,8 +27,8 @@ int main(int argc, char** argv) {
   if (argc == 1) {
     const fs::path root = detect_package_root(argc > 0 ? argv[0] : ".");
     input = root / "samples" / "app.rc";
-    out_h = root / "samples" / "rc_app.h";
-    out_cpp = root / "samples" / "rc_app.cpp";
+    out_h = root / ".intermediate" / "generated" / "rc_app.h";
+    out_cpp = root / ".intermediate" / "generated" / "rc_app.cpp";
   } else if (argc == 4) {
     input = argv[1];
     out_h = argv[2];

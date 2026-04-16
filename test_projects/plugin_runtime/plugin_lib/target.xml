@@ -1,0 +1,6 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<target name="plugin_lib" type="shared_library">
+  <sources>
+    <file>plugin_lib.cpp</file>
+  </sources>
+</target>

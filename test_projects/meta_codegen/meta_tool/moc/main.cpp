@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
   if (argc == 1) {
     const fs::path root = detect_package_root(argc > 0 ? argv[0] : ".");
     input = root / "samples" / "widget.h";
-    output = root / "samples" / "widget.meta.cpp";
+    output = root / ".intermediate" / "generated" / "widget.meta.cpp";
   } else if (argc == 3) {
     input = argv[1];
     output = argv[2];
