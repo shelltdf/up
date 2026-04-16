@@ -49,7 +49,7 @@
         每个文件只包含一个 target 根元素。
         固定文件名 target.xml
           同一目录下只能有一个 target.xml 多目标须分目录。
-          例如 hello_demo/foo/target.xml 与 hello_demo/hello_demo/target.xml。
+          例如 hello_demo/hello_foo/target.xml 与 hello_demo/hello_demo/target.xml。
         sources 路径
           相对于该 target.xml 所在目录。
         文件组管理 规划中
@@ -70,7 +70,7 @@
       test_projects 目录
         每个一级子目录是一个独立测试包 根目录 package.xml。
         hello_demo 示例
-          foo hello_demo hello_demo_test 各为子目录 每目录一个 target.xml。
+          hello_foo hello_demo hello_foo_test 各为子目录 每目录一个 target.xml。
           单元测试与 CTest。
     宿主工具开发与分发 Python
       不参与包内行为树逻辑 仅构建安装打包 up 与 up-gui。

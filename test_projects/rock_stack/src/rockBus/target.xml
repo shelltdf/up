@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<target name="rockBus" type="static_library">
+  <sources>
+    <file>rock_bus.cpp</file>
+  </sources>
+  <includes>
+    <dir>../../include/rockBus</dir>
+  </includes>
+</target>

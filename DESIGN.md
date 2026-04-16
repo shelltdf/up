@@ -70,6 +70,8 @@
 
 ## 3. 包文件设计
 
+细则见 **[doc/package-target-xml-spec.md](doc/package-target-xml-spec.md)**。
+
 ### 3.1 package.xml
 
 - 文件内**只包含一个根 `<package>` 元素**（一个 package 对象）。
@@ -83,7 +85,7 @@
 
 ### 3.3 最小示例与仓库布局
 
-见 **`test_projects/<包名>/`**：**一级子目录**为独立测试包（根下放 `package.xml`）；包内**每个目标**再占**子目录**，该目录内**仅一个** `target.xml`（示例见 `hello_demo/foo/`、`hello_demo/hello_demo/`）。正式 schema 可在后续迭代为 XSD 或 JSON Schema。
+见 **`test_projects/<包名>/`**：**一级子目录**为独立测试包（根下放 `package.xml`）；包内**每个目标**再占**子目录**，该目录内**仅一个** `target.xml`（示例见 `hello_demo/hello_foo/`、`hello_demo/hello_demo/`）。正式 schema 可在后续迭代为 XSD 或 JSON Schema。
 
 ## 4. 工作原理（概要）
 

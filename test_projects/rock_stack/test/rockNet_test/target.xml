@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<target name="rockNet_test" type="executable">
+  <sources>
+    <file>rock_net_test.cpp</file>
+  </sources>
+</target>

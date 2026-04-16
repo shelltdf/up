@@ -1,6 +1,6 @@
 # uni-package (up)
 
-**uni-package**（缩写 **`up`**）是一个面向「用数据结构驱动构建与包关系」的原型命令行工具：用 **`package.xml`** 与各目标子目录中的 **`target.xml`**（每目录至多一个）描述包与目标，`up` 负责扫描、生成 CMake 工程、构建、测试与运行。设计背景与完整约定见 **[DESIGN.md](DESIGN.md)**，思维导图见 **[mindmap.mmd](mindmap.mmd)**。
+**uni-package**（缩写 **`up`**）是一个面向「用数据结构驱动构建与包关系」的原型命令行工具：用 **`package.xml`** 与各目标子目录中的 **`target.xml`**（每目录至多一个）描述包与目标，`up` 负责扫描、生成 CMake 工程、构建、测试与运行。`package.xml` / `target.xml` 的字段与解析约定见 **[doc/package-target-xml-spec.md](doc/package-target-xml-spec.md)**；设计背景与完整约定见 **[DESIGN.md](DESIGN.md)**，思维导图见 **[mindmap.mmd](mindmap.mmd)**。
 
 ## 依赖
 
@@ -82,6 +82,7 @@ python package.py
 ├── install.py          # cmake --install（默认前缀 dist/）
 ├── package.py          # 将 up / up-gui 打成 zip 或 tar.gz
 ├── DESIGN.md           # 设计文档
+├── doc/                # 补充规范（如 XML 描述文件）
 ├── README.md           # 本文件
 ├── mindmap.mmd         # 设计思维导图
 ├── src/                # up CLI 源码（*.hpp 与 *.cpp）

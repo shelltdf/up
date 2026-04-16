@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<target name="rockBus_test" type="executable">
+  <sources>
+    <file>rock_bus_test.cpp</file>
+  </sources>
+</target>

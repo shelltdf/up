@@ -1,6 +1,6 @@
-// Unit tests for foo; run via CTest / `up test`.
+// Unit tests for hello_foo lib; run via CTest / `up test`.
 
-#include "../foo/foo.hpp"
+#include "../hello_foo/foo.hpp"
 
 #include <cassert>
 

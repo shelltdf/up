@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package name="rock_stack" version="0.1.0">
+  <!-- 演示 include/、src/、app/、test/ 目录组织；三库独立，由应用与测试组合使用 -->
+</package>

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<target name="foo" type="static_library">
+<target name="hello_foo" type="static_library">
   <sources>
     <file>foo.cpp</file>
   </sources>
