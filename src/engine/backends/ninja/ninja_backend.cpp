@@ -1,5 +1,7 @@
 #include "ninja/ninja_backend.hpp"
 
+#include "paths.hpp"
+
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -37,7 +39,7 @@ std::string quote_ninja_path(const std::filesystem::path& p) {
 
 std::string build_ninja_install_command(const BuildBackendContext& ctx) {
   std::ostringstream cmd;
-  cmd << "ninja -C \"" << ctx.bin_dir.string() << "\" install";
+  cmd << "ninja -C \"" << to_posix_path_string(ctx.bin_dir) << "\" install";
   return cmd.str();
 }
 
@@ -259,7 +261,7 @@ int write_ninja_file(const ConfigureGraphModel& model) {
   nf << "\n";
   nf << "default install\n";
 
-  std::cout << "Wrote " << ninja_path.string() << std::endl;
+  std::cout << "Wrote " << to_posix_path_string(ninja_path) << std::endl;
   return 0;
 }
 

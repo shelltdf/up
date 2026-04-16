@@ -1,5 +1,7 @@
 #include "run.hpp"
 
+#include "paths.hpp"
+
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -16,11 +18,11 @@ int cmd_run(const std::filesystem::path& install_dir, const std::string& target_
     exe.replace_filename(exe.filename().string() + ".exe");
 #endif
   if (!std::filesystem::exists(exe)) {
-    std::cerr << "run: executable not found: " << exe << "\n";
+    std::cerr << "run: executable not found: " << to_posix_path_string(exe) << "\n";
     return 2;
   }
   std::ostringstream cmd;
-  cmd << "\"" << exe.string() << "\"";
+  cmd << "\"" << to_posix_path_string(exe) << "\"";
   return std::system(cmd.str().c_str());
 }
 

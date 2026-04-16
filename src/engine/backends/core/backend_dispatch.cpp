@@ -3,6 +3,7 @@
 #include "archive/archive_backend.hpp"
 #include "cmake/cmake_backend.hpp"
 #include "commands_common.hpp"
+#include "paths.hpp"
 #include "ninja/ninja_backend.hpp"
 #include "test/ctest_backend.hpp"
 
@@ -36,7 +37,7 @@ bool try_run_cpack(const PackBackendContext& ctx, int& out_code) {
   std::cout << command << "\n";
   const int code = std::system(command.c_str());
   if (code == 0) {
-    std::cout << "pack: cpack output -> " << ctx.dst_dir << "\n";
+    std::cout << "pack: cpack output -> " << to_posix_path_string(ctx.dst_dir) << "\n";
     out_code = 0;
     return true;
   }
@@ -55,7 +56,7 @@ int run_archive_pack(const PackBackendContext& ctx) {
     std::cerr << "pack: archive command failed with code " << code << "\n";
     return static_cast<unsigned>(code) > 255u ? 1 : code;
   }
-  std::cout << "pack: " << ctx.src_dir << " -> " << archive << "\n";
+  std::cout << "pack: " << to_posix_path_string(ctx.src_dir) << " -> " << to_posix_path_string(archive) << "\n";
   return 0;
 }
 
@@ -99,12 +100,12 @@ int run_test_backend_ninja(const TestBackendContext& ctx, int not_found_return_c
     tests.push_back(p);
   }
   if (tests.empty()) {
-    std::cerr << "test: no matching test executables in " << ctx.install_bin_dir << "\n";
+    std::cerr << "test: no matching test executables in " << to_posix_path_string(ctx.install_bin_dir) << "\n";
     return not_found_return_code;
   }
   for (const auto& t : tests) {
     std::ostringstream cmd;
-    cmd << "\"" << t.string() << "\"";
+    cmd << "\"" << to_posix_path_string(t) << "\"";
     const int code = std::system(cmd.str().c_str());
     if (code != 0)
       return static_cast<unsigned>(code) > 255u ? 1 : code;

@@ -1,5 +1,7 @@
 #include "cmake/cmake_backend.hpp"
 
+#include "paths.hpp"
+
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -8,8 +10,8 @@ namespace up {
 
 std::string build_cmake_build_command(const BuildBackendContext& ctx) {
   std::ostringstream cmd;
-  cmd << "cmake -S \"" << ctx.src_dir.string() << "\" -B \"" << ctx.bin_dir.string()
-      << "\" -DCMAKE_INSTALL_PREFIX=\"" << ctx.install_dir.string() << "\"";
+  cmd << "cmake -S \"" << to_posix_path_string(ctx.src_dir) << "\" -B \"" << to_posix_path_string(ctx.bin_dir)
+      << "\" -DCMAKE_INSTALL_PREFIX=\"" << to_posix_path_string(ctx.install_dir) << "\"";
   if (!ctx.cmake_generator.empty()) {
     cmd << " -G \"" << ctx.cmake_generator << "\"";
   }
@@ -19,7 +21,7 @@ std::string build_cmake_build_command(const BuildBackendContext& ctx) {
   if (!ctx.multi_config) {
     cmd << " -DCMAKE_BUILD_TYPE=" << ctx.config_name;
   }
-  cmd << " && cmake --build \"" << ctx.bin_dir.string() << "\"";
+  cmd << " && cmake --build \"" << to_posix_path_string(ctx.bin_dir) << "\"";
   if (ctx.multi_config) {
     cmd << " --config " << ctx.config_name;
   }
@@ -29,7 +31,7 @@ std::string build_cmake_build_command(const BuildBackendContext& ctx) {
 
 std::string build_cmake_configure_command(const ConfigureBackendContext& ctx) {
   std::ostringstream cmd;
-  cmd << "cmake -S \"" << ctx.source_dir.string() << "\" -B \"" << ctx.out_dir.string() << "\"";
+  cmd << "cmake -S \"" << to_posix_path_string(ctx.source_dir) << "\" -B \"" << to_posix_path_string(ctx.out_dir) << "\"";
   if (!ctx.cmake_generator.empty()) {
     cmd << " -G \"" << ctx.cmake_generator << "\"";
   }
@@ -143,7 +145,7 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
   }
   f << cm.str();
   // Flush before a later system(cmake) so captured stdout does not splice into this line.
-  std::cout << "Wrote " << out_cmake.string() << std::endl;
+  std::cout << "Wrote " << to_posix_path_string(out_cmake) << std::endl;
   return 0;
 }
 

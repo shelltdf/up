@@ -49,11 +49,13 @@ void collect_desc_files(const std::filesystem::path& root, std::vector<std::file
 std::filesystem::path nearest_package_parent(const std::filesystem::path& target_xml_path,
                                              const std::vector<std::filesystem::path>& package_files) {
   const auto t = target_xml_path.parent_path();
+  const std::string ts = to_posix_path_string(t);
   std::filesystem::path best;
   for (const auto& pkg : package_files) {
     const auto parent = pkg.parent_path();
-    if (t.string().rfind(parent.string(), 0) == 0) {
-      if (best.empty() || parent.string().size() > best.string().size())
+    const std::string ps = to_posix_path_string(parent);
+    if (ts.rfind(ps, 0) == 0) {
+      if (best.empty() || ps.size() > to_posix_path_string(best).size())
         best = parent;
     }
   }
@@ -80,7 +82,7 @@ bool split_dep_ref(const std::string& ref, const std::string& self_pkg, std::str
 
 bool require_ascii_path(const std::filesystem::path& p) {
   if (path_has_non_ascii(p)) {
-    std::cerr << lang::configure_path_non_ascii() << p << "\n";
+    std::cerr << lang::configure_path_non_ascii() << to_posix_path_string(p) << "\n";
     return false;
   }
   return true;
@@ -152,7 +154,7 @@ void write_up_cache(const std::filesystem::path& cache_path,
                     const std::map<std::string, std::string>& options) {
   std::ofstream f(cache_path);
   if (!f) {
-    std::cerr << "configure: warning: could not write " << cache_path << "\n";
+    std::cerr << "configure: warning: could not write " << to_posix_path_string(cache_path) << "\n";
     return;
   }
   f << "up.cache.version=1\n";
@@ -189,7 +191,7 @@ void write_packages_md(const std::filesystem::path& out_path,
                        const std::vector<std::filesystem::path>& scan_roots) {
   std::ofstream f(out_path);
   if (!f) {
-    std::cerr << "configure: warning: could not write " << out_path << "\n";
+    std::cerr << "configure: warning: could not write " << to_posix_path_string(out_path) << "\n";
     return;
   }
 
@@ -378,7 +380,7 @@ int cmd_configure(const std::filesystem::path& cwd,
     PackageDesc pkg;
     std::string err;
     if (!load_package_xml(pkg_path, pkg, err)) {
-      std::cerr << pkg_path << ": " << err << "\n";
+      std::cerr << to_posix_path_string(pkg_path) << ": " << err << "\n";
       return 3;
     }
     if (package_name_to_dir.count(pkg.name)) {
@@ -394,7 +396,7 @@ int cmd_configure(const std::filesystem::path& cwd,
   for (const auto& tpath : target_files) {
     const auto anchor = nearest_package_parent(tpath, package_files);
     if (anchor.empty()) {
-      std::cerr << "warning: target without package parent in scan set: " << tpath << "\n";
+      std::cerr << "warning: target without package parent in scan set: " << to_posix_path_string(tpath) << "\n";
       continue;
     }
     std::string pkg_name;
@@ -405,13 +407,13 @@ int cmd_configure(const std::filesystem::path& cwd,
       }
     }
     if (pkg_name.empty()) {
-      std::cerr << "warning: target parent package not resolved: " << tpath << "\n";
+      std::cerr << "warning: target parent package not resolved: " << to_posix_path_string(tpath) << "\n";
       continue;
     }
     TargetDesc td;
     std::string err;
     if (!load_target_xml(tpath, td, err)) {
-      std::cerr << tpath << ": " << err << "\n";
+      std::cerr << to_posix_path_string(tpath) << ": " << err << "\n";
       return 3;
     }
     LoadedTarget lt;
@@ -420,7 +422,7 @@ int cmd_configure(const std::filesystem::path& cwd,
     lt.desc = std::move(td);
     const std::string key = pkg_name + ":" + lt.desc.name;
     if (target_index.count(key)) {
-      std::cerr << "configure: duplicate target key: " << key << " at " << tpath << "\n";
+      std::cerr << "configure: duplicate target key: " << key << " at " << to_posix_path_string(tpath) << "\n";
       return 3;
     }
     target_index[key] = all_targets.size();
@@ -431,14 +433,15 @@ int cmd_configure(const std::filesystem::path& cwd,
   for (const auto& pkg_pair : loaded_packages) {
     const auto& pkg_path = pkg_pair.first;
     const auto& pkg = pkg_pair.second;
-    std::cout << "  package \"" << pkg.name << "\" v" << pkg.version << " @ " << pkg_path << "\n";
+    std::cout << "  package \"" << pkg.name << "\" v" << pkg.version << " @ " << to_posix_path_string(pkg_path) << "\n";
     for (const auto& d : pkg.dependencies)
       std::cout << "    (dep) " << d.first << (d.second ? " [optional]" : "") << "\n";
     for (const auto& lt : all_targets) {
       if (lt.package_name != pkg.name)
         continue;
       std::filesystem::path tpath = lt.target_dir / "target.xml";
-      std::cout << "    target \"" << lt.desc.name << "\" (" << lt.desc.type << ") @ " << tpath << "\n";
+      std::cout << "    target \"" << lt.desc.name << "\" (" << lt.desc.type << ") @ " << to_posix_path_string(tpath)
+                << "\n";
     }
   }
 

@@ -188,6 +188,8 @@ struct GuiEnvSettings {
   std::wstring android_ndk_path;
   std::wstring emsdk_path;
   std::wstring selected_vcvars;
+  std::wstring vcvars64_path;
+  std::wstring vcvars32_path;
   int vcvars_cl_hits = 0;
   std::wstring vcvars_cl_note;
   std::wstring vcvars_cl_output;
@@ -260,6 +262,31 @@ void TrimInPlace(std::wstring& s) {
     s.pop_back();
 }
 
+// 路径统一为 POSIX 风格「/」分隔（generic 形式），便于与 Linux 习惯一致、配置文件易读；Windows API 多数仍接受此种路径。
+std::wstring PathToPortableSlashes(std::wstring w) {
+  TrimInPlace(w);
+  if (w.empty())
+    return w;
+  std::filesystem::path p(w);
+  p = p.lexically_normal();
+  return p.generic_wstring();
+}
+
+// 配置文件里所有「路径形态」的项统一为正斜杠 /（含从环境/自动探测得到的值）。
+void NormalizeGuiSettingsStoredPaths() {
+  g_env_settings.android_sdk_path = PathToPortableSlashes(g_env_settings.android_sdk_path);
+  g_env_settings.android_ndk_path = PathToPortableSlashes(g_env_settings.android_ndk_path);
+  g_env_settings.emsdk_path = PathToPortableSlashes(g_env_settings.emsdk_path);
+  g_env_settings.selected_vcvars = PathToPortableSlashes(g_env_settings.selected_vcvars);
+  g_env_settings.vcvars64_path = PathToPortableSlashes(g_env_settings.vcvars64_path);
+  g_env_settings.vcvars32_path = PathToPortableSlashes(g_env_settings.vcvars32_path);
+  g_browse_history.cwd_folder = PathToPortableSlashes(g_browse_history.cwd_folder);
+  g_browse_history.scan_folder = PathToPortableSlashes(g_browse_history.scan_folder);
+  g_browse_history.android_sdk_folder = PathToPortableSlashes(g_browse_history.android_sdk_folder);
+  g_browse_history.android_ndk_folder = PathToPortableSlashes(g_browse_history.android_ndk_folder);
+  g_browse_history.emsdk_folder = PathToPortableSlashes(g_browse_history.emsdk_folder);
+}
+
 void SetStatus(const wchar_t* text) {
   g_status_text = text ? text : L"";
   if (g_status)
@@ -327,7 +354,7 @@ std::wstring DirOfModule() {
   const auto pos = p.find_last_of(L"\\/");
   if (pos == std::wstring::npos)
     return {};
-  return p.substr(0, pos + 1);
+  return PathToPortableSlashes(p.substr(0, pos));
 }
 
 std::filesystem::path GuiSettingsPath() {
@@ -347,14 +374,14 @@ std::wstring CmdExePath() {
   if (!comspec.empty()) {
     std::error_code ec;
     if (std::filesystem::exists(std::filesystem::path(comspec), ec))
-      return comspec;
+      return PathToPortableSlashes(std::move(comspec));
   }
   std::wstring sysroot = GetEnvVarW(L"SystemRoot");
   if (!sysroot.empty()) {
     std::filesystem::path p = std::filesystem::path(sysroot) / "System32" / "cmd.exe";
     std::error_code ec;
     if (std::filesystem::exists(p, ec))
-      return p.wstring();
+      return p.lexically_normal().generic_wstring();
   }
   return L"cmd.exe";
 }
@@ -388,11 +415,7 @@ void AddUnique(std::vector<std::wstring>& v, const std::wstring& s) {
 std::wstring NormalizePath(const std::filesystem::path& p) {
   std::error_code ec;
   const auto abs = std::filesystem::absolute(p, ec);
-  std::wstring s = (ec ? p : abs).lexically_normal().wstring();
-  for (auto& c : s)
-    if (c == L'/')
-      c = L'\\';
-  return s;
+  return (ec ? p : abs).lexically_normal().generic_wstring();
 }
 
 void AddUniqueHit(std::vector<ToolHit>& hits, const std::wstring& name, const std::filesystem::path& p, bool from_path) {
@@ -622,6 +645,8 @@ void DetectAndroidAndEmsdkHits(GuiEnvSettings& s) {
   s.emsdk_path = PickPreferredPath(s.emsdk_path, s.emsdk_hits);
 }
 
+void RefreshStoredVcvars32And64Paths(GuiEnvSettings& s);
+
 void DetectVcvarsHits(GuiEnvSettings& s) {
   s.vcvars_hits.clear();
   auto try_add = [&](const std::filesystem::path& p, const std::wstring& name, bool from_env) {
@@ -691,6 +716,50 @@ void DetectVcvarsHits(GuiEnvSettings& s) {
   }
   if (!sel_ok)
     s.selected_vcvars = s.vcvars_hits.empty() ? L"" : s.vcvars_hits.front().path;
+  RefreshStoredVcvars32And64Paths(s);
+}
+
+// 在配置中同时记住 vcvars64 / vcvars32 的完整路径（同目录成对 + 命中列表补全）。
+void RefreshStoredVcvars32And64Paths(GuiEnvSettings& s) {
+  std::error_code ec;
+  const std::filesystem::path sel(s.selected_vcvars);
+  const std::filesystem::path sel_dir = sel.has_parent_path() ? sel.parent_path() : std::filesystem::path{};
+
+  auto fill_pair_from_dir = [&](const std::filesystem::path& dir) {
+    if (dir.empty())
+      return;
+    const auto p64 = dir / L"vcvars64.bat";
+    const auto p32 = dir / L"vcvars32.bat";
+    if (s.vcvars64_path.empty() && std::filesystem::exists(p64, ec)) {
+      ec.clear();
+      s.vcvars64_path = PathToPortableSlashes(p64.wstring());
+    }
+    if (s.vcvars32_path.empty() && std::filesystem::exists(p32, ec)) {
+      ec.clear();
+      s.vcvars32_path = PathToPortableSlashes(p32.wstring());
+    }
+  };
+
+  if (!s.selected_vcvars.empty())
+    fill_pair_from_dir(sel_dir);
+
+  for (const auto& h : s.vcvars_hits) {
+    if (h.name != L"vcvars64" && h.name != L"vcvars32")
+      continue;
+    const std::filesystem::path hp(h.path);
+    if (!sel_dir.empty() && hp.has_parent_path() && hp.parent_path() == sel_dir) {
+      if (h.name == L"vcvars64" && s.vcvars64_path.empty())
+        s.vcvars64_path = PathToPortableSlashes(h.path);
+      if (h.name == L"vcvars32" && s.vcvars32_path.empty())
+        s.vcvars32_path = PathToPortableSlashes(h.path);
+    }
+  }
+  for (const auto& h : s.vcvars_hits) {
+    if (h.name == L"vcvars64" && s.vcvars64_path.empty())
+      s.vcvars64_path = PathToPortableSlashes(h.path);
+    else if (h.name == L"vcvars32" && s.vcvars32_path.empty())
+      s.vcvars32_path = PathToPortableSlashes(h.path);
+  }
 }
 
 void DetectCompilerHitsBase(const std::vector<std::filesystem::path>& roots, std::vector<ToolHit>& out) {
@@ -832,6 +901,10 @@ void LoadGuiEnvSettings() {
       g_env_settings.emsdk_path = v;
     else if (k == "local.vcvars")
       g_env_settings.selected_vcvars = v;
+    else if (k == "local.vcvars64" && !v.empty())
+      g_env_settings.vcvars64_path = v;
+    else if (k == "local.vcvars32" && !v.empty())
+      g_env_settings.vcvars32_path = v;
     else if (k == "browse.cwd")
       g_browse_history.cwd_folder = v;
     else if (k == "browse.scan")
@@ -850,9 +923,11 @@ void LoadGuiEnvSettings() {
     }
   }
   DetectVcvarsHits(g_env_settings);
+  NormalizeGuiSettingsStoredPaths();
 }
 
 void SaveGuiEnvSettings() {
+  NormalizeGuiSettingsStoredPaths();
   std::ofstream f(GuiSettingsPath(), std::ios::binary | std::ios::trunc);
   if (!f)
     return;
@@ -862,6 +937,8 @@ void SaveGuiEnvSettings() {
   f << "android.ndk=" << WideToUtf8(g_env_settings.android_ndk_path) << "\n";
   f << "emsdk.path=" << WideToUtf8(g_env_settings.emsdk_path) << "\n";
   f << "local.vcvars=" << WideToUtf8(g_env_settings.selected_vcvars) << "\n";
+  f << "local.vcvars64=" << WideToUtf8(g_env_settings.vcvars64_path) << "\n";
+  f << "local.vcvars32=" << WideToUtf8(g_env_settings.vcvars32_path) << "\n";
   f << "browse.cwd=" << WideToUtf8(g_browse_history.cwd_folder) << "\n";
   f << "browse.scan=" << WideToUtf8(g_browse_history.scan_folder) << "\n";
   f << "browse.android_sdk=" << WideToUtf8(g_browse_history.android_sdk_folder) << "\n";
@@ -1266,6 +1343,7 @@ void PullEnvDialogValues(EnvDialogState* st) {
   st->work.android_ndk_path = buf;
   GetWindowTextW(st->edt_emsdk, buf, static_cast<int>(std::size(buf)));
   st->work.emsdk_path = buf;
+  RefreshStoredVcvars32And64Paths(st->work);
 }
 
 void PushEnvDialogValues(EnvDialogState* st) {
@@ -1283,6 +1361,40 @@ void PushEnvDialogValues(EnvDialogState* st) {
   SetWindowTextW(st->edt_android_ndk, st->work.android_ndk_path.c_str());
   SetWindowTextW(st->edt_emsdk, st->work.emsdk_path.c_str());
   st->suppress_list_notify = false;
+}
+
+void PushEnvAndroidSdkNdkEmsdkEditsOnly(EnvDialogState* st) {
+  if (!st)
+    return;
+  SetWindowTextW(st->edt_android_sdk, st->work.android_sdk_path.c_str());
+  SetWindowTextW(st->edt_android_ndk, st->work.android_ndk_path.c_str());
+  SetWindowTextW(st->edt_emsdk, st->work.emsdk_path.c_str());
+}
+
+void EnvFinalizeAndroidEmsdkPathsInWork(GuiEnvSettings& w, bool rescan_hits) {
+  w.android_sdk_path = PathToPortableSlashes(w.android_sdk_path);
+  w.android_ndk_path = PathToPortableSlashes(w.android_ndk_path);
+  w.emsdk_path = PathToPortableSlashes(w.emsdk_path);
+  if (rescan_hits)
+    DetectAndroidAndEmsdkHits(w);
+  w.android_sdk_path = PathToPortableSlashes(w.android_sdk_path);
+  w.android_ndk_path = PathToPortableSlashes(w.android_ndk_path);
+  w.emsdk_path = PathToPortableSlashes(w.emsdk_path);
+}
+
+// 将对话框里的 SDK/NDK/emsdk 路径写回 g_env_settings 并保存；此前「浏览」后只更新了 st->work，SaveGuiEnvSettings 仍写旧的全局值，导致 android.ndk 等不落盘。
+void EnvCommitAndroidEmsdkPathsToGlobal(EnvDialogState* st, HWND dlg, bool rescan_hits) {
+  if (!st)
+    return;
+  PullEnvDialogValues(st);
+  EnvFinalizeAndroidEmsdkPathsInWork(st->work, rescan_hits);
+  PushEnvAndroidSdkNdkEmsdkEditsOnly(st);
+  g_env_settings.android_sdk_path = st->work.android_sdk_path;
+  g_env_settings.android_ndk_path = st->work.android_ndk_path;
+  g_env_settings.emsdk_path = st->work.emsdk_path;
+  SaveGuiEnvSettings();
+  if (dlg && IsWindow(dlg))
+    SetWindowTextW(dlg, BuildDetectStatusText(st->work).c_str());
 }
 
 void RefreshEnvSettingsDialogLanguage() {
@@ -1454,17 +1566,21 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         AppendLog(BuildEnvDetectLogTextForTab(st->work, tab));
         return 0;
       }
+      if (HIWORD(wParam) == EN_KILLFOCUS &&
+          (id == IDC_ENV_ANDROID_SDK || id == IDC_ENV_ANDROID_NDK || id == IDC_ENV_EMSDK)) {
+        EnvCommitAndroidEmsdkPathsToGlobal(st, hwnd, id == IDC_ENV_ANDROID_SDK);
+        return 0;
+      }
       if ((HWND)lParam == st->btn_android_sdk) {
         std::wstring folder;
         std::wstring init = g_browse_history.android_sdk_folder;
         if (init.empty())
           GetEditText(st->edt_android_sdk, init);
         if (PickFolder(hwnd, init, folder)) {
+          folder = PathToPortableSlashes(std::move(folder));
           SetWindowTextW(st->edt_android_sdk, folder.c_str());
           g_browse_history.android_sdk_folder = folder;
-          SaveGuiEnvSettings();
-          PullEnvDialogValues(st);
-          SetWindowTextW(hwnd, BuildDetectStatusText(st->work).c_str());
+          EnvCommitAndroidEmsdkPathsToGlobal(st, hwnd, true);
         }
         return 0;
       }
@@ -1474,11 +1590,10 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         if (init.empty())
           GetEditText(st->edt_android_ndk, init);
         if (PickFolder(hwnd, init, folder)) {
+          folder = PathToPortableSlashes(std::move(folder));
           SetWindowTextW(st->edt_android_ndk, folder.c_str());
           g_browse_history.android_ndk_folder = folder;
-          SaveGuiEnvSettings();
-          PullEnvDialogValues(st);
-          SetWindowTextW(hwnd, BuildDetectStatusText(st->work).c_str());
+          EnvCommitAndroidEmsdkPathsToGlobal(st, hwnd, true);
         }
         return 0;
       }
@@ -1488,16 +1603,17 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         if (init.empty())
           GetEditText(st->edt_emsdk, init);
         if (PickFolder(hwnd, init, folder)) {
+          folder = PathToPortableSlashes(std::move(folder));
           SetWindowTextW(st->edt_emsdk, folder.c_str());
           g_browse_history.emsdk_folder = folder;
-          SaveGuiEnvSettings();
-          PullEnvDialogValues(st);
-          SetWindowTextW(hwnd, BuildDetectStatusText(st->work).c_str());
+          EnvCommitAndroidEmsdkPathsToGlobal(st, hwnd, true);
         }
         return 0;
       }
       if (id == IDC_ENV_OK) {
         PullEnvDialogValues(st);
+        EnvFinalizeAndroidEmsdkPathsInWork(st->work, true);
+        PushEnvAndroidSdkNdkEmsdkEditsOnly(st);
         st->accepted = true;
         DestroyWindow(hwnd);
         return 0;
@@ -1529,6 +1645,7 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
           if (hdr->idFrom == IDC_ENV_LOCAL_VCVARS_LIST) {
             if (nmlv->iItem >= 0 && static_cast<size_t>(nmlv->iItem) < st->work.vcvars_hits.size())
               st->work.selected_vcvars = st->work.vcvars_hits[static_cast<size_t>(nmlv->iItem)].path;
+            RefreshStoredVcvars32And64Paths(st->work);
           }
           PullEnvDialogValues(st);
           SetWindowTextW(hwnd, BuildDetectStatusText(st->work).c_str());
@@ -1597,7 +1714,7 @@ bool ShowEnvSettingsDialog(HWND owner) {
 }
 
 std::wstring UpExePath() {
-  return DirOfModule() + L"up.exe";
+  return (std::filesystem::path(DirOfModule()) / L"up.exe").lexically_normal().generic_wstring();
 }
 
 bool PickFolder(HWND owner, const std::wstring& initial_dir, std::wstring& out) {
@@ -1774,7 +1891,7 @@ void RefreshBuildDirDisplay(const std::filesystem::path& cache_path) {
     SetWindowTextW(g_build_dir, L"");
     return;
   }
-  const std::wstring build_dir = std::filesystem::absolute(cache_path.parent_path()).lexically_normal().wstring();
+  const std::wstring build_dir = std::filesystem::absolute(cache_path.parent_path()).lexically_normal().generic_wstring();
   SetWindowTextW(g_build_dir, build_dir.c_str());
 }
 
@@ -1808,7 +1925,7 @@ void RefreshInstallDirDisplay(const std::filesystem::path& cache_path, const std
   const std::wstring arch_w = Utf8ToWide(arch_utf8);
   const std::filesystem::path inst =
       std::filesystem::path(cwd_w) / L".intermediate" / L"install" / arch_w;
-  const std::wstring install_dir = std::filesystem::absolute(inst).lexically_normal().wstring();
+  const std::wstring install_dir = std::filesystem::absolute(inst).lexically_normal().generic_wstring();
   SetWindowTextW(g_install_dir, install_dir.c_str());
 }
 
@@ -1844,7 +1961,7 @@ void LoadOptionsFromCache(const std::wstring& cwd, bool restore_scan_roots = tru
         const size_t p = rest.find(';', off);
         const std::string part = rest.substr(off, p == std::string::npos ? std::string::npos : (p - off));
         if (!part.empty())
-          scan_roots.push_back(Utf8ToWide(part));
+          scan_roots.push_back(PathToPortableSlashes(Utf8ToWide(part)));
         if (p == std::string::npos)
           break;
         off = p + 1;
@@ -3566,6 +3683,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (init.empty())
           GetEditText(g_path, init);
         if (PickFolder(hwnd, init, folder)) {
+          folder = PathToPortableSlashes(std::move(folder));
           SetWindowTextW(g_path, folder.c_str());
           g_browse_history.cwd_folder = folder;
           SaveGuiEnvSettings();
@@ -3579,10 +3697,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         return 0;
       }
       if (id == IDC_PATH && HIWORD(wParam) == EN_KILLFOCUS) {
-        std::wstring cwd;
-        GetEditText(g_path, cwd);
-        TrimInPlace(cwd);
+        std::wstring raw;
+        GetEditText(g_path, raw);
+        const std::wstring cwd = PathToPortableSlashes(raw);
+        if (cwd != raw)
+          SetWindowTextW(g_path, cwd.c_str());
         if (!cwd.empty()) {
+          g_browse_history.cwd_folder = cwd;
+          SaveGuiEnvSettings();
           LoadOptionsFromCache(cwd, true);
           RefreshRunTargetListFromPath();
         }
@@ -3594,6 +3716,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (init.empty())
           GetEditText(g_path, init);
         if (PickFolder(hwnd, init, folder)) {
+          folder = PathToPortableSlashes(std::move(folder));
           g_browse_history.scan_folder = folder;
           SaveGuiEnvSettings();
           const int exists = static_cast<int>(SendMessageW(g_scan_list, LB_FINDSTRINGEXACT, static_cast<WPARAM>(-1),

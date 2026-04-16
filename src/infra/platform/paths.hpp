@@ -5,6 +5,11 @@
 
 namespace up {
 
+// 序列化路径时使用正斜杠（generic），与 POSIX/Linux 习惯一致，在 Windows 上多数工具也可接受。
+inline std::string to_posix_path_string(const std::filesystem::path& p) {
+  return p.lexically_normal().generic_string();
+}
+
 std::filesystem::path default_cmake_build_root(const std::filesystem::path& cwd);
 std::filesystem::path default_build_root(const std::filesystem::path& cwd, const std::string& build_system);
 std::filesystem::path default_install_root(const std::filesystem::path& cwd);

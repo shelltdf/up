@@ -4,7 +4,7 @@ namespace up {
 
 bool path_has_non_ascii(const std::filesystem::path& path) {
 #ifdef _WIN32
-  const std::wstring ws = path.wstring();
+  const std::wstring ws = path.lexically_normal().generic_wstring();
   for (wchar_t c : ws) {
     if (static_cast<unsigned int>(c) > 127u)
       return true;

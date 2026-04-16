@@ -13,7 +13,7 @@ int cmd_build(const std::filesystem::path& cwd, const std::filesystem::path& bui
   const auto bd = std::filesystem::absolute(build_dir);
   const auto cache = bd / "up_cache.txt";
   if (!std::filesystem::exists(cache)) {
-    std::cerr << "build: missing " << cache << " (run `up configure` for this --build-dir-name first)\n";
+    std::cerr << "build: missing " << to_posix_path_string(cache) << " (run `up configure` for this --build-dir-name first)\n";
     return 2;
   }
   const auto opts = load_up_options_from_build_dir(bd);
@@ -33,11 +33,13 @@ int cmd_build(const std::filesystem::path& cwd, const std::filesystem::path& bui
   std::filesystem::create_directories(bin_dir);
   if (equals_ci(build_system, "ninja")) {
     if (!std::filesystem::exists(src_dir / "out" / "build.ninja")) {
-      std::cerr << "build: run `up configure` first (missing " << (src_dir / "out" / "build.ninja") << ")\n";
+      std::cerr << "build: run `up configure` first (missing " << to_posix_path_string(src_dir / "out" / "build.ninja")
+                << ")\n";
       return 2;
     }
   } else if (!std::filesystem::exists(src_dir / "CMakeLists.txt")) {
-    std::cerr << "build: run `up configure` first (missing " << (src_dir / "CMakeLists.txt") << ")\n";
+    std::cerr << "build: run `up configure` first (missing " << to_posix_path_string(src_dir / "CMakeLists.txt")
+              << ")\n";
     return 2;
   }
   const std::string cmake_generator = option_or(opts, "UP_CMAKE_GENERATOR", "");

@@ -20,13 +20,13 @@ int cmd_pack(const std::filesystem::path& cwd, const std::vector<std::filesystem
   for (const auto& install_dir : install_dirs) {
     const auto src = std::filesystem::absolute(install_dir);
     if (!std::filesystem::exists(src)) {
-      std::cerr << "pack: install tree missing: " << src << "\n";
+      std::cerr << "pack: install tree missing: " << to_posix_path_string(src) << "\n";
       return 2;
     }
 
     const std::string arch = src.filename().string();
     if (arch.empty()) {
-      std::cerr << "pack: cannot infer arch tag from install path: " << src << "\n";
+      std::cerr << "pack: cannot infer arch tag from install path: " << to_posix_path_string(src) << "\n";
       return 2;
     }
 
@@ -34,7 +34,7 @@ int cmd_pack(const std::filesystem::path& cwd, const std::vector<std::filesystem
     std::error_code ec;
     std::filesystem::create_directories(dst_dir, ec);
     if (ec) {
-      std::cerr << "pack: cannot create " << dst_dir << ": " << ec.message() << "\n";
+      std::cerr << "pack: cannot create " << to_posix_path_string(dst_dir) << ": " << ec.message() << "\n";
       return 3;
     }
 

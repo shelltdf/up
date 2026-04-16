@@ -1,5 +1,7 @@
 #include "simple_xml.hpp"
 
+#include "paths.hpp"
+
 #include <cctype>
 #include <fstream>
 #include <regex>
@@ -12,7 +14,7 @@ namespace {
 std::string read_all(const std::filesystem::path& path, std::string& error) {
   std::ifstream in(path, std::ios::binary);
   if (!in) {
-    error = "cannot open: " + path.string();
+    error = "cannot open: " + to_posix_path_string(path);
     return {};
   }
   std::ostringstream ss;
