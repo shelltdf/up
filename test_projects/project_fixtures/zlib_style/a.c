@@ -1,0 +1,2 @@
+/* fixture */
+void fa(void) {}

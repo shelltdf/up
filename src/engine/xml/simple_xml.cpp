@@ -4,6 +4,7 @@
 
 #include <cctype>
 #include <fstream>
+#include <ostream>
 #include <regex>
 #include <sstream>
 
@@ -39,6 +40,31 @@ std::string trim_copy(std::string s) {
   while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1])))
     --e;
   return s.substr(b, e - b);
+}
+
+std::string xml_escape_text(const std::string& s) {
+  std::string o;
+  o.reserve(s.size() + 8);
+  for (unsigned char uc : s) {
+    const char c = static_cast<char>(uc);
+    switch (c) {
+      case '&':
+        o += "&amp;";
+        break;
+      case '<':
+        o += "&lt;";
+        break;
+      case '>':
+        o += "&gt;";
+        break;
+      case '"':
+        o += "&quot;";
+        break;
+      default:
+        o += c;
+    }
+  }
+  return o;
 }
 
 void parse_stage_commands(const std::string& body, std::string& pre, std::string& post) {
@@ -230,6 +256,88 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
     }
   }
 
+  error.clear();
+  return true;
+}
+
+bool write_package_xml(std::ostream& out, const PackageDesc& pkg) {
+  out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+  out << "<package name=\"" << xml_escape_text(pkg.name) << "\" version=\"" << xml_escape_text(pkg.version) << "\">\n";
+  for (const auto& d : pkg.dependencies) {
+    out << "  <dependency name=\"" << xml_escape_text(d.first) << "\" optional=\""
+        << (d.second ? "true" : "false") << "\"/>\n";
+  }
+  out << "</package>\n";
+  return static_cast<bool>(out);
+}
+
+bool write_target_xml(std::ostream& out, const TargetDesc& desc) {
+  out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+  out << "<target name=\"" << xml_escape_text(desc.name) << "\" type=\"" << xml_escape_text(desc.type) << "\">\n";
+  out << "  <sources>\n";
+  if (!desc.source_entries.empty()) {
+    for (const auto& se : desc.source_entries) {
+      if (se.kind == "glob") {
+        out << "    <glob from=\"" << xml_escape_text(se.from) << "\"/>\n";
+      } else {
+        out << "    <file>" << xml_escape_text(se.from.empty() ? "" : se.from) << "</file>\n";
+      }
+    }
+  } else {
+    for (const auto& s : desc.sources)
+      out << "    <file>" << xml_escape_text(s) << "</file>\n";
+  }
+  out << "  </sources>\n";
+  if (!desc.dependencies.empty()) {
+    for (const auto& d : desc.dependencies)
+      out << "  <dependency name=\"" << xml_escape_text(d) << "\"/>\n";
+  }
+  if (!desc.includes.empty()) {
+    out << "  <includes>\n";
+    for (const auto& inc : desc.includes) {
+      out << "    <" << inc.kind << " from=\"" << xml_escape_text(inc.from) << "\"";
+      if (!inc.to.empty())
+        out << " to=\"" << xml_escape_text(inc.to) << "\"";
+      out << "/>\n";
+    }
+    out << "  </includes>\n";
+  } else if (desc.type == "executable" || desc.type == "static_library" || desc.type == "shared_library") {
+    out << "  <includes>\n";
+    out << "    <dir from=\".\"/>\n";
+    out << "  </includes>\n";
+  }
+  if (!desc.assets.empty()) {
+    out << "  <assets>\n";
+    for (const auto& ae : desc.assets) {
+      out << "    <" << ae.kind << " from=\"" << xml_escape_text(ae.from) << "\"";
+      if (!ae.to.empty())
+        out << " to=\"" << xml_escape_text(ae.to) << "\"";
+      out << "/>\n";
+    }
+    out << "  </assets>\n";
+  }
+  out << "</target>\n";
+  return static_cast<bool>(out);
+}
+
+bool write_package_xml(const std::filesystem::path& path, const PackageDesc& pkg, std::string& error) {
+  std::ofstream f(path, std::ios::binary | std::ios::trunc);
+  if (!f) {
+    error = "cannot write: " + to_posix_path_string(path);
+    return false;
+  }
+  write_package_xml(f, pkg);
+  error.clear();
+  return true;
+}
+
+bool write_target_xml(const std::filesystem::path& path, const TargetDesc& desc, std::string& error) {
+  std::ofstream f(path, std::ios::binary | std::ios::trunc);
+  if (!f) {
+    error = "cannot write: " + to_posix_path_string(path);
+    return false;
+  }
+  write_target_xml(f, desc);
   error.clear();
   return true;
 }

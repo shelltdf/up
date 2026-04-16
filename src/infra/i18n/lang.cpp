@@ -35,7 +35,7 @@ void print_usage(std::ostream& os) {
           "  up run --install-dir-name <名> <可执行目标名>  （<名> 为 .intermediate/install 下的子目录名）\n"
           "  up test --install-dir-name <名> [测试目标名]\n"
           "  up pack --install-dir-name <名>...  （可重复，多架构）\n"
-          "  up project\n"
+          "  up project [--dry-run] [--force] [--output-dir <path>] [--package-name <name>]\n"
           "  up --help | -h | help\n";
   } else {
     os << "up — generic package / build orchestrator (prototype)\n\n"
@@ -46,7 +46,7 @@ void print_usage(std::ostream& os) {
           "  up run --install-dir-name <leaf> <target_executable_name>  (<leaf> under .intermediate/install)\n"
           "  up test --install-dir-name <leaf> [test_target_name]\n"
           "  up pack --install-dir-name <leaf>...  (repeatable; multi-arch)\n"
-          "  up project\n"
+          "  up project [--dry-run] [--force] [--output-dir <path>] [--package-name <name>]\n"
           "  up --help | -h | help\n";
   }
 }

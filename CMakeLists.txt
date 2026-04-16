@@ -16,6 +16,14 @@ add_executable(up
   src/engine/commands/test.cpp
   src/engine/commands/pack.cpp
   src/engine/commands/project.cpp
+  src/engine/project/project_import.cpp
+  src/engine/project/project_import_common.cpp
+  src/engine/project/import_cmake.cpp
+  src/engine/project/import_autotools.cpp
+  src/engine/project/import_qmake.cpp
+  src/engine/project/import_meson.cpp
+  src/engine/project/import_sources.cpp
+  src/engine/project/project_probe.cpp
   src/engine/commands/commands_common.cpp
   src/engine/backends/cmake/cmake_backend.cpp
   src/engine/backends/ninja/ninja_backend.cpp
@@ -47,6 +55,7 @@ target_include_directories(up PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/commands"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/backends"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/xml"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/project"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/infra/platform"
   "${CMAKE_CURRENT_SOURCE_DIR}/src/infra/i18n"
 )

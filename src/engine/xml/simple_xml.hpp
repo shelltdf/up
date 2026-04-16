@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <iosfwd>
 #include <map>
 #include <string>
 #include <vector>
@@ -49,5 +50,11 @@ struct TargetDesc {
 // Minimal attribute scanner for root elements (no full XML parser dependency).
 bool load_package_xml(const std::filesystem::path& path, PackageDesc& out, std::string& error);
 bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::string& error);
+
+bool write_package_xml(std::ostream& out, const PackageDesc& pkg);
+bool write_target_xml(std::ostream& out, const TargetDesc& desc);
+
+bool write_package_xml(const std::filesystem::path& path, const PackageDesc& pkg, std::string& error);
+bool write_target_xml(const std::filesystem::path& path, const TargetDesc& desc, std::string& error);
 
 }  // namespace up

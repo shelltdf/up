@@ -1,0 +1,2 @@
+/* fixture */
+void fb(void) {}

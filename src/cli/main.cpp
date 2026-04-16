@@ -203,8 +203,12 @@ int main(int argc, char** argv) {
     }
     return up::cmd_pack(cwd, install_dirs);
   }
-  if (cmd == "project")
-    return up::cmd_project(cwd);
+  if (cmd == "project") {
+    std::vector<std::string> pargs;
+    for (size_t i = 1; i < args.size(); ++i)
+      pargs.push_back(args[i]);
+    return up::cmd_project(cwd, pargs);
+  }
 
   std::cerr << "unknown command: " << cmd << "\n";
   print_usage();
