@@ -62,6 +62,9 @@ constexpr int IDC_SCAN_UP = 128;
 constexpr int IDC_SCAN_DOWN = 129;
 constexpr int IDC_VARS_TREE = 130;
 constexpr int IDC_ENV_SETTINGS = 131;
+constexpr int IDC_LOG_SPLITTER = 132;
+constexpr int IDC_LOG_COPY = 133;
+constexpr int IDC_LOG_CLEAR = 134;
 constexpr int IDM_OPT_COPY_KEY = 2101;
 constexpr int IDM_OPT_COPY_KEY_VALUE = 2102;
 constexpr int IDM_OPT_RESET_DEFAULT = 2103;
@@ -111,11 +114,24 @@ HWND g_run_target{};
 HWND g_lbl_test{};
 HWND g_test_target{};
 HWND g_log{};
+HWND g_log_splitter{};
+HWND g_log_copy{};
+HWND g_log_clear{};
 
 std::atomic<bool> g_running{};
 std::wstring g_last_up_args;
+std::wstring g_status_text = L"Ready";
 std::vector<int> g_row_to_option_idx;
 int g_selected_option_idx = -1;
+bool g_dragging_log_splitter = false;
+double g_log_top_ratio = 0.0;
+int g_log_top_cached = 0;
+int g_log_panel_top_cached = 0;
+int g_log_panel_h_cached = 0;
+int g_log_left_cached = 0;
+int g_log_width_cached = 0;
+int g_log_splitter_y_cached = 0;
+RECT g_log_splitter_rect{};
 
 struct DonePack {
   std::wstring output;
@@ -206,8 +222,9 @@ void TrimInPlace(std::wstring& s) {
 }
 
 void SetStatus(const wchar_t* text) {
+  g_status_text = text ? text : L"";
   if (g_status)
-    SendMessageW(g_status, SB_SETTEXT, 0, reinterpret_cast<LPARAM>(text));
+    SendMessageW(g_status, SB_SETTEXTW, 0, reinterpret_cast<LPARAM>(g_status_text.c_str()));
 }
 
 bool CopyTextToClipboard(HWND owner, const std::wstring& text) {
@@ -990,8 +1007,9 @@ std::wstring BuildEnvDetectLogTextForTab(const GuiEnvSettings& s, int tab) {
 void LayoutEnvDialog(HWND hwnd, EnvDialogState* st) {
   RECT rc{};
   GetClientRect(hwnd, &rc);
-  const int pad = 10;
-  const int tab_h = rc.bottom - 56 - pad * 2;
+  const int pad = 14;
+  const int footer_h = 44;
+  const int tab_h = rc.bottom - footer_h - pad * 2;
   MoveWindow(st->tab, pad, pad, rc.right - pad * 2, tab_h, TRUE);
   RECT tr{};
   GetWindowRect(st->tab, &tr);
@@ -999,14 +1017,14 @@ void LayoutEnvDialog(HWND hwnd, EnvDialogState* st) {
   POINT p1{tr.right, tr.bottom};
   ScreenToClient(hwnd, &p0);
   ScreenToClient(hwnd, &p1);
-  RECT page{p0.x + 14, p0.y + 32, p1.x - 14, p1.y - 10};
+  RECT page{p0.x + 18, p0.y + 36, p1.x - 18, p1.y - 14};
 
-  const int lbl_w = 130;
-  const int pick_w = 66;
-  const int row_h = 24;
-  const int row_gap = 8;
+  const int lbl_w = 140;
+  const int pick_w = 78;
+  const int row_h = 28;
+  const int row_gap = 12;
   const int local_total_h = (page.bottom - page.top);
-  const int list_h = std::max(56, (local_total_h - row_gap * 2) / 3);
+  const int list_h = std::max(72, (local_total_h - row_gap * 2) / 3);
   int y = page.top;
   MoveWindow(st->lbl_local_build, page.left, y + 3, lbl_w, row_h, TRUE);
   MoveWindow(st->lv_local_build, page.left + lbl_w + 6, y, page.right - page.left - lbl_w - 6, list_h, TRUE);
@@ -1030,10 +1048,10 @@ void LayoutEnvDialog(HWND hwnd, EnvDialogState* st) {
   MoveWindow(st->edt_emsdk, page.left + lbl_w + 6, page.top, page.right - page.left - lbl_w - 6 - pick_w - 6, row_h, TRUE);
   MoveWindow(st->btn_emsdk, page.right - pick_w, page.top, pick_w, row_h, TRUE);
 
-  const int btn_y = rc.bottom - 36 - pad;
-  MoveWindow(st->btn_auto, pad, btn_y, 100, 28, TRUE);
-  MoveWindow(st->btn_cancel, rc.right - pad - 90, btn_y, 90, 28, TRUE);
-  MoveWindow(st->btn_ok, rc.right - pad - 90 - 96, btn_y, 90, 28, TRUE);
+  const int btn_y = rc.bottom - 34 - pad;
+  MoveWindow(st->btn_auto, pad, btn_y, 108, 30, TRUE);
+  MoveWindow(st->btn_cancel, rc.right - pad - 96, btn_y, 96, 30, TRUE);
+  MoveWindow(st->btn_ok, rc.right - pad - 96 - 104, btn_y, 96, 30, TRUE);
 }
 
 void ShowEnvTab(EnvDialogState* st, int tab) {
@@ -1193,6 +1211,12 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
       if (st)
         LayoutEnvDialog(hwnd, st);
       return 0;
+    case WM_GETMINMAXINFO: {
+      auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
+      mmi->ptMinTrackSize.x = 760;
+      mmi->ptMinTrackSize.y = 500;
+      return 0;
+    }
     case WM_COMMAND: {
       const int id = LOWORD(wParam);
       if (!st)
@@ -1287,6 +1311,7 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
     default:
       return DefWindowProcW(hwnd, msg, wParam, lParam);
   }
+  return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 bool ShowEnvSettingsDialog(HWND owner) {
@@ -1310,7 +1335,7 @@ bool ShowEnvSettingsDialog(HWND owner) {
   GetWindowRect(owner, &rc);
   HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kEnvClass, L"编译环境设置",
                              WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE | WS_THICKFRAME,
-                             rc.left + 40, rc.top + 40, 620, 340, owner, nullptr, GetModuleHandleW(nullptr), &st);
+                             rc.left + 32, rc.top + 28, 860, 560, owner, nullptr, GetModuleHandleW(nullptr), &st);
   if (!dlg) {
     EnableWindow(owner, TRUE);
     return false;
@@ -1794,14 +1819,17 @@ void LayoutChildren(HWND hwnd) {
   if (w < 200 || h < 160)
     return;
 
-  const int pad = 8;
-  const int editH = 26;
-  const int btnW = 72;
-  const int lblW = 72;
+  const int pad = 6;
+  const int editH = 24;
+  const int btnW = 70;
+  const int lblW = 68;
 
   SendMessageW(g_status, WM_SIZE, 0, 0);
   const int cyStatus = StatusBarHeight(g_status);
   MoveWindow(g_status, 0, h - cyStatus, w, cyStatus, TRUE);
+  int status_parts[1] = {w - 1};
+  SendMessageW(g_status, SB_SETPARTS, 1, reinterpret_cast<LPARAM>(status_parts));
+  SendMessageW(g_status, SB_SETTEXTW, 0, reinterpret_cast<LPARAM>(g_status_text.c_str()));
 
   const int contentBottom = h - cyStatus;
   int y = 0;
@@ -1833,11 +1861,13 @@ void LayoutChildren(HWND hwnd) {
   MoveWindow(g_lbl_vars, pad, y + 4, lblW, 20, TRUE);
   MoveWindow(g_opt_group, w - pad - 170, y + 2, 170, 24, TRUE);
   y += 24;
-  int varsH = (contentBottom - y) / 4;
-  if (varsH < 72)
-    varsH = 72;
-  if (varsH > 140)
-    varsH = 140;
+  // 先为后续区域预留最小空间，避免默认窗口时底部控件被挤没。
+  const int reserveBelowVars = (editH + pad) * 4 + 92;
+  int varsH = (contentBottom - y - reserveBelowVars);
+  if (varsH < 56)
+    varsH = 56;
+  if (varsH > 104)
+    varsH = 104;
   MoveWindow(g_vars, pad + lblW + 4, y, w - pad * 2 - lblW - 4, varsH, TRUE);
   MoveWindow(g_vars_tree, pad + lblW + 4, y, w - pad * 2 - lblW - 4, varsH, TRUE);
   const bool grouped = g_opt_group && (SendMessageW(g_opt_group, BM_GETCHECK, 0, 0) == BST_CHECKED);
@@ -1868,9 +1898,41 @@ void LayoutChildren(HWND hwnd) {
   MoveWindow(g_test_target, pad + lblW + 4, y, w - pad * 2 - lblW - 4, 240, TRUE);
   y += editH + pad;
 
-  // 第四行：日志
-  const int logTop = y;
-  MoveWindow(g_log, pad, logTop, w - pad * 2, std::max(60, contentBottom - logTop - pad), TRUE);
+  // 第四行：日志 + 可拖动分隔条 + 底部操作按钮
+  g_log_left_cached = pad;
+  g_log_width_cached = w - pad * 2;
+  g_log_panel_top_cached = y;
+  g_log_panel_h_cached = std::max(0, contentBottom - y - pad);
+  auto layout_log_panel = [&](BOOL repaint) {
+    const int splitterH = 6;
+    const int btnH = 26;
+    const int logBtnW = 88;
+    const int gapAfterSplitter = 2;
+    const int minLogH = 40;
+    int maxSplitterY = g_log_panel_top_cached + g_log_panel_h_cached - splitterH - gapAfterSplitter - minLogH - pad - btnH - pad;
+    if (maxSplitterY < g_log_panel_top_cached)
+      maxSplitterY = g_log_panel_top_cached;
+    int splitterY = g_log_panel_top_cached + static_cast<int>(g_log_top_ratio * g_log_panel_h_cached);
+    if (splitterY < g_log_panel_top_cached)
+      splitterY = g_log_panel_top_cached;
+    if (splitterY > maxSplitterY)
+      splitterY = maxSplitterY;
+    g_log_splitter_y_cached = splitterY;
+    g_log_top_ratio = g_log_panel_h_cached > 0
+                          ? static_cast<double>(splitterY - g_log_panel_top_cached) / static_cast<double>(g_log_panel_h_cached)
+                          : g_log_top_ratio;
+    g_log_top_cached = splitterY + splitterH + 2;
+    int logH = g_log_panel_top_cached + g_log_panel_h_cached - g_log_top_cached - pad - btnH - pad;
+    if (logH < minLogH)
+      logH = minLogH;
+    MoveWindow(g_log, g_log_left_cached, g_log_top_cached, g_log_width_cached, logH, repaint);
+    MoveWindow(g_log_splitter, g_log_left_cached, splitterY, g_log_width_cached, splitterH, repaint);
+    g_log_splitter_rect = {g_log_left_cached, splitterY, g_log_left_cached + g_log_width_cached, splitterY + splitterH};
+    const int btnY = g_log_top_cached + logH + pad;
+    MoveWindow(g_log_copy, g_log_left_cached, btnY, logBtnW, btnH, repaint);
+    MoveWindow(g_log_clear, g_log_left_cached + logBtnW + 8, btnY, logBtnW, btnH, repaint);
+  };
+  layout_log_panel(TRUE);
 }
 
 std::wstring OptionGroupName(const std::wstring& name) {
@@ -2277,6 +2339,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
           WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | ES_WANTRETURN,
           0, 0, 100, 100, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LOG)), GetModuleHandleW(nullptr),
           nullptr);
+      g_log_splitter =
+          CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_NOTIFY | SS_ETCHEDHORZ, 0, 0, 100, 6, hwnd,
+                          reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LOG_SPLITTER)), GetModuleHandleW(nullptr), nullptr);
+      g_log_copy =
+          CreateWindowExW(0, L"BUTTON", L"复制内容", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 88, 26, hwnd,
+                          reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LOG_COPY)), GetModuleHandleW(nullptr), nullptr);
+      g_log_clear =
+          CreateWindowExW(0, L"BUTTON", L"清理内容", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 88, 26, hwnd,
+                          reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LOG_CLEAR)), GetModuleHandleW(nullptr), nullptr);
 
       g_status = CreateWindowExW(0, STATUSCLASSNAMEW, nullptr, WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP, 0, 0, 0, 0,
                                  hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_STATUS)),
@@ -2309,6 +2380,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         SendMessageW(g_lbl_run, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
         SendMessageW(g_lbl_test, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
         SendMessageW(g_toolbar, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+
+        SendMessageW(g_log_copy, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+        SendMessageW(g_log_clear, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
       }
 
       AppendLogRaw(
@@ -2325,10 +2399,70 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       LayoutChildren(hwnd);
       return 0;
 
+    case WM_SETCURSOR: {
+      POINT pt{};
+      GetCursorPos(&pt);
+      ScreenToClient(hwnd, &pt);
+      if (pt.y >= g_log_splitter_rect.top && pt.y <= g_log_splitter_rect.bottom && pt.x >= g_log_splitter_rect.left &&
+          pt.x <= g_log_splitter_rect.right) {
+        SetCursor(LoadCursor(nullptr, IDC_SIZENS));
+        return TRUE;
+      }
+      return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+
+    case WM_LBUTTONDOWN: {
+      const int x = GET_X_LPARAM(lParam);
+      const int y = GET_Y_LPARAM(lParam);
+      if (y >= g_log_splitter_rect.top && y <= g_log_splitter_rect.bottom && x >= g_log_splitter_rect.left &&
+          x <= g_log_splitter_rect.right) {
+        g_dragging_log_splitter = true;
+        SetCapture(hwnd);
+        return 0;
+      }
+      return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+
+    case WM_MOUSEMOVE: {
+      if (!g_dragging_log_splitter)
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+      const int y = GET_Y_LPARAM(lParam);
+      const int panelH = g_log_panel_h_cached;
+      if (panelH <= 0)
+        return 0;
+      const int splitterH = 6;
+      const int gapAfterSplitter = 2;
+      const int btnH = 26;
+      const int pad = 6;
+      const int minLogH = 40;
+      int splitterY = y;
+      if (splitterY < g_log_panel_top_cached)
+        splitterY = g_log_panel_top_cached;
+      int maxSplitterY = g_log_panel_top_cached + panelH - splitterH - gapAfterSplitter - minLogH - pad - btnH - pad;
+      if (maxSplitterY < g_log_panel_top_cached)
+        maxSplitterY = g_log_panel_top_cached;
+      if (splitterY > maxSplitterY)
+        splitterY = maxSplitterY;
+      g_log_splitter_y_cached = splitterY;
+      g_log_top_ratio = static_cast<double>(splitterY - g_log_panel_top_cached) / static_cast<double>(panelH);
+      LayoutChildren(hwnd);
+      return 0;
+    }
+
+    case WM_LBUTTONUP:
+      if (g_dragging_log_splitter) {
+        g_dragging_log_splitter = false;
+        ReleaseCapture();
+        LayoutChildren(hwnd);
+        RedrawWindow(hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+        return 0;
+      }
+      return DefWindowProcW(hwnd, msg, wParam, lParam);
+
     case WM_GETMINMAXINFO: {
       auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
       mmi->ptMinTrackSize.x = 520;
-      mmi->ptMinTrackSize.y = 380;
+      mmi->ptMinTrackSize.y = 620;
       return 0;
     }
 
@@ -2385,6 +2519,25 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
           SetStatus(L"Environment settings updated");
         else
           SetStatus(L"Environment settings unchanged");
+        return 0;
+      }
+      if (id == IDC_LOG_COPY) {
+        const int len = GetWindowTextLengthW(g_log);
+        std::wstring text;
+        if (len > 0) {
+          text.resize(static_cast<size_t>(len) + 1);
+          GetWindowTextW(g_log, text.data(), len + 1);
+          text.resize(static_cast<size_t>(len));
+        }
+        if (CopyTextToClipboard(hwnd, text))
+          SetStatus(L"Log copied");
+        else
+          SetStatus(L"Copy failed");
+        return 0;
+      }
+      if (id == IDC_LOG_CLEAR) {
+        SetWindowTextW(g_log, L"");
+        SetStatus(L"Log cleared");
         return 0;
       }
 
@@ -2638,10 +2791,16 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int show) {
   wc.lpszMenuName = nullptr;
   RegisterClassW(&wc);
 
-  RECT want{0, 0, 780, 520};
+  RECT want{0, 0, 860, 680};
   AdjustWindowRect(&want, WS_OVERLAPPEDWINDOW, TRUE);
-  HWND hwnd = CreateWindowExW(0, kClassName, kTitle, WS_OVERLAPPEDWINDOW | WS_VISIBLE, CW_USEDEFAULT, CW_USEDEFAULT,
-                              want.right - want.left, want.bottom - want.top, nullptr, nullptr, hi, nullptr);
+  const int win_w = want.right - want.left;
+  const int win_h = want.bottom - want.top;
+  RECT work{};
+  SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+  const int x = work.left + ((work.right - work.left) - win_w) / 2;
+  const int y = work.top + ((work.bottom - work.top) - win_h) / 2;
+  HWND hwnd = CreateWindowExW(0, kClassName, kTitle, WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN, x, y, win_w,
+                              win_h, nullptr, nullptr, hi, nullptr);
   if (!hwnd)
     return 1;
 
