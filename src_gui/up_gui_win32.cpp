@@ -469,6 +469,9 @@ void DetectAndroidAndEmsdkHits(GuiEnvSettings& s) {
 
   const auto sdk_env1 = GetEnvVarW(L"ANDROID_SDK_ROOT");
   const auto sdk_env2 = GetEnvVarW(L"ANDROID_HOME");
+  // Preserve user-selected SDK path as a first-class candidate.
+  if (!s.android_sdk_path.empty())
+    AddUnique(s.android_sdk_hits, NormalizePath(s.android_sdk_path));
   if (!sdk_env1.empty())
     AddUnique(s.android_sdk_hits, NormalizePath(sdk_env1));
   if (!sdk_env2.empty())
@@ -478,11 +481,13 @@ void DetectAndroidAndEmsdkHits(GuiEnvSettings& s) {
 
   const auto ndk_env1 = GetEnvVarW(L"ANDROID_NDK_ROOT");
   const auto ndk_env2 = GetEnvVarW(L"ANDROID_NDK_HOME");
+  if (!s.android_ndk_path.empty())
+    AddUnique(s.android_ndk_hits, NormalizePath(s.android_ndk_path));
   if (!ndk_env1.empty())
     AddUnique(s.android_ndk_hits, NormalizePath(ndk_env1));
   if (!ndk_env2.empty())
     AddUnique(s.android_ndk_hits, NormalizePath(ndk_env2));
-  for (const auto& sdk : s.android_sdk_hits) {
+  auto collect_ndk_from_sdk = [&](const std::wstring& sdk) {
     std::error_code ec;
     const std::filesystem::path sdkp(sdk);
     AddUniqueDirPath(s.android_ndk_hits, sdkp / "ndk-bundle");
@@ -494,6 +499,11 @@ void DetectAndroidAndEmsdkHits(GuiEnvSettings& s) {
           AddUniqueDirPath(s.android_ndk_hits, it->path());
       }
     }
+  };
+  if (!s.android_sdk_path.empty())
+    collect_ndk_from_sdk(s.android_sdk_path);
+  for (const auto& sdk : s.android_sdk_hits) {
+    collect_ndk_from_sdk(sdk);
   }
 
   const auto emsdk_env = GetEnvVarW(L"EMSDK");
@@ -523,7 +533,8 @@ void DetectAndroidAndEmsdkHits(GuiEnvSettings& s) {
   }
 #endif
 
-  s.android_sdk_path = PickPreferredPath(s.android_sdk_path, s.android_sdk_hits);
+  if (s.android_sdk_path.empty())
+    s.android_sdk_path = PickPreferredPath(s.android_sdk_path, s.android_sdk_hits);
   if (!s.android_ndk_hits.empty() && s.android_ndk_path.empty()) {
     auto version_score = [](const std::wstring& p) {
       std::wstring name = std::filesystem::path(p).filename().wstring();
@@ -1108,9 +1119,12 @@ void PullEnvDialogValues(EnvDialogState* st) {
 
 void PushEnvDialogValues(EnvDialogState* st) {
   st->suppress_list_notify = true;
-  st->work.android_sdk_path = PickPreferredPath(st->work.android_sdk_path, st->work.android_sdk_hits);
-  st->work.android_ndk_path = PickPreferredPath(st->work.android_ndk_path, st->work.android_ndk_hits);
-  st->work.emsdk_path = PickPreferredPath(st->work.emsdk_path, st->work.emsdk_hits);
+  if (st->work.android_sdk_path.empty())
+    st->work.android_sdk_path = PickPreferredPath(st->work.android_sdk_path, st->work.android_sdk_hits);
+  if (st->work.android_ndk_path.empty())
+    st->work.android_ndk_path = PickPreferredPath(st->work.android_ndk_path, st->work.android_ndk_hits);
+  if (st->work.emsdk_path.empty())
+    st->work.emsdk_path = PickPreferredPath(st->work.emsdk_path, st->work.emsdk_hits);
   FillToolHitsList(st->lv_local_build, st->work.build_hits, st->work.selected_build_system);
   FillToolHitsListByPath(st->lv_local_vcvars, st->work.vcvars_hits, st->work.selected_vcvars);
   FillToolHitsList(st->lv_local_compiler, st->work.compiler_hits, st->work.selected_compiler);
@@ -1246,7 +1260,7 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         if (PickFolder(hwnd, folder)) {
           SetWindowTextW(st->edt_android_sdk, folder.c_str());
           PullEnvDialogValues(st);
-          PushEnvDialogValues(st);
+          SetWindowTextW(hwnd, BuildDetectStatusText(st->work).c_str());
         }
         return 0;
       }
@@ -1255,7 +1269,7 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         if (PickFolder(hwnd, folder)) {
           SetWindowTextW(st->edt_android_ndk, folder.c_str());
           PullEnvDialogValues(st);
-          PushEnvDialogValues(st);
+          SetWindowTextW(hwnd, BuildDetectStatusText(st->work).c_str());
         }
         return 0;
       }
@@ -1264,7 +1278,7 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         if (PickFolder(hwnd, folder)) {
           SetWindowTextW(st->edt_emsdk, folder.c_str());
           PullEnvDialogValues(st);
-          PushEnvDialogValues(st);
+          SetWindowTextW(hwnd, BuildDetectStatusText(st->work).c_str());
         }
         return 0;
       }
@@ -1301,16 +1315,6 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
               st->work.selected_vcvars = st->work.vcvars_hits[static_cast<size_t>(nmlv->iItem)].path;
           }
           PullEnvDialogValues(st);
-          if (hdr->idFrom == IDC_ENV_LOCAL_VCVARS_LIST) {
-            RefreshCompilerHitsForCurrentVcvars(st->work);
-            PushEnvDialogValues(st);
-            if (!st->work.vcvars_cl_note.empty())
-              SetStatus(st->work.vcvars_cl_note.c_str());
-            AppendLog(L"[调试] vcvars 选中: " + st->work.selected_vcvars + L"\r\n");
-            AppendLog(L"[调试] where cl: " + st->work.vcvars_cl_note + L"\r\n");
-            if (!st->work.vcvars_cl_output.empty())
-              AppendLog(L"[调试] where cl 原始输出:\r\n" + st->work.vcvars_cl_output + L"\r\n");
-          }
           SetWindowTextW(hwnd, BuildDetectStatusText(st->work).c_str());
           return 0;
         }
