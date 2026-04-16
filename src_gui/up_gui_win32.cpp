@@ -171,6 +171,14 @@ struct GuiEnvSettings {
 };
 
 GuiEnvSettings g_env_settings;
+struct GuiBrowseHistory {
+  std::wstring cwd_folder;
+  std::wstring scan_folder;
+  std::wstring android_sdk_folder;
+  std::wstring android_ndk_folder;
+  std::wstring emsdk_folder;
+};
+GuiBrowseHistory g_browse_history;
 
 std::vector<OptionRow> g_options = {
     {L"UP_TARGET_SYSTEM", L"windows", L"windows | linux | macos | android | ios | emsdk | uwp"},
@@ -790,6 +798,16 @@ void LoadGuiEnvSettings() {
       g_env_settings.emsdk_path = v;
     else if (k == "local.vcvars")
       g_env_settings.selected_vcvars = v;
+    else if (k == "browse.cwd")
+      g_browse_history.cwd_folder = v;
+    else if (k == "browse.scan")
+      g_browse_history.scan_folder = v;
+    else if (k == "browse.android_sdk")
+      g_browse_history.android_sdk_folder = v;
+    else if (k == "browse.android_ndk")
+      g_browse_history.android_ndk_folder = v;
+    else if (k == "browse.emsdk")
+      g_browse_history.emsdk_folder = v;
   }
   DetectVcvarsHits(g_env_settings);
 }
@@ -804,6 +822,11 @@ void SaveGuiEnvSettings() {
   f << "android.ndk=" << WideToUtf8(g_env_settings.android_ndk_path) << "\n";
   f << "emsdk.path=" << WideToUtf8(g_env_settings.emsdk_path) << "\n";
   f << "local.vcvars=" << WideToUtf8(g_env_settings.selected_vcvars) << "\n";
+  f << "browse.cwd=" << WideToUtf8(g_browse_history.cwd_folder) << "\n";
+  f << "browse.scan=" << WideToUtf8(g_browse_history.scan_folder) << "\n";
+  f << "browse.android_sdk=" << WideToUtf8(g_browse_history.android_sdk_folder) << "\n";
+  f << "browse.android_ndk=" << WideToUtf8(g_browse_history.android_ndk_folder) << "\n";
+  f << "browse.emsdk=" << WideToUtf8(g_browse_history.emsdk_folder) << "\n";
 }
 
 void AppendConfigureEnvArgs(std::wstring& args_no_exe) {
@@ -849,7 +872,8 @@ struct EnvDialogState {
   HWND btn_cancel{};
 };
 
-bool PickFolder(HWND owner, std::wstring& out);
+bool PickFolder(HWND owner, const std::wstring& initial_dir, std::wstring& out);
+void GetEditText(HWND ed, std::wstring& out);
 
 void EnsureListColumns(HWND lv) {
   if (ListView_GetColumnWidth(lv, 0) > 0)
@@ -1258,8 +1282,13 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
       }
       if ((HWND)lParam == st->btn_android_sdk) {
         std::wstring folder;
-        if (PickFolder(hwnd, folder)) {
+        std::wstring init = g_browse_history.android_sdk_folder;
+        if (init.empty())
+          GetEditText(st->edt_android_sdk, init);
+        if (PickFolder(hwnd, init, folder)) {
           SetWindowTextW(st->edt_android_sdk, folder.c_str());
+          g_browse_history.android_sdk_folder = folder;
+          SaveGuiEnvSettings();
           PullEnvDialogValues(st);
           SetWindowTextW(hwnd, BuildDetectStatusText(st->work).c_str());
         }
@@ -1267,8 +1296,13 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
       }
       if ((HWND)lParam == st->btn_android_ndk) {
         std::wstring folder;
-        if (PickFolder(hwnd, folder)) {
+        std::wstring init = g_browse_history.android_ndk_folder;
+        if (init.empty())
+          GetEditText(st->edt_android_ndk, init);
+        if (PickFolder(hwnd, init, folder)) {
           SetWindowTextW(st->edt_android_ndk, folder.c_str());
+          g_browse_history.android_ndk_folder = folder;
+          SaveGuiEnvSettings();
           PullEnvDialogValues(st);
           SetWindowTextW(hwnd, BuildDetectStatusText(st->work).c_str());
         }
@@ -1276,8 +1310,13 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
       }
       if ((HWND)lParam == st->btn_emsdk) {
         std::wstring folder;
-        if (PickFolder(hwnd, folder)) {
+        std::wstring init = g_browse_history.emsdk_folder;
+        if (init.empty())
+          GetEditText(st->edt_emsdk, init);
+        if (PickFolder(hwnd, init, folder)) {
           SetWindowTextW(st->edt_emsdk, folder.c_str());
+          g_browse_history.emsdk_folder = folder;
+          SaveGuiEnvSettings();
           PullEnvDialogValues(st);
           SetWindowTextW(hwnd, BuildDetectStatusText(st->work).c_str());
         }
@@ -1381,13 +1420,25 @@ std::wstring UpExePath() {
   return DirOfModule() + L"up.exe";
 }
 
-bool PickFolder(HWND owner, std::wstring& out) {
+bool PickFolder(HWND owner, const std::wstring& initial_dir, std::wstring& out) {
   IFileOpenDialog* dlg = nullptr;
   if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&dlg))))
     return false;
   DWORD opt = 0;
   dlg->GetOptions(&opt);
   dlg->SetOptions(opt | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+  if (!initial_dir.empty()) {
+    std::error_code ec;
+    std::filesystem::path p(initial_dir);
+    if (std::filesystem::is_directory(p, ec)) {
+      IShellItem* init = nullptr;
+      if (SUCCEEDED(SHCreateItemFromParsingName(p.c_str(), nullptr, IID_PPV_ARGS(&init)))) {
+        dlg->SetFolder(init);
+        dlg->SetDefaultFolder(init);
+        init->Release();
+      }
+    }
+  }
   if (FAILED(dlg->Show(owner))) {
     dlg->Release();
     return false;
@@ -2706,8 +2757,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
       if (id == IDC_BROWSE) {
         std::wstring folder;
-        if (PickFolder(hwnd, folder)) {
+        std::wstring init = g_browse_history.cwd_folder;
+        if (init.empty())
+          GetEditText(g_path, init);
+        if (PickFolder(hwnd, init, folder)) {
           SetWindowTextW(g_path, folder.c_str());
+          g_browse_history.cwd_folder = folder;
+          SaveGuiEnvSettings();
           ResetScanDirsForCwd(folder);
           SendMessageW(g_run_target, CB_RESETCONTENT, 0, 0);
           SendMessageW(g_test_target, CB_RESETCONTENT, 0, 0);
@@ -2717,7 +2773,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       }
       if (id == IDC_SCAN_ADD) {
         std::wstring folder;
-        if (PickFolder(hwnd, folder)) {
+        std::wstring init = g_browse_history.scan_folder;
+        if (init.empty())
+          GetEditText(g_path, init);
+        if (PickFolder(hwnd, init, folder)) {
+          g_browse_history.scan_folder = folder;
+          SaveGuiEnvSettings();
           const int exists = static_cast<int>(SendMessageW(g_scan_list, LB_FINDSTRINGEXACT, static_cast<WPARAM>(-1),
                                                            reinterpret_cast<LPARAM>(folder.c_str())));
           if (exists == LB_ERR)
