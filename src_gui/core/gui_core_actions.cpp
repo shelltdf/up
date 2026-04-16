@@ -22,6 +22,11 @@ bool path_equal_ci(const std::wstring& a, const std::wstring& b) {
   return true;
 }
 
+void trim_trailing_dir_seps(std::wstring& s) {
+  while (!s.empty() && (s.back() == L'\\' || s.back() == L'/'))
+    s.pop_back();
+}
+
 }  // namespace
 
 std::wstring quote_arg(const std::wstring& s) {
@@ -39,26 +44,16 @@ std::wstring quote_arg(const std::wstring& s) {
   return out;
 }
 
-std::vector<std::wstring> merge_scan_dirs_with_cwd(const std::vector<std::wstring>& scan_dirs, const std::wstring& cwd) {
-  std::vector<std::wstring> out = scan_dirs;
-  if (cwd.empty())
-    return out;
-  bool has_cwd = false;
-  for (const auto& d : out) {
-    if (path_equal_ci(d, cwd)) {
-      has_cwd = true;
-      break;
-    }
-  }
-  if (!has_cwd)
-    out.push_back(cwd);
-  return out;
-}
-
 void append_scan_args(std::wstring& args_no_exe, const std::vector<std::wstring>& scan_dirs, const std::wstring& cwd) {
-  const auto merged = merge_scan_dirs_with_cwd(scan_dirs, cwd);
-  for (const auto& d : merged) {
+  std::wstring cwd_norm = cwd;
+  trim_trailing_dir_seps(cwd_norm);
+  for (const auto& d : scan_dirs) {
     if (d.empty())
+      continue;
+    std::wstring dn = d;
+    trim_trailing_dir_seps(dn);
+    // up 已在 cwd 下扫描，不必再传与 cwd 相同的 --scan
+    if (!cwd_norm.empty() && path_equal_ci(dn, cwd_norm))
       continue;
     args_no_exe += L" --scan ";
     if (d.find(L' ') != std::wstring::npos)

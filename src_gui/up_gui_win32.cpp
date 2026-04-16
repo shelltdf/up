@@ -1,4 +1,4 @@
-// up-gui：本地 Win32 外壳，调用与 up-gui.exe 同目录的 up.exe（见 DESIGN.md / mindmap：菜单栏→工具栏→四行→状态栏）。
+// up-gui：本地 Win32 外壳，仅通过命令行调用与 up-gui.exe 同目录的 up.exe；不链接、不包含 src 下业务代码（见 DESIGN.md / mindmap）。
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -50,6 +50,10 @@ constexpr int IDC_TESTTARGET = 116;
 constexpr int IDC_LBL_TEST = 117;
 constexpr int IDC_LBL_PATH = 118;
 constexpr int IDC_LBL_VARS = 119;
+constexpr int IDC_LBL_BUILD_DIR = 135;
+constexpr int IDC_BUILD_DIR = 136;
+constexpr int IDC_LBL_INSTALL_DIR = 137;
+constexpr int IDC_INSTALL_DIR = 138;
 constexpr int IDC_OPT_GROUP = 120;
 constexpr int IDC_OPT_PICK = 121;
 constexpr int IDC_OPT_CUSTOM = 122;
@@ -60,7 +64,6 @@ constexpr int IDC_SCAN_ADD = 126;
 constexpr int IDC_SCAN_REMOVE = 127;
 constexpr int IDC_SCAN_UP = 128;
 constexpr int IDC_SCAN_DOWN = 129;
-constexpr int IDC_VARS_TREE = 130;
 constexpr int IDC_ENV_SETTINGS = 131;
 constexpr int IDC_LOG_SPLITTER = 132;
 constexpr int IDC_LOG_COPY = 133;
@@ -72,6 +75,8 @@ constexpr int IDM_OPT_RESET_DEFAULT = 2103;
 constexpr int IDM_EXIT = 1000;
 constexpr int IDM_ABOUT = 1001;
 constexpr int IDM_UP_HELP = 1002;
+constexpr int IDM_LANG_ZH = 1005;
+constexpr int IDM_LANG_EN = 1006;
 
 constexpr int IDC_ENV_TAB = 3001;
 constexpr int IDC_ENV_AUTO = 3002;
@@ -89,6 +94,17 @@ constexpr int IDC_ENV_LOCAL_VCVARS_LIST = 3012;
 constexpr UINT WM_APPEND_LOG = WM_APP + 50;
 constexpr UINT WM_PROCESS_DONE = WM_APP + 51;
 
+bool g_ui_lang_zh = true;
+
+bool SystemDefaultUiLangIsChinese() {
+  const LANGID lid = static_cast<LANGID>(GetUserDefaultUILanguage());
+  return PRIMARYLANGID(lid) == LANG_CHINESE;
+}
+
+const wchar_t* T(const wchar_t* zh, const wchar_t* en) {
+  return g_ui_lang_zh ? zh : en;
+}
+
 HWND g_hwnd{};
 HWND g_toolbar{};
 HWND g_status{};
@@ -97,6 +113,10 @@ HWND g_browse{};
 HWND g_lbl_path{};
 HWND g_vars{};
 HWND g_lbl_vars{};
+HWND g_lbl_build_dir{};
+HWND g_build_dir{};
+HWND g_lbl_install_dir{};
+HWND g_install_dir{};
 HWND g_opt_group{};
 HWND g_opt_pick{};
 HWND g_opt_custom{};
@@ -107,7 +127,6 @@ HWND g_scan_add{};
 HWND g_scan_remove{};
 HWND g_scan_up{};
 HWND g_scan_down{};
-HWND g_vars_tree{};
 HWND g_lbl_extra{};
 HWND g_extra{};
 HWND g_lbl_run{};
@@ -776,6 +795,7 @@ void AutoDetectEnvSettings(GuiEnvSettings& s) {
 void LoadGuiEnvSettings() {
   g_env_settings = GuiEnvSettings{};
   AutoDetectEnvSettings(g_env_settings);
+  g_ui_lang_zh = SystemDefaultUiLangIsChinese();
   std::ifstream f(GuiSettingsPath());
   if (!f)
     return;
@@ -808,6 +828,12 @@ void LoadGuiEnvSettings() {
       g_browse_history.android_ndk_folder = v;
     else if (k == "browse.emsdk")
       g_browse_history.emsdk_folder = v;
+    else if (k == "gui.ui_lang") {
+      if (_wcsicmp(v.c_str(), L"en") == 0)
+        g_ui_lang_zh = false;
+      else
+        g_ui_lang_zh = true;
+    }
   }
   DetectVcvarsHits(g_env_settings);
 }
@@ -827,6 +853,7 @@ void SaveGuiEnvSettings() {
   f << "browse.android_sdk=" << WideToUtf8(g_browse_history.android_sdk_folder) << "\n";
   f << "browse.android_ndk=" << WideToUtf8(g_browse_history.android_ndk_folder) << "\n";
   f << "browse.emsdk=" << WideToUtf8(g_browse_history.emsdk_folder) << "\n";
+  f << "gui.ui_lang=" << (g_ui_lang_zh ? "zh" : "en") << "\n";
 }
 
 void AppendConfigureEnvArgs(std::wstring& args_no_exe) {
@@ -874,6 +901,8 @@ struct EnvDialogState {
 
 bool PickFolder(HWND owner, const std::wstring& initial_dir, std::wstring& out);
 void GetEditText(HWND ed, std::wstring& out);
+bool QueryConfigureBuildDirNameFromUpExe(const std::wstring& up_exe, const std::wstring& cwd, std::wstring& out_arch_leaf,
+                                         std::wstring& err_msg);
 
 void EnsureListColumns(HWND lv) {
   if (ListView_GetColumnWidth(lv, 0) > 0)
@@ -881,13 +910,13 @@ void EnsureListColumns(HWND lv) {
   LVCOLUMNW col{};
   col.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
   col.cx = 100;
-  col.pszText = const_cast<LPWSTR>(L"工具");
+  col.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(T(L"工具", L"Tool")));
   SendMessageW(lv, LVM_INSERTCOLUMNW, 0, reinterpret_cast<LPARAM>(&col));
   col.cx = 310;
-  col.pszText = const_cast<LPWSTR>(L"路径");
+  col.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(T(L"路径", L"Path")));
   SendMessageW(lv, LVM_INSERTCOLUMNW, 1, reinterpret_cast<LPARAM>(&col));
   col.cx = 90;
-  col.pszText = const_cast<LPWSTR>(L"来源");
+  col.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(T(L"来源", L"Source")));
   SendMessageW(lv, LVM_INSERTCOLUMNW, 2, reinterpret_cast<LPARAM>(&col));
 }
 
@@ -1171,62 +1200,62 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
                                 reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_ENV_TAB)), GetModuleHandleW(nullptr), nullptr);
       TCITEMW ti{};
       ti.mask = TCIF_TEXT;
-      ti.pszText = const_cast<LPWSTR>(L"本地环境");
+      ti.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(T(L"本地环境", L"Local")));
       SendMessageW(st->tab, TCM_INSERTITEMW, 0, reinterpret_cast<LPARAM>(&ti));
-      ti.pszText = const_cast<LPWSTR>(L"Android 环境");
+      ti.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(T(L"Android 环境", L"Android")));
       SendMessageW(st->tab, TCM_INSERTITEMW, 1, reinterpret_cast<LPARAM>(&ti));
-      ti.pszText = const_cast<LPWSTR>(L"emsdk 环境");
+      ti.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(T(L"emsdk 环境", L"emsdk")));
       SendMessageW(st->tab, TCM_INSERTITEMW, 2, reinterpret_cast<LPARAM>(&ti));
 
-      st->lbl_local_build = CreateWindowExW(0, L"STATIC", L"建造系统", WS_CHILD | WS_VISIBLE, 0, 0, 80, 22, hwnd, nullptr,
+      st->lbl_local_build = CreateWindowExW(0, L"STATIC", T(L"建造系统", L"Build system"), WS_CHILD | WS_VISIBLE, 0, 0, 80, 22, hwnd, nullptr,
                                             GetModuleHandleW(nullptr), nullptr);
       st->lv_local_build = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
                                            WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | WS_TABSTOP,
                                            0, 0, 100, 100, hwnd,
                                            reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_ENV_LOCAL_BUILD_LIST)),
                                            GetModuleHandleW(nullptr), nullptr);
-      st->lbl_local_vcvars = CreateWindowExW(0, L"STATIC", L"VS vcvars", WS_CHILD | WS_VISIBLE, 0, 0, 80, 22, hwnd, nullptr,
+      st->lbl_local_vcvars = CreateWindowExW(0, L"STATIC", T(L"VS vcvars", L"VS vcvars"), WS_CHILD | WS_VISIBLE, 0, 0, 80, 22, hwnd, nullptr,
                                              GetModuleHandleW(nullptr), nullptr);
       st->lv_local_vcvars = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
                                             WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | WS_TABSTOP,
                                             0, 0, 100, 100, hwnd,
                                             reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_ENV_LOCAL_VCVARS_LIST)),
                                             GetModuleHandleW(nullptr), nullptr);
-      st->lbl_local_compiler = CreateWindowExW(0, L"STATIC", L"编译器", WS_CHILD | WS_VISIBLE, 0, 0, 80, 22, hwnd, nullptr,
+      st->lbl_local_compiler = CreateWindowExW(0, L"STATIC", T(L"编译器", L"Compiler"), WS_CHILD | WS_VISIBLE, 0, 0, 80, 22, hwnd, nullptr,
                                                GetModuleHandleW(nullptr), nullptr);
       st->lv_local_compiler = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
                                               WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | WS_TABSTOP,
                                               0, 0, 100, 100, hwnd,
                                               reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_ENV_LOCAL_COMPILER_LIST)),
                                               GetModuleHandleW(nullptr), nullptr);
-      st->lbl_android_sdk = CreateWindowExW(0, L"STATIC", L"Android SDK 路径", WS_CHILD | WS_VISIBLE, 0, 0, 80, 22, hwnd,
+      st->lbl_android_sdk = CreateWindowExW(0, L"STATIC", T(L"Android SDK 路径", L"Android SDK"), WS_CHILD | WS_VISIBLE, 0, 0, 80, 22, hwnd,
                                             nullptr, GetModuleHandleW(nullptr), nullptr);
       st->edt_android_sdk = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
                                             0, 0, 100, 22, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_ENV_ANDROID_SDK)),
                                             GetModuleHandleW(nullptr), nullptr);
-      st->btn_android_sdk = CreateWindowExW(0, L"BUTTON", L"浏览...", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 66, 24, hwnd,
+      st->btn_android_sdk = CreateWindowExW(0, L"BUTTON", T(L"浏览…", L"Browse…"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 66, 24, hwnd,
                                             nullptr, GetModuleHandleW(nullptr), nullptr);
-      st->lbl_android_ndk = CreateWindowExW(0, L"STATIC", L"Android NDK 路径", WS_CHILD | WS_VISIBLE, 0, 0, 80, 22, hwnd,
+      st->lbl_android_ndk = CreateWindowExW(0, L"STATIC", T(L"Android NDK 路径", L"Android NDK"), WS_CHILD | WS_VISIBLE, 0, 0, 80, 22, hwnd,
                                             nullptr, GetModuleHandleW(nullptr), nullptr);
       st->edt_android_ndk = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
                                             0, 0, 100, 22, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_ENV_ANDROID_NDK)),
                                             GetModuleHandleW(nullptr), nullptr);
-      st->btn_android_ndk = CreateWindowExW(0, L"BUTTON", L"浏览...", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 66, 24, hwnd,
+      st->btn_android_ndk = CreateWindowExW(0, L"BUTTON", T(L"浏览…", L"Browse…"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 66, 24, hwnd,
                                             nullptr, GetModuleHandleW(nullptr), nullptr);
-      st->lbl_emsdk = CreateWindowExW(0, L"STATIC", L"emsdk 路径", WS_CHILD | WS_VISIBLE, 0, 0, 80, 22, hwnd, nullptr,
+      st->lbl_emsdk = CreateWindowExW(0, L"STATIC", T(L"emsdk 路径", L"emsdk path"), WS_CHILD | WS_VISIBLE, 0, 0, 80, 22, hwnd, nullptr,
                                       GetModuleHandleW(nullptr), nullptr);
       st->edt_emsdk = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0,
                                       0, 100, 22, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_ENV_EMSDK)),
                                       GetModuleHandleW(nullptr), nullptr);
-      st->btn_emsdk = CreateWindowExW(0, L"BUTTON", L"浏览...", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 66, 24, hwnd,
+      st->btn_emsdk = CreateWindowExW(0, L"BUTTON", T(L"浏览…", L"Browse…"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 66, 24, hwnd,
                                       nullptr, GetModuleHandleW(nullptr), nullptr);
-      st->btn_auto = CreateWindowExW(0, L"BUTTON", L"自动搜索", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
+      st->btn_auto = CreateWindowExW(0, L"BUTTON", T(L"自动搜索", L"Auto-detect"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
                                      reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_ENV_AUTO)),
                                      GetModuleHandleW(nullptr), nullptr);
-      st->btn_ok = CreateWindowExW(0, L"BUTTON", L"确定", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
+      st->btn_ok = CreateWindowExW(0, L"BUTTON", T(L"确定", L"OK"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
                                    reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_ENV_OK)),
                                    GetModuleHandleW(nullptr), nullptr);
-      st->btn_cancel = CreateWindowExW(0, L"BUTTON", L"取消", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
+      st->btn_cancel = CreateWindowExW(0, L"BUTTON", T(L"取消", L"Cancel"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
                                        reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_ENV_CANCEL)),
                                        GetModuleHandleW(nullptr), nullptr);
       SendMessageW(st->tab, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
@@ -1391,7 +1420,7 @@ bool ShowEnvSettingsDialog(HWND owner) {
   EnableWindow(owner, FALSE);
   RECT rc{};
   GetWindowRect(owner, &rc);
-  HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kEnvClass, L"编译环境设置",
+  HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kEnvClass, T(L"编译环境设置", L"Build environment"),
                              WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE | WS_THICKFRAME | WS_CLIPCHILDREN,
                              rc.left + 32, rc.top + 28, 860, 560, owner, nullptr, GetModuleHandleW(nullptr), &st);
   if (!dlg) {
@@ -1463,7 +1492,6 @@ bool PickFolder(HWND owner, const std::wstring& initial_dir, std::wstring& out) 
 
 void GetEditText(HWND ed, std::wstring& out);
 void RebuildOptionsListView();
-void RebuildOptionsTreeView();
 
 std::string ReadTextFileUtf8BestEffort(const std::filesystem::path& p) {
   std::ifstream in(p, std::ios::binary);
@@ -1555,42 +1583,88 @@ void RefreshRunTargetListFromPath() {
   }
 
   if (!targets.empty() || !tests.empty())
-    SetStatus(L"Run/Test targets refreshed");
+    SetStatus(T(L"已刷新运行/测试目标", L"Run/Test targets refreshed"));
   else
-    SetStatus(L"No run/test targets found");
+    SetStatus(T(L"未找到运行/测试目标", L"No run/test targets found"));
 }
 
 std::filesystem::path ResolveUpCachePath(const std::wstring& cwd) {
   if (cwd.empty())
     return {};
-  std::error_code ec;
-  const auto root = std::filesystem::path(cwd) / ".intermediate" / "build";
-  if (!std::filesystem::exists(root, ec))
+  // configure 写入：<cwd>/.intermediate/build/<leaf>/up_cache.txt，其中 <leaf> 为 --build-dir-name（与 print-build-dir-name 一致），
+  // 不一定是 "default"。旧工程可能仍只有 default。
+  const auto try_leaf = [&](const std::wstring& leaf) -> std::filesystem::path {
+    if (leaf.empty())
+      return {};
+    std::error_code ec{};
+    const auto p = std::filesystem::path(cwd) / L".intermediate" / L"build" / leaf / L"up_cache.txt";
+    if (std::filesystem::exists(p, ec))
+      return p;
     return {};
-  std::filesystem::path best;
-  std::filesystem::file_time_type best_time = std::filesystem::file_time_type::min();
-  for (const auto& e : std::filesystem::directory_iterator(root, std::filesystem::directory_options::skip_permission_denied, ec)) {
-    if (ec)
-      break;
-    if (!e.is_directory(ec))
-      continue;
-    const auto p = e.path() / "up_cache.txt";
-    if (!std::filesystem::exists(p, ec))
-      continue;
-    std::error_code tec;
-    const auto t = std::filesystem::last_write_time(p, tec);
-    if (tec)
-      continue;
-    if (best.empty() || t > best_time) {
-      best = p;
-      best_time = t;
+  };
+
+  const std::wstring up = UpExePath();
+  if (GetFileAttributesW(up.c_str()) != INVALID_FILE_ATTRIBUTES) {
+    std::wstring leaf;
+    std::wstring err;
+    if (QueryConfigureBuildDirNameFromUpExe(up, cwd, leaf, err) && !leaf.empty()) {
+      const auto p = try_leaf(leaf);
+      if (!p.empty())
+        return p;
     }
   }
-  return best;
+  return try_leaf(L"default");
+}
+
+void RefreshBuildDirDisplay(const std::filesystem::path& cache_path) {
+  if (!g_build_dir)
+    return;
+  if (cache_path.empty()) {
+    SetWindowTextW(g_build_dir, L"");
+    return;
+  }
+  const std::wstring build_dir = std::filesystem::absolute(cache_path.parent_path()).lexically_normal().wstring();
+  SetWindowTextW(g_build_dir, build_dir.c_str());
+}
+
+std::string ReadUpCacheArchUtf8(const std::filesystem::path& cache_path) {
+  std::ifstream f(cache_path);
+  if (!f)
+    return {};
+  std::string line;
+  while (std::getline(f, line)) {
+    const auto pos = line.find('=');
+    if (pos == std::string::npos || pos == 0)
+      continue;
+    if (line.substr(0, pos) == "arch")
+      return line.substr(pos + 1);
+  }
+  return {};
+}
+
+void RefreshInstallDirDisplay(const std::filesystem::path& cache_path, const std::wstring& cwd_w) {
+  if (!g_install_dir)
+    return;
+  if (cache_path.empty() || cwd_w.empty()) {
+    SetWindowTextW(g_install_dir, L"");
+    return;
+  }
+  const std::string arch_utf8 = ReadUpCacheArchUtf8(cache_path);
+  if (arch_utf8.empty()) {
+    SetWindowTextW(g_install_dir, L"");
+    return;
+  }
+  const std::wstring arch_w = Utf8ToWide(arch_utf8);
+  const std::filesystem::path inst =
+      std::filesystem::path(cwd_w) / L".intermediate" / L"install" / arch_w;
+  const std::wstring install_dir = std::filesystem::absolute(inst).lexically_normal().wstring();
+  SetWindowTextW(g_install_dir, install_dir.c_str());
 }
 
 void LoadOptionsFromCache(const std::wstring& cwd, bool restore_scan_roots = true) {
   const auto cache = ResolveUpCachePath(cwd);
+  RefreshBuildDirDisplay(cache);
+  RefreshInstallDirDisplay(cache, cwd);
   if (cache.empty()) {
     g_options = g_default_options;
     g_selected_option_idx = g_options.empty() ? -1 : 0;
@@ -1703,6 +1777,65 @@ std::wstring QuoteWinArg(const std::wstring& s) {
   return out;
 }
 
+// Takes full path or a single name; returns the leaf directory name for .intermediate/build|install.
+std::wstring IntermediateLeafFromPathishEdit(std::wstring s) {
+  TrimInPlace(s);
+  if (s.empty())
+    return {};
+  std::wstring leaf = std::filesystem::path(s).filename().wstring();
+  if (leaf.empty() || leaf == L"." || leaf == L"..")
+    return {};
+  return leaf;
+}
+
+// Appends ` --build-dir-name <leaf>` (name under .intermediate/build). When required and empty, logs and returns false.
+bool AppendBuildDirFlagOrAbort(std::wstring& args_no_exe, bool required) {
+  if (!g_build_dir) {
+    if (required) {
+      AppendLog(L"[错误] Build Dir 控件未初始化。\r\n");
+      return false;
+    }
+    return true;
+  }
+  std::wstring bd;
+  GetEditText(g_build_dir, bd);
+  const std::wstring leaf = IntermediateLeafFromPathishEdit(bd);
+  if (leaf.empty()) {
+    if (required) {
+      AppendLog(L"[错误] 请填写「Build Dir」或构建目录名（对应 CLI：--build-dir-name），再执行 build。\r\n");
+      return false;
+    }
+    return true;
+  }
+  args_no_exe += L" --build-dir-name ";
+  args_no_exe += QuoteWinArg(leaf);
+  return true;
+}
+
+// Appends ` --install-dir-name <leaf>` (name under .intermediate/install).
+bool AppendInstallDirFlagOrAbort(std::wstring& args_no_exe, bool required) {
+  if (!g_install_dir) {
+    if (required) {
+      AppendLog(L"[错误] 安装目录控件未初始化。\r\n");
+      return false;
+    }
+    return true;
+  }
+  std::wstring id;
+  GetEditText(g_install_dir, id);
+  const std::wstring leaf = IntermediateLeafFromPathishEdit(id);
+  if (leaf.empty()) {
+    if (required) {
+      AppendLog(L"[错误] 请填写「安装目录」或 install 子目录名（对应 CLI：--install-dir-name），再执行 run/test。\r\n");
+      return false;
+    }
+    return true;
+  }
+  args_no_exe += L" --install-dir-name ";
+  args_no_exe += QuoteWinArg(leaf);
+  return true;
+}
+
 void GetEditText(HWND ed, std::wstring& out) {
   const int n = GetWindowTextLengthW(ed);
   if (n <= 0) {
@@ -1773,6 +1906,52 @@ bool RunProcessCapture(const std::wstring& app, const std::wstring& cmdline, con
   return true;
 }
 
+// Shells out to up.exe (same UP_* as configure) — no compile-time dependency on src/.
+bool QueryConfigureBuildDirNameFromUpExe(const std::wstring& up_exe, const std::wstring& cwd, std::wstring& out_arch_leaf,
+                                         std::wstring& err_msg) {
+  out_arch_leaf.clear();
+  err_msg.clear();
+  std::wstring bd;
+  if (g_build_dir)
+    GetEditText(g_build_dir, bd);
+  std::wstring cache_leaf = IntermediateLeafFromPathishEdit(bd);
+  if (cache_leaf.empty())
+    cache_leaf = L"default";
+
+  std::wstring opt_part;
+  AppendConfigureOptions(opt_part);
+  AppendConfigureEnvArgs(opt_part);
+
+  std::wstring cmdline = L"\"";
+  cmdline += up_exe;
+  cmdline += L"\" print-build-dir-name --build-dir-name ";
+  cmdline += QuoteWinArg(cache_leaf);
+  cmdline += opt_part;
+
+  std::wstring output;
+  DWORD code = static_cast<DWORD>(-1);
+  if (!RunProcessCapture(up_exe, cmdline, cwd, output, code)) {
+    err_msg = L"无法启动 print-build-dir-name。";
+    return false;
+  }
+  TrimInPlace(output);
+  while (!output.empty() && (output.back() == L'\r' || output.back() == L'\n'))
+    output.pop_back();
+  TrimInPlace(output);
+  const auto line_end = output.find_first_of(L"\r\n");
+  if (line_end != std::wstring::npos)
+    output.resize(line_end);
+  TrimInPlace(output);
+  if (code != 0 || output.empty()) {
+    err_msg = L"print-build-dir-name 失败 (退出码 " + std::to_wstring(static_cast<unsigned long>(code)) + L")";
+    if (!output.empty())
+      err_msg += L": " + output;
+    return false;
+  }
+  out_arch_leaf = std::move(output);
+  return true;
+}
+
 void SetUiRunning(bool running) {
   g_running = running;
   const BOOL en = running ? FALSE : TRUE;
@@ -1787,7 +1966,16 @@ void SetUiRunning(bool running) {
   EnableWindow(g_extra, en);
   EnableWindow(g_run_target, en);
   EnableWindow(g_test_target, en);
-  EnableWindow(g_vars, en);
+  if (g_vars)
+    EnableWindow(g_vars, en);
+  if (g_opt_group)
+    EnableWindow(g_opt_group, en);
+  if (g_opt_pick)
+    EnableWindow(g_opt_pick, en);
+  if (g_opt_custom)
+    EnableWindow(g_opt_custom, en);
+  if (g_opt_apply)
+    EnableWindow(g_opt_apply, en);
   HMENU menu = GetMenu(g_hwnd);
   if (menu) {
     const UINT gray = MF_BYCOMMAND | MF_GRAYED;
@@ -1801,21 +1989,25 @@ void SetUiRunning(bool running) {
     EnableMenuItem(menu, IDC_PACK, running ? gray : ena);
     EnableMenuItem(menu, IDC_RUN, running ? gray : ena);
     EnableMenuItem(menu, IDC_ENV_SETTINGS, running ? gray : ena);
+    EnableMenuItem(menu, IDM_LANG_ZH, ena);
+    EnableMenuItem(menu, IDM_LANG_EN, ena);
   }
-  SetStatus(running ? L"Running up..." : L"Ready");
+  SetStatus(running ? T(L"正在运行 up…", L"Running up…") : T(L"就绪", L"Ready"));
 }
 
 void RunUpAsync(std::wstring args_no_exe) {
   const std::wstring up = UpExePath();
   if (GetFileAttributesW(up.c_str()) == INVALID_FILE_ATTRIBUTES) {
-    AppendLog(L"[错误] 找不到 up.exe，请与 up-gui.exe 放在同一目录。\r\n");
+    AppendLog(g_ui_lang_zh ? L"[错误] 找不到 up.exe，请与 up-gui.exe 放在同一目录。\r\n"
+                           : L"[Error] up.exe not found (place next to up-gui.exe).\r\n");
     return;
   }
 
   std::wstring cwd;
   GetEditText(g_path, cwd);
   if (cwd.empty()) {
-    AppendLog(L"[错误] 请先填写或选择「当前工作目录 (CWD)」。\r\n");
+    AppendLog(g_ui_lang_zh ? L"[错误] 请先填写或选择「当前工作目录 (CWD)」。\r\n"
+                           : L"[Error] Set or pick the working directory (CWD) first.\r\n");
     return;
   }
 
@@ -1829,6 +2021,16 @@ void RunUpAsync(std::wstring args_no_exe) {
     AppendConfigureOptions(args_no_exe);
   if (args_no_exe.rfind(L"configure", 0) == 0)
     AppendConfigureEnvArgs(args_no_exe);
+  if (args_no_exe.rfind(L"configure", 0) == 0) {
+    std::wstring arch_leaf;
+    std::wstring qerr;
+    if (!QueryConfigureBuildDirNameFromUpExe(up, cwd, arch_leaf, qerr)) {
+      AppendLog(L"[错误] 无法从 up.exe 计算 --build-dir-name: " + qerr + L"\r\n");
+      return;
+    }
+    args_no_exe += L" --build-dir-name ";
+    args_no_exe += QuoteWinArg(arch_leaf);
+  }
 
   std::wstring run_app = up;
   bool use_vcvars = false;
@@ -1931,40 +2133,35 @@ void LayoutChildren(HWND hwnd) {
   MoveWindow(g_scan_down, scanLeft + std::max(180, scanW) + 6, y + 78, 66, 24, TRUE);
   y += scanH + pad;
 
-  // 第二行：Option 列表 + 分组开关
-  MoveWindow(g_lbl_vars, pad, y + 4, lblW, 20, TRUE);
-  MoveWindow(g_opt_group, w - pad - 170, y + 2, 170, 24, TRUE);
-  y += 24;
-  // 先为后续区域预留最小空间，避免默认窗口时底部控件被挤没。
-  const int reserveBelowVars = (editH + pad) * 4 + 92;
-  int varsH = (contentBottom - y - reserveBelowVars);
-  if (varsH < 56)
-    varsH = 56;
-  if (varsH > 104)
-    varsH = 104;
-  MoveWindow(g_vars, pad + lblW + 4, y, w - pad * 2 - lblW - 4, varsH, TRUE);
-  MoveWindow(g_vars_tree, pad + lblW + 4, y, w - pad * 2 - lblW - 4, varsH, TRUE);
-  const bool grouped = g_opt_group && (SendMessageW(g_opt_group, BM_GETCHECK, 0, 0) == BST_CHECKED);
-  ShowWindow(g_vars_tree, grouped ? SW_SHOW : SW_HIDE);
-  ShowWindow(g_vars, grouped ? SW_HIDE : SW_SHOW);
-  y += varsH + pad;
-
-  // Option 编辑：可选 + 自定义
-  const int optLeft = pad + lblW + 4;
-  const int optW = w - pad * 2 - lblW - 4;
-  MoveWindow(g_opt_pick, optLeft, y, std::max(180, optW / 3), editH + 140, TRUE);
-  MoveWindow(g_opt_custom, optLeft + std::max(180, optW / 3) + 8, y, std::max(180, optW / 3), editH, TRUE);
-  MoveWindow(g_opt_apply, optLeft + std::max(180, optW / 3) * 2 + 16, y - 1, 120, editH + 2, TRUE);
+  // Build Dir（configure 成功后显示当前 build 目录）
+  MoveWindow(g_lbl_build_dir, pad, y + 4, lblW, 20, TRUE);
+  MoveWindow(g_build_dir, pad + lblW + 4, y + 2, w - pad * 2 - lblW - 4, editH, TRUE);
   y += editH + pad;
 
-  // 第三行区块：附加参数
-  MoveWindow(g_lbl_extra, pad, y + 4, lblW, 20, TRUE);
-  MoveWindow(g_extra, pad + lblW + 4, y, w - pad * 2 - lblW - 4, editH, TRUE);
+  // Install Dir（与 up 的 default_install_root(cwd)/<arch> 一致，arch 来自 up_cache.txt）
+  MoveWindow(g_lbl_install_dir, pad, y + 4, lblW, 20, TRUE);
+  MoveWindow(g_install_dir, pad + lblW + 4, y + 2, w - pad * 2 - lblW - 4, editH, TRUE);
   y += editH + pad;
 
-  // 第三行：运行目标列表（configure 成功后刷新）
-  MoveWindow(g_lbl_run, pad, y + 4, lblW, 20, TRUE);
-  MoveWindow(g_run_target, pad + lblW + 4, y, w - pad * 2 - lblW - 4, 240, TRUE);
+  // 第三行：运行目标（左）+ 运行参数（右）（runComboW + extraW = avail_total）
+  const int midGap = 10;
+  int avail_total = w - pad * 2 - lblW * 2 - 8 - midGap;
+  if (avail_total < 2)
+    avail_total = 2;
+  int runComboW = (avail_total * 11) / 20;
+  int extraW = avail_total - runComboW;
+  if (runComboW < 56 || extraW < 56) {
+    runComboW = avail_total / 2;
+    extraW = avail_total - runComboW;
+  }
+  const int xRunLbl = pad;
+  const int xRun = pad + lblW + 4;
+  const int xExtraLbl = xRun + runComboW + midGap;
+  const int xExtra = xExtraLbl + lblW + 4;
+  MoveWindow(g_lbl_run, xRunLbl, y + 4, lblW, 20, TRUE);
+  MoveWindow(g_run_target, xRun, y, runComboW, 240, TRUE);
+  MoveWindow(g_lbl_extra, xExtraLbl, y + 4, lblW, 20, TRUE);
+  MoveWindow(g_extra, xExtra, y, extraW, editH, TRUE);
   y += editH + pad;
 
   // 第三行：单元测试目标列表（configure 成功后刷新）
@@ -2056,7 +2253,7 @@ bool SoftValidateOptionValue(const OptionRow& opt, const std::wstring& value) {
   bool warned = false;
   if (!opt.choices.empty() && !ChoiceContainsValue(opt, value)) {
     AppendLog(L"[警告] " + opt.name + L" 的值 \"" + value + L"\" 不在推荐候选中，已按自定义值保存。\r\n");
-    SetStatus(L"Warning: custom option value used");
+    SetStatus(T(L"警告：已使用自定义 Option 值", L"Warning: custom option value used"));
     warned = true;
   }
 
@@ -2064,7 +2261,7 @@ bool SoftValidateOptionValue(const OptionRow& opt, const std::wstring& value) {
     const OptionRow* build = FindOptionByName(L"UP_TARGET_BUILD_SYSTEM");
     if (build && _wcsicmp(build->value.c_str(), L"cmake") != 0) {
       AppendLog(L"[警告] 当前 UP_TARGET_BUILD_SYSTEM 不是 cmake，UP_CMAKE_GENERATOR 可能不会生效。\r\n");
-      SetStatus(L"Warning: generator may be ignored");
+      SetStatus(T(L"警告：生成器可能被忽略", L"Warning: generator may be ignored"));
       warned = true;
     }
   }
@@ -2077,17 +2274,17 @@ void HandleOptionContextAction(HWND hwnd, int action_id) {
   auto& opt = g_options[static_cast<size_t>(g_selected_option_idx)];
   if (action_id == IDM_OPT_COPY_KEY) {
     if (CopyTextToClipboard(hwnd, opt.name))
-      SetStatus(L"Copied option name");
+      SetStatus(T(L"已复制变量名", L"Copied option name"));
     else
-      SetStatus(L"Copy failed");
+      SetStatus(T(L"复制失败", L"Copy failed"));
     return;
   }
   if (action_id == IDM_OPT_COPY_KEY_VALUE) {
     const std::wstring kv = opt.name + L"=" + opt.value;
     if (CopyTextToClipboard(hwnd, kv))
-      SetStatus(L"Copied option key=value");
+      SetStatus(T(L"已复制 KEY=VALUE", L"Copied option key=value"));
     else
-      SetStatus(L"Copy failed");
+      SetStatus(T(L"复制失败", L"Copy failed"));
     return;
   }
   if (action_id == IDM_OPT_RESET_DEFAULT) {
@@ -2095,7 +2292,7 @@ void HandleOptionContextAction(HWND hwnd, int action_id) {
       if (d.name == opt.name) {
         opt.value = d.value;
         RebuildOptionsListView();
-        SetStatus(L"Option reset to default");
+        SetStatus(T(L"已恢复为默认 Option", L"Option reset to default"));
         break;
       }
     }
@@ -2126,26 +2323,68 @@ void RebuildOptionsListView() {
   if (!g_vars)
     return;
   SendMessageW(g_vars, LVM_DELETEALLITEMS, 0, 0);
+  SendMessageW(g_vars, LVM_REMOVEALLGROUPS, 0, 0);
+  SendMessageW(g_vars, LVM_ENABLEGROUPVIEW, FALSE, 0);
   g_row_to_option_idx.clear();
-  ListView_EnableGroupView(g_vars, FALSE);
 
   std::wstring cwd;
   if (g_path)
     GetEditText(g_path, cwd);
   if (cwd.empty()) {
     g_selected_option_idx = -1;
-    if (g_vars_tree)
-      TreeView_DeleteAllItems(g_vars_tree);
     SyncOptionEditorFromSelection();
     return;
   }
 
-  int row = 0;
+  const bool grouped = g_opt_group && (SendMessageW(g_opt_group, BM_GETCHECK, 0, 0) == BST_CHECKED);
 
-  auto add_option_row = [&](int opt_idx) {
+  std::vector<int> sorted_order(g_options.size());
+  for (size_t i = 0; i < g_options.size(); ++i)
+    sorted_order[i] = static_cast<int>(i);
+  if (grouped) {
+    std::sort(sorted_order.begin(), sorted_order.end(), [](int a, int b) {
+      const std::wstring ga = OptionGroupName(g_options[static_cast<size_t>(a)].name);
+      const std::wstring gb = OptionGroupName(g_options[static_cast<size_t>(b)].name);
+      if (ga != gb)
+        return ga < gb;
+      return g_options[static_cast<size_t>(a)].name < g_options[static_cast<size_t>(b)].name;
+    });
+    SendMessageW(g_vars, LVM_ENABLEGROUPVIEW, TRUE, 0);
+  }
+
+  int row = 0;
+  std::map<std::wstring, int> group_id_for;
+  int next_group_id = 1;
+
+  auto insert_group_if_needed = [&](const std::wstring& gn) -> int {
+    const auto it = group_id_for.find(gn);
+    if (it != group_id_for.end())
+      return it->second;
+    const int gid = next_group_id++;
+    LVGROUP lg{};
+    lg.cbSize = sizeof(LVGROUP);
+    lg.mask = LVGF_HEADER | LVGF_GROUPID | LVGF_STATE;
+    lg.pszHeader = const_cast<LPWSTR>(gn.c_str());
+    lg.cchHeader = 0;
+    lg.iGroupId = gid;
+    lg.stateMask = LVGS_NORMAL;
+    lg.state = LVGS_NORMAL;
+    SendMessageW(g_vars, LVM_INSERTGROUP, static_cast<WPARAM>(-1), reinterpret_cast<LPARAM>(&lg));
+    group_id_for.emplace(gn, gid);
+    return gid;
+  };
+
+  for (int opt_idx : sorted_order) {
     const auto& o = g_options[static_cast<size_t>(opt_idx)];
     LVITEMW it{};
     it.mask = LVIF_TEXT;
+    int gid = 0;
+    if (grouped) {
+      const std::wstring gn = OptionGroupName(o.name);
+      gid = insert_group_if_needed(gn);
+      it.mask |= LVIF_GROUPID;
+      it.iGroupId = gid;
+    }
     it.iItem = row;
     it.iSubItem = 0;
     it.pszText = const_cast<LPWSTR>(o.name.c_str());
@@ -2160,10 +2399,8 @@ void RebuildOptionsListView() {
     SendMessageW(g_vars, LVM_SETITEMTEXTW, static_cast<WPARAM>(row), reinterpret_cast<LPARAM>(&c));
     g_row_to_option_idx.push_back(opt_idx);
     ++row;
-  };
+  }
 
-  for (int i = 0; i < static_cast<int>(g_options.size()); ++i)
-    add_option_row(i);
   int sel_row = -1;
   for (int r = 0; r < static_cast<int>(g_row_to_option_idx.size()); ++r) {
     if (g_row_to_option_idx[static_cast<size_t>(r)] >= 0) {
@@ -2177,53 +2414,7 @@ void RebuildOptionsListView() {
   }
   if (sel_row >= 0)
     ListView_SetItemState(g_vars, sel_row, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
-  RebuildOptionsTreeView();
   SyncOptionEditorFromSelection();
-}
-
-void RebuildOptionsTreeView() {
-  if (!g_vars_tree)
-    return;
-  TreeView_DeleteAllItems(g_vars_tree);
-  std::map<std::wstring, HTREEITEM> groups;
-  HTREEITEM selected{};
-  for (int i = 0; i < static_cast<int>(g_options.size()); ++i) {
-    const auto& o = g_options[static_cast<size_t>(i)];
-    const std::wstring gname = OptionGroupName(o.name);
-    HTREEITEM parent{};
-    auto it = groups.find(gname);
-    if (it == groups.end()) {
-      TVINSERTSTRUCTW ins{};
-      ins.hParent = TVI_ROOT;
-      ins.hInsertAfter = TVI_LAST;
-      ins.item.mask = TVIF_TEXT;
-      ins.item.pszText = const_cast<LPWSTR>(gname.c_str());
-      parent = reinterpret_cast<HTREEITEM>(SendMessageW(g_vars_tree, TVM_INSERTITEMW, 0, reinterpret_cast<LPARAM>(&ins)));
-      groups.emplace(gname, parent);
-    } else {
-      parent = it->second;
-    }
-
-    std::wstring label = o.name + L" = " + o.value;
-    TVINSERTSTRUCTW child{};
-    child.hParent = parent;
-    child.hInsertAfter = TVI_LAST;
-    child.item.mask = TVIF_TEXT | TVIF_PARAM;
-    child.item.pszText = const_cast<LPWSTR>(label.c_str());
-    child.item.lParam = static_cast<LPARAM>(i);
-    HTREEITEM h =
-        reinterpret_cast<HTREEITEM>(SendMessageW(g_vars_tree, TVM_INSERTITEMW, 0, reinterpret_cast<LPARAM>(&child)));
-    if (i == g_selected_option_idx)
-      selected = h;
-  }
-
-  HTREEITEM root = TreeView_GetRoot(g_vars_tree);
-  while (root) {
-    TreeView_Expand(g_vars_tree, root, TVE_EXPAND);
-    root = TreeView_GetNextSibling(g_vars_tree, root);
-  }
-  if (selected)
-    TreeView_SelectItem(g_vars_tree, selected);
 }
 
 void InitVarsList(HWND lv) {
@@ -2232,16 +2423,13 @@ void InitVarsList(HWND lv) {
   LVCOLUMNW col{};
   col.mask = LVCF_TEXT | LVCF_WIDTH;
   col.cx = 230;
-  wchar_t c0[] = L"Option";
-  col.pszText = c0;
+  col.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(T(L"变量名", L"Name")));
   SendMessageW(lv, LVM_INSERTCOLUMNW, 0, reinterpret_cast<LPARAM>(&col));
   col.cx = 120;
-  wchar_t c1[] = L"Value";
-  col.pszText = c1;
+  col.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(T(L"值", L"Value")));
   SendMessageW(lv, LVM_INSERTCOLUMNW, 1, reinterpret_cast<LPARAM>(&col));
   col.cx = 360;
-  wchar_t c2[] = L"Choices";
-  col.pszText = c2;
+  col.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(T(L"候选", L"Choices")));
   SendMessageW(lv, LVM_INSERTCOLUMNW, 2, reinterpret_cast<LPARAM>(&col));
 
   RebuildOptionsListView();
@@ -2250,23 +2438,28 @@ void InitVarsList(HWND lv) {
 void CreateMainMenu(HWND hwnd) {
   HMENU bar = CreateMenu();
   HMENU file = CreateMenu();
-  AppendMenuW(file, MF_STRING, IDM_EXIT, L"退出(&X)");
-  AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(file), L"文件(&F)");
+  AppendMenuW(file, MF_STRING, IDM_EXIT, T(L"退出(&X)", L"E&xit"));
+  AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(file), T(L"文件(&F)", L"&File"));
 
   HMENU tools = CreateMenu();
-  AppendMenuW(tools, MF_STRING, IDC_CONFIGURE, L"&configure");
-  AppendMenuW(tools, MF_STRING, IDC_BUILD, L"&build");
-  AppendMenuW(tools, MF_STRING, IDC_TEST, L"&test");
-  AppendMenuW(tools, MF_STRING, IDC_PACK, L"&pack");
-  AppendMenuW(tools, MF_STRING, IDC_RUN, L"&run…");
+  AppendMenuW(tools, MF_STRING, IDC_CONFIGURE, T(L"配置(&C)", L"&configure"));
+  AppendMenuW(tools, MF_STRING, IDC_BUILD, T(L"编译(&B)", L"&build"));
+  AppendMenuW(tools, MF_STRING, IDC_TEST, T(L"测试(&T)", L"&test"));
+  AppendMenuW(tools, MF_STRING, IDC_PACK, T(L"打包(&P)", L"&pack"));
+  AppendMenuW(tools, MF_STRING, IDC_RUN, T(L"运行(&R)…", L"&run…"));
   AppendMenuW(tools, MF_SEPARATOR, 0, nullptr);
-  AppendMenuW(tools, MF_STRING, IDC_ENV_SETTINGS, L"编译环境设置...");
-  AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(tools), L"操作(&O)");
+  AppendMenuW(tools, MF_STRING, IDC_ENV_SETTINGS, T(L"编译环境设置…", L"Build &environment…"));
+  AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(tools), T(L"操作(&O)", L"&Actions"));
+
+  HMENU lang = CreateMenu();
+  AppendMenuW(lang, MF_STRING | (g_ui_lang_zh ? MF_CHECKED : MF_UNCHECKED), IDM_LANG_ZH, L"简体中文(&S)");
+  AppendMenuW(lang, MF_STRING | (!g_ui_lang_zh ? MF_CHECKED : MF_UNCHECKED), IDM_LANG_EN, L"English(&E)");
+  AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(lang), T(L"语言(&L)", L"&Language"));
 
   HMENU help = CreateMenu();
-  AppendMenuW(help, MF_STRING, IDM_UP_HELP, L"up 帮助信息(&U)...");
-  AppendMenuW(help, MF_STRING, IDM_ABOUT, L"关于(&A)…");
-  AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(help), L"帮助(&H)");
+  AppendMenuW(help, MF_STRING, IDM_UP_HELP, T(L"up 帮助(&U)…", L"up &Help…"));
+  AppendMenuW(help, MF_STRING, IDM_ABOUT, T(L"关于(&A)…", L"&About…"));
+  AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(help), T(L"帮助(&H)", L"&Help"));
 
   SetMenu(hwnd, bar);
 }
@@ -2302,9 +2495,9 @@ LRESULT CALLBACK UpHelpWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
                                  WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL |
                                      ES_READONLY | ES_WANTRETURN,
                                  0, 0, 100, 100, hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
-      st->btn_copy = CreateWindowExW(0, L"BUTTON", L"复制", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
+      st->btn_copy = CreateWindowExW(0, L"BUTTON", T(L"复制", L"Copy"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
                                      nullptr, GetModuleHandleW(nullptr), nullptr);
-      st->btn_close = CreateWindowExW(0, L"BUTTON", L"关闭", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
+      st->btn_close = CreateWindowExW(0, L"BUTTON", T(L"关闭", L"Close"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
                                       nullptr, GetModuleHandleW(nullptr), nullptr);
       SendMessageW(st->edit, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
       SendMessageW(st->btn_copy, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
@@ -2367,7 +2560,7 @@ void ShowUpHelpDialog(HWND owner, const std::wstring& text) {
   EnableWindow(owner, FALSE);
   RECT rc{};
   GetWindowRect(owner, &rc);
-  HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kHelpClass, L"up 帮助信息",
+  HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kHelpClass, T(L"up 帮助信息", L"up Help"),
                              WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE | WS_THICKFRAME, rc.left + 40, rc.top + 40,
                              760, 520, owner, nullptr, GetModuleHandleW(nullptr), &st);
   if (!dlg) {
@@ -2388,22 +2581,337 @@ void ShowUpHelpDialog(HWND owner, const std::wstring& text) {
 void ShowUpHelpInfo(HWND hwnd) {
   const std::wstring up = UpExePath();
   if (GetFileAttributesW(up.c_str()) == INVALID_FILE_ATTRIBUTES) {
-    MessageBoxW(hwnd, L"未找到 up.exe（需与 up-gui.exe 同目录）。", L"up 帮助信息", MB_OK | MB_ICONWARNING);
+    MessageBoxW(hwnd, T(L"未找到 up.exe（需与 up-gui.exe 同目录）。", L"up.exe not found (must sit next to up-gui.exe)."),
+                T(L"up 帮助信息", L"up Help"), MB_OK | MB_ICONWARNING);
     return;
   }
-  SetStatus(L"Running up --help...");
+  SetStatus(T(L"正在运行 up --help…", L"Running up --help…"));
   const std::wstring cmd = L"\"" + up + L"\" --help";
   std::wstring output;
   DWORD exit_code = 0;
   if (!RunProcessCapture(up, cmd, L"", output, exit_code)) {
-    SetStatus(L"Failed to run up --help");
-    MessageBoxW(hwnd, L"执行 up --help 失败。", L"up 帮助信息", MB_OK | MB_ICONERROR);
+    SetStatus(T(L"运行 up --help 失败", L"Failed to run up --help"));
+    MessageBoxW(hwnd, T(L"执行 up --help 失败。", L"Failed to run up --help."), T(L"up 帮助信息", L"up Help"),
+                MB_OK | MB_ICONERROR);
     return;
   }
   std::wstringstream ss;
-  ss << L"$ " << cmd << L"\r\n\r\n" << output << L"\r\n[退出码 " << static_cast<unsigned long>(exit_code) << L"]\r\n";
+  ss << L"$ " << cmd << L"\r\n\r\n" << output << L"\r\n";
+  if (g_ui_lang_zh)
+    ss << L"[退出码 " << static_cast<unsigned long>(exit_code) << L"]\r\n";
+  else
+    ss << L"[exit code " << static_cast<unsigned long>(exit_code) << L"]\r\n";
   ShowUpHelpDialog(hwnd, ss.str());
-  SetStatus(L"up --help loaded");
+  SetStatus(T(L"已加载 up --help", L"up --help loaded"));
+}
+
+bool IsConfigureOptionName(const std::wstring& name) {
+  if (name.rfind(L"UP_TARGET_", 0) == 0)
+    return true;
+  return _wcsicmp(name.c_str(), L"UP_CMAKE_GENERATOR") == 0;
+}
+
+std::wstring BuildConfigureOptionText() {
+  std::wstringstream ss;
+  for (const auto& o : g_options) {
+    if (!IsConfigureOptionName(o.name))
+      continue;
+    ss << o.name << L"=" << o.value << L"\r\n";
+  }
+  return ss.str();
+}
+
+struct ConfigureOptionDialogState {
+  HWND btn_ok{};
+  HWND btn_cancel{};
+  HWND owner{};
+  bool accepted = false;
+};
+
+void LayoutConfigureOptionDialog(HWND hwnd, ConfigureOptionDialogState* st) {
+  if (!st)
+    return;
+  RECT rc{};
+  GetClientRect(hwnd, &rc);
+  const int pad = 10;
+  const int editH = 26;
+  const int lblW = 68;
+  const int btnW = 100;
+  const int btnH = 28;
+  const int w = rc.right;
+  const int h = rc.bottom;
+  int y = pad;
+
+  if (g_lbl_vars)
+    MoveWindow(g_lbl_vars, pad, y + 4, lblW, 20, TRUE);
+  if (g_opt_group)
+    MoveWindow(g_opt_group, w - pad - 170, y + 2, 170, 24, TRUE);
+  y += 24;
+
+  const int bottomReserved = editH + pad + btnH + pad * 2;
+  int varsH = h - y - bottomReserved;
+  if (varsH < 100)
+    varsH = 100;
+  const int maxVars = h - y - 40;
+  if (varsH > maxVars)
+    varsH = (std::max)(60, maxVars);
+
+  if (g_vars)
+    MoveWindow(g_vars, pad + lblW + 4, y, w - pad * 2 - lblW - 4, varsH, TRUE);
+  if (g_vars)
+    ShowWindow(g_vars, SW_SHOW);
+  y += varsH + pad;
+
+  const int optLeft = pad + lblW + 4;
+  const int optW = w - pad * 2 - lblW - 4;
+  const int third = (std::max)(160, optW / 3);
+  if (g_opt_pick)
+    MoveWindow(g_opt_pick, optLeft, y, third, editH + 140, TRUE);
+  if (g_opt_custom)
+    MoveWindow(g_opt_custom, optLeft + third + 8, y, third, editH, TRUE);
+  if (g_opt_apply)
+    MoveWindow(g_opt_apply, optLeft + third * 2 + 16, y - 1, 120, editH + 2, TRUE);
+  y += editH + pad;
+
+  const int btnY = h - pad - btnH;
+  if (st->btn_cancel)
+    MoveWindow(st->btn_cancel, w - pad - btnW, btnY, btnW, btnH, TRUE);
+  if (st->btn_ok)
+    MoveWindow(st->btn_ok, w - pad - btnW * 2 - 8, btnY, btnW, btnH, TRUE);
+}
+
+LRESULT CALLBACK ConfigureOptionWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+  auto* st = reinterpret_cast<ConfigureOptionDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+  switch (msg) {
+    case WM_CREATE: {
+      auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
+      st = reinterpret_cast<ConfigureOptionDialogState*>(cs->lpCreateParams);
+      SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(st));
+      if (!st->owner)
+        st->owner = GetParent(hwnd);
+      const HFONT ui = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+
+      g_lbl_vars = CreateWindowExW(0, L"STATIC", T(L"Option", L"Option"), WS_CHILD | WS_VISIBLE, 0, 0, 72, 20, hwnd,
+                                   reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LBL_VARS)),
+                                   GetModuleHandleW(nullptr), nullptr);
+      g_opt_group = CreateWindowExW(0, L"BUTTON", T(L"按前缀分组显示", L"Group by prefix"), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX, 0, 0,
+                                    170, 24, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_OPT_GROUP)),
+                                    GetModuleHandleW(nullptr), nullptr);
+      SendMessageW(g_opt_group, BM_SETCHECK, BST_CHECKED, 0);
+      g_vars = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
+                               WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_REPORT | LVS_SINGLESEL | LVS_NOSORTHEADER, 0, 0,
+                               100, 80, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_VARS)),
+                               GetModuleHandleW(nullptr), nullptr);
+      g_opt_pick = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+                                   0, 0, 120, 220, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_OPT_PICK)),
+                                   GetModuleHandleW(nullptr), nullptr);
+      g_opt_custom = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0,
+                                     0, 160, 26, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_OPT_CUSTOM)),
+                                     GetModuleHandleW(nullptr), nullptr);
+      g_opt_apply = CreateWindowExW(0, L"BUTTON", T(L"应用到选中项", L"Apply to selection"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 120, 28, hwnd,
+                                    reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_OPT_APPLY)),
+                                    GetModuleHandleW(nullptr), nullptr);
+      st->btn_ok = CreateWindowExW(0, L"BUTTON", L"确定并配置", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 100, 28, hwnd,
+                                   nullptr, GetModuleHandleW(nullptr), nullptr);
+      st->btn_cancel = CreateWindowExW(0, L"BUTTON", L"取消", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 100, 28, hwnd,
+                                       nullptr, GetModuleHandleW(nullptr), nullptr);
+
+      SendMessageW(g_lbl_vars, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(g_opt_group, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(g_vars, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(g_opt_pick, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(g_opt_custom, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(g_opt_apply, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(st->btn_ok, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(st->btn_cancel, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      InitVarsList(g_vars);
+      LayoutConfigureOptionDialog(hwnd, st);
+      return 0;
+    }
+    case WM_SIZE:
+      if (st)
+        LayoutConfigureOptionDialog(hwnd, st);
+      return 0;
+    case WM_GETMINMAXINFO: {
+      auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
+      mmi->ptMinTrackSize.x = 560;
+      mmi->ptMinTrackSize.y = 420;
+      return 0;
+    }
+    case WM_CONTEXTMENU: {
+      if (!st || !g_vars)
+        return 0;
+      HWND src = reinterpret_cast<HWND>(wParam);
+      if (src != g_vars)
+        return 0;
+      POINT pt{};
+      pt.x = GET_X_LPARAM(lParam);
+      pt.y = GET_Y_LPARAM(lParam);
+      if (pt.x == -1 && pt.y == -1) {
+        RECT rc{};
+        GetWindowRect(g_vars, &rc);
+        pt.x = rc.left + 12;
+        pt.y = rc.top + 12;
+      }
+      POINT local = pt;
+      ScreenToClient(g_vars, &local);
+      LVHITTESTINFO ht{};
+      ht.pt = local;
+      ht.flags = LVHT_NOWHERE;
+      ListView_SubItemHitTest(g_vars, &ht);
+      if (ht.iItem < 0 || ht.iItem >= static_cast<int>(g_row_to_option_idx.size()))
+        return 0;
+      ListView_SetItemState(g_vars, ht.iItem, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
+      g_selected_option_idx = g_row_to_option_idx[static_cast<size_t>(ht.iItem)];
+      SyncOptionEditorFromSelection();
+
+      HMENU menu = CreatePopupMenu();
+      AppendMenuW(menu, MF_STRING, IDM_OPT_COPY_KEY, T(L"复制变量名", L"Copy name"));
+      AppendMenuW(menu, MF_STRING, IDM_OPT_COPY_KEY_VALUE, T(L"复制 KEY=VALUE", L"Copy KEY=VALUE"));
+      AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+      AppendMenuW(menu, MF_STRING, IDM_OPT_RESET_DEFAULT, T(L"重置默认值", L"Reset to default"));
+      TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_LEFTALIGN, pt.x, pt.y, 0, hwnd, nullptr);
+      DestroyMenu(menu);
+      return 0;
+    }
+    case WM_COMMAND: {
+      if (!st)
+        return 0;
+      const int id = LOWORD(wParam);
+      if (id == IDC_OPT_GROUP) {
+        RebuildOptionsListView();
+        LayoutConfigureOptionDialog(hwnd, st);
+        SetStatus(T(L"已更新 Option 分组显示", L"Option grouping updated"));
+        return 0;
+      }
+      if (id == IDC_OPT_PICK && HIWORD(wParam) == CBN_SELCHANGE) {
+        const int idx = static_cast<int>(SendMessageW(g_opt_pick, CB_GETCURSEL, 0, 0));
+        if (idx != CB_ERR) {
+          const int n = static_cast<int>(SendMessageW(g_opt_pick, CB_GETLBTEXTLEN, static_cast<WPARAM>(idx), 0));
+          if (n > 0) {
+            std::wstring val(static_cast<size_t>(n), L'\0');
+            SendMessageW(g_opt_pick, CB_GETLBTEXT, static_cast<WPARAM>(idx), reinterpret_cast<LPARAM>(val.data()));
+            SetWindowTextW(g_opt_custom, val.c_str());
+          }
+        }
+        return 0;
+      }
+      if (id == IDC_OPT_APPLY) {
+        if (g_selected_option_idx < 0 || g_selected_option_idx >= static_cast<int>(g_options.size())) {
+          AppendLog(L"[错误] 请先在 Option 表中选择一个变量。\r\n");
+          return 0;
+        }
+        std::wstring newv;
+        GetEditText(g_opt_custom, newv);
+        TrimInPlace(newv);
+        if (newv.empty()) {
+          const int idx = static_cast<int>(SendMessageW(g_opt_pick, CB_GETCURSEL, 0, 0));
+          if (idx != CB_ERR) {
+            const int n = static_cast<int>(SendMessageW(g_opt_pick, CB_GETLBTEXTLEN, static_cast<WPARAM>(idx), 0));
+            if (n > 0) {
+              newv.assign(static_cast<size_t>(n), L'\0');
+              SendMessageW(g_opt_pick, CB_GETLBTEXT, static_cast<WPARAM>(idx), reinterpret_cast<LPARAM>(newv.data()));
+            }
+          }
+        }
+        if (newv.empty()) {
+          AppendLog(L"[错误] 请输入值或从候选中选择。\r\n");
+          return 0;
+        }
+        g_options[static_cast<size_t>(g_selected_option_idx)].value = newv;
+        const bool warned =
+            SoftValidateOptionValue(g_options[static_cast<size_t>(g_selected_option_idx)], newv);
+        RebuildOptionsListView();
+        if (!warned)
+          SetStatus(T(L"已更新 Option 值", L"Option value updated"));
+        return 0;
+      }
+      if (id == IDM_OPT_COPY_KEY || id == IDM_OPT_COPY_KEY_VALUE || id == IDM_OPT_RESET_DEFAULT) {
+        HandleOptionContextAction(st->owner ? st->owner : hwnd, id);
+        return 0;
+      }
+      if ((HWND)lParam == st->btn_ok) {
+        st->accepted = true;
+        DestroyWindow(hwnd);
+        return 0;
+      }
+      if ((HWND)lParam == st->btn_cancel) {
+        st->accepted = false;
+        DestroyWindow(hwnd);
+        return 0;
+      }
+      return 0;
+    }
+    case WM_NOTIFY: {
+      if (!st)
+        return 0;
+      const auto* hdr = reinterpret_cast<NMHDR*>(lParam);
+      if (!hdr)
+        return 0;
+      if (hdr->idFrom == IDC_VARS && hdr->code == LVN_ITEMCHANGED) {
+        const int row = ListView_GetNextItem(g_vars, -1, LVNI_SELECTED);
+        if (row < 0 || row >= static_cast<int>(g_row_to_option_idx.size())) {
+          g_selected_option_idx = -1;
+          SyncOptionEditorFromSelection();
+          return 0;
+        }
+        g_selected_option_idx = g_row_to_option_idx[static_cast<size_t>(row)];
+        SyncOptionEditorFromSelection();
+        return 0;
+      }
+      return 0;
+    }
+    case WM_DESTROY:
+      g_vars = nullptr;
+      g_lbl_vars = nullptr;
+      g_opt_group = nullptr;
+      g_opt_pick = nullptr;
+      g_opt_custom = nullptr;
+      g_opt_apply = nullptr;
+      return DefWindowProcW(hwnd, msg, wParam, lParam);
+    case WM_CLOSE:
+      DestroyWindow(hwnd);
+      return 0;
+    default:
+      return DefWindowProcW(hwnd, msg, wParam, lParam);
+  }
+}
+
+bool ShowConfigureOptionDialog(HWND owner) {
+  static bool cls_registered = false;
+  static constexpr wchar_t kClass[] = L"UpGuiConfigureOptionDialogClass";
+  if (!cls_registered) {
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = ConfigureOptionWndProc;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = kClass;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    RegisterClassW(&wc);
+    cls_registered = true;
+  }
+  ConfigureOptionDialogState st{};
+  st.owner = owner;
+  EnableWindow(owner, FALSE);
+  RECT rc{};
+  GetWindowRect(owner, &rc);
+  HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kClass, T(L"configure 选项设置", L"configure options"),
+                             WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE | WS_THICKFRAME, rc.left + 50, rc.top + 40,
+                             760, 520, owner, nullptr, GetModuleHandleW(nullptr), &st);
+  if (!dlg) {
+    EnableWindow(owner, TRUE);
+    return false;
+  }
+  MSG msg{};
+  while (IsWindow(dlg) && GetMessageW(&msg, nullptr, 0, 0) > 0) {
+    if (!IsDialogMessageW(dlg, &msg)) {
+      TranslateMessage(&msg);
+      DispatchMessageW(&msg);
+    }
+  }
+  EnableWindow(owner, TRUE);
+  SetActiveWindow(owner);
+  return st.accepted;
 }
 
 void CreateToolbarButtons(HWND tb) {
@@ -2427,12 +2935,12 @@ void CreateToolbarButtons(HWND tb) {
     const wchar_t* text;
   };
   const Entry entries[] = {
-      {IDC_CONFIGURE, STD_PROPERTIES, L"configure"},
-      {IDC_BUILD, STD_REPLACE, L"build"},
-      {IDC_RUN, STD_FILENEW, L"run"},
-      {IDC_TEST, STD_FIND, L"test"},
-      {IDC_PACK, STD_PRINT, L"pack"},
-      {IDC_ENV_SETTINGS, STD_HELP, L"env"},
+      {IDC_CONFIGURE, STD_PROPERTIES, T(L"配置", L"configure")},
+      {IDC_BUILD, STD_REPLACE, T(L"编译", L"build")},
+      {IDC_RUN, STD_FILENEW, T(L"运行", L"run")},
+      {IDC_TEST, STD_FIND, T(L"测试", L"test")},
+      {IDC_PACK, STD_PRINT, T(L"打包", L"pack")},
+      {IDC_ENV_SETTINGS, STD_HELP, T(L"环境", L"env")},
   };
 
   std::vector<TBBUTTON> buttons;
@@ -2452,10 +2960,114 @@ void CreateToolbarButtons(HWND tb) {
   SendMessageW(tb, TB_AUTOSIZE, 0, 0);
 }
 
+void DestroyMainMenuBar(HWND hwnd) {
+  HMENU bar = GetMenu(hwnd);
+  if (!bar)
+    return;
+  SetMenu(hwnd, nullptr);
+  DestroyMenu(bar);
+}
+
+void SetMainWindowLocalizedControlTexts() {
+  if (!g_hwnd)
+    return;
+  if (g_lbl_path)
+    SetWindowTextW(g_lbl_path, T(L"工作目录", L"CWD"));
+  if (g_browse)
+    SetWindowTextW(g_browse, T(L"浏览…", L"Browse…"));
+  if (g_lbl_scan)
+    SetWindowTextW(g_lbl_scan, T(L"扫描目录", L"Scan dirs"));
+  if (g_scan_add)
+    SetWindowTextW(g_scan_add, T(L"添加", L"+Add"));
+  if (g_scan_remove)
+    SetWindowTextW(g_scan_remove, T(L"删除", L"-Del"));
+  if (g_scan_up)
+    SetWindowTextW(g_scan_up, T(L"上移", L"Up"));
+  if (g_scan_down)
+    SetWindowTextW(g_scan_down, T(L"下移", L"Down"));
+  if (g_lbl_build_dir)
+    SetWindowTextW(g_lbl_build_dir, T(L"构建目录", L"Build dir"));
+  if (g_lbl_install_dir)
+    SetWindowTextW(g_lbl_install_dir, T(L"安装目录", L"Install dir"));
+  if (g_lbl_run)
+    SetWindowTextW(g_lbl_run, T(L"运行目标", L"Run target"));
+  if (g_lbl_extra)
+    SetWindowTextW(g_lbl_extra, T(L"运行参数", L"Extra args"));
+  if (g_lbl_test)
+    SetWindowTextW(g_lbl_test, T(L"单元测试", L"Tests"));
+  if (g_log_copy)
+    SetWindowTextW(g_log_copy, T(L"复制日志", L"Copy log"));
+  if (g_log_clear)
+    SetWindowTextW(g_log_clear, T(L"清空日志", L"Clear log"));
+  if (g_opt_apply)
+    SetWindowTextW(g_opt_apply, T(L"应用到选中项", L"Apply to selection"));
+}
+
+void RefreshVarsListColumnHeaders() {
+  if (!g_vars)
+    return;
+  LVCOLUMNW col{};
+  col.mask = LVCF_TEXT;
+  col.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(T(L"变量名", L"Name")));
+  SendMessageW(g_vars, LVM_SETCOLUMNW, 0, reinterpret_cast<LPARAM>(&col));
+  col.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(T(L"值", L"Value")));
+  SendMessageW(g_vars, LVM_SETCOLUMNW, 1, reinterpret_cast<LPARAM>(&col));
+  col.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(T(L"候选", L"Choices")));
+  SendMessageW(g_vars, LVM_SETCOLUMNW, 2, reinterpret_cast<LPARAM>(&col));
+}
+
+void RebuildMainToolbar(HWND parent) {
+  const HFONT ui = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+  if (g_toolbar) {
+    DestroyWindow(g_toolbar);
+    g_toolbar = nullptr;
+  }
+  g_toolbar =
+      CreateWindowExW(0, TOOLBARCLASSNAMEW, nullptr,
+                      WS_CHILD | WS_VISIBLE | TBSTYLE_FLAT | TBSTYLE_TOOLTIPS | TBSTYLE_LIST | CCS_NODIVIDER |
+                          CCS_NOPARENTALIGN,
+                      0, 0, 0, 0, parent, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_TOOLBAR)),
+                      GetModuleHandleW(nullptr), nullptr);
+  CreateToolbarButtons(g_toolbar);
+  SendMessageW(g_toolbar, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+  LayoutChildren(parent);
+}
+
+std::wstring InitialWelcomeLogText() {
+  if (g_ui_lang_zh) {
+    return L"up-gui：在「当前工作目录 (CWD)」下调用同目录的 up.exe。\r\n"
+           L"「运行参数」可加 --scan 指定额外扫描根（与 CWD 相同的路径不会重复传入）；up 默认已扫描当前工作目录。\r\n"
+           L"工具栏与「操作」菜单均可触发 configure / build / test / pack / run。\r\n"
+           L"运行目标与单元测试列表会在 configure 成功后自动刷新。\r\n"
+           L"点击工具栏「configure」可在弹窗中编辑 Option（含按前缀分组）。\r\n"
+           L"使用菜单「语言」可切换界面语言。\r\n\r\n";
+  }
+  return L"up-gui runs up.exe from the same folder as up-gui.exe, using the working directory (CWD).\r\n"
+         L"Use \"Extra args\" to pass --scan for extra scan roots (duplicates of CWD are skipped); up already scans CWD.\r\n"
+         L"The toolbar and Actions menu trigger configure / build / test / pack / run.\r\n"
+         L"Run targets and test lists refresh after a successful configure.\r\n"
+         L"Click toolbar \"configure\" to edit Options (including prefix grouping).\r\n"
+         L"Use the Language menu to switch UI language.\r\n\r\n";
+}
+
+void ApplyMainWindowLanguage(HWND hwnd) {
+  if (!hwnd)
+    return;
+  const bool running = g_running.load();
+  DestroyMainMenuBar(hwnd);
+  CreateMainMenu(hwnd);
+  DrawMenuBar(hwnd);
+  SetMainWindowLocalizedControlTexts();
+  RefreshVarsListColumnHeaders();
+  RebuildMainToolbar(hwnd);
+  SetUiRunning(running);
+}
+
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
   switch (msg) {
     case WM_CREATE:
       g_hwnd = hwnd;
+      LoadGuiEnvSettings();
       CreateMainMenu(hwnd);
 
       g_toolbar =
@@ -2469,74 +3081,61 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       g_path = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0,
                                0, 100, 24, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_PATH)),
                                GetModuleHandleW(nullptr), nullptr);
-      g_lbl_path = CreateWindowExW(0, L"STATIC", L"CWD", WS_CHILD | WS_VISIBLE, 0, 0, 72, 20, hwnd,
+      g_lbl_path = CreateWindowExW(0, L"STATIC", T(L"工作目录", L"CWD"), WS_CHILD | WS_VISIBLE, 0, 0, 72, 20, hwnd,
                                    reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LBL_PATH)),
                                    GetModuleHandleW(nullptr), nullptr);
-      g_browse = CreateWindowExW(0, L"BUTTON", L"浏览…", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 72, 28, hwnd,
+      g_browse = CreateWindowExW(0, L"BUTTON", T(L"浏览…", L"Browse…"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 72, 28, hwnd,
                                  reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_BROWSE)), GetModuleHandleW(nullptr),
                                  nullptr);
-      g_lbl_scan = CreateWindowExW(0, L"STATIC", L"Scan Dir", WS_CHILD | WS_VISIBLE, 0, 0, 72, 20, hwnd,
+      g_lbl_scan = CreateWindowExW(0, L"STATIC", T(L"扫描目录", L"Scan dirs"), WS_CHILD | WS_VISIBLE, 0, 0, 72, 20, hwnd,
                                    reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LBL_SCAN)),
                                    GetModuleHandleW(nullptr), nullptr);
       g_scan_list = CreateWindowExW(WS_EX_CLIENTEDGE, L"LISTBOX", L"",
                                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | LBS_NOTIFY | WS_VSCROLL | LBS_NOINTEGRALHEIGHT,
                                     0, 0, 220, 104, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_SCAN_LIST)),
                                     GetModuleHandleW(nullptr), nullptr);
-      g_scan_add = CreateWindowExW(0, L"BUTTON", L"+Add", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 66, 24, hwnd,
+      g_scan_add = CreateWindowExW(0, L"BUTTON", T(L"添加", L"+Add"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 66, 24, hwnd,
                                    reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_SCAN_ADD)),
                                    GetModuleHandleW(nullptr), nullptr);
-      g_scan_remove = CreateWindowExW(0, L"BUTTON", L"-Del", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 66, 24, hwnd,
+      g_scan_remove = CreateWindowExW(0, L"BUTTON", T(L"删除", L"-Del"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 66, 24, hwnd,
                                       reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_SCAN_REMOVE)),
                                       GetModuleHandleW(nullptr), nullptr);
-      g_scan_up = CreateWindowExW(0, L"BUTTON", L"Up", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 66, 24, hwnd,
+      g_scan_up = CreateWindowExW(0, L"BUTTON", T(L"上移", L"Up"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 66, 24, hwnd,
                                   reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_SCAN_UP)),
                                   GetModuleHandleW(nullptr), nullptr);
-      g_scan_down = CreateWindowExW(0, L"BUTTON", L"Down", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 66, 24, hwnd,
+      g_scan_down = CreateWindowExW(0, L"BUTTON", T(L"下移", L"Down"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 66, 24, hwnd,
                                     reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_SCAN_DOWN)),
                                     GetModuleHandleW(nullptr), nullptr);
 
-      g_vars = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
-                               WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SINGLESEL | LVS_NOSORTHEADER, 0, 0, 100, 80,
-                               hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_VARS)), GetModuleHandleW(nullptr),
-                               nullptr);
-      g_vars_tree = CreateWindowExW(WS_EX_CLIENTEDGE, WC_TREEVIEWW, L"",
-                                    WS_CHILD | WS_VISIBLE | WS_TABSTOP | TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT |
-                                        TVS_SHOWSELALWAYS,
-                                    0, 0, 100, 80, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_VARS_TREE)),
+      g_lbl_build_dir = CreateWindowExW(0, L"STATIC", T(L"构建目录", L"Build dir"), WS_CHILD | WS_VISIBLE, 0, 0, 72, 20, hwnd,
+                                        reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LBL_BUILD_DIR)),
+                                        GetModuleHandleW(nullptr), nullptr);
+      g_build_dir = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+                                    WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_READONLY,
+                                    0, 0, 100, 24, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_BUILD_DIR)),
                                     GetModuleHandleW(nullptr), nullptr);
-      g_lbl_vars = CreateWindowExW(0, L"STATIC", L"Option", WS_CHILD | WS_VISIBLE, 0, 0, 72, 20, hwnd,
-                                   reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LBL_VARS)),
-                                   GetModuleHandleW(nullptr), nullptr);
-      g_opt_group = CreateWindowExW(0, L"BUTTON", L"按前缀分组显示", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX, 0, 0,
-                                    170, 24, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_OPT_GROUP)),
-                                    GetModuleHandleW(nullptr), nullptr);
-      SendMessageW(g_opt_group, BM_SETCHECK, BST_CHECKED, 0);
-      g_opt_pick = CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
-                                   0, 0, 120, 220, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_OPT_PICK)),
-                                   GetModuleHandleW(nullptr), nullptr);
-      g_opt_custom = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0,
-                                     0, 160, 26, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_OPT_CUSTOM)),
-                                     GetModuleHandleW(nullptr), nullptr);
-      g_opt_apply = CreateWindowExW(0, L"BUTTON", L"应用到选中项", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 120, 28, hwnd,
-                                    reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_OPT_APPLY)),
-                                    GetModuleHandleW(nullptr), nullptr);
-      InitVarsList(g_vars);
-      LoadGuiEnvSettings();
+      g_lbl_install_dir = CreateWindowExW(0, L"STATIC", T(L"安装目录", L"Install dir"), WS_CHILD | WS_VISIBLE, 0, 0, 72, 20, hwnd,
+                                          reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LBL_INSTALL_DIR)),
+                                          GetModuleHandleW(nullptr), nullptr);
+      g_install_dir = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+                                      WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | ES_READONLY,
+                                      0, 0, 100, 24, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_INSTALL_DIR)),
+                                      GetModuleHandleW(nullptr), nullptr);
 
-      g_lbl_extra = CreateWindowExW(0, L"STATIC", L"附加参数", WS_CHILD | WS_VISIBLE, 0, 0, 72, 20, hwnd,
-                                    reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LBL_EXTRA)),
-                                    GetModuleHandleW(nullptr), nullptr);
-      g_extra = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0,
-                                0, 100, 26, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_EXTRA)),
-                                GetModuleHandleW(nullptr), nullptr);
-      g_lbl_run = CreateWindowExW(0, L"STATIC", L"运行目标", WS_CHILD | WS_VISIBLE, 0, 0, 72, 20, hwnd,
+      g_lbl_run = CreateWindowExW(0, L"STATIC", T(L"运行目标", L"Run target"), WS_CHILD | WS_VISIBLE, 0, 0, 72, 20, hwnd,
                                   reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LBL_RUN)),
                                   GetModuleHandleW(nullptr), nullptr);
       g_run_target =
           CreateWindowExW(0, WC_COMBOBOXW, L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, 0,
                           0, 100, 220, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_RUNTARGET)),
                           GetModuleHandleW(nullptr), nullptr);
-      g_lbl_test = CreateWindowExW(0, L"STATIC", L"单元测试", WS_CHILD | WS_VISIBLE, 0, 0, 72, 20, hwnd,
+      g_lbl_extra = CreateWindowExW(0, L"STATIC", T(L"运行参数", L"Extra args"), WS_CHILD | WS_VISIBLE, 0, 0, 72, 20, hwnd,
+                                    reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LBL_EXTRA)),
+                                    GetModuleHandleW(nullptr), nullptr);
+      g_extra = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0,
+                                0, 100, 26, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_EXTRA)),
+                                GetModuleHandleW(nullptr), nullptr);
+      g_lbl_test = CreateWindowExW(0, L"STATIC", T(L"单元测试", L"Tests"), WS_CHILD | WS_VISIBLE, 0, 0, 72, 20, hwnd,
                                    reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LBL_TEST)),
                                    GetModuleHandleW(nullptr), nullptr);
       g_test_target =
@@ -2553,16 +3152,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
           CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_NOTIFY | SS_ETCHEDHORZ, 0, 0, 100, 6, hwnd,
                           reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LOG_SPLITTER)), GetModuleHandleW(nullptr), nullptr);
       g_log_copy =
-          CreateWindowExW(0, L"BUTTON", L"复制内容", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 88, 26, hwnd,
+          CreateWindowExW(0, L"BUTTON", T(L"复制日志", L"Copy log"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 88, 26, hwnd,
                           reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LOG_COPY)), GetModuleHandleW(nullptr), nullptr);
       g_log_clear =
-          CreateWindowExW(0, L"BUTTON", L"清理内容", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 88, 26, hwnd,
+          CreateWindowExW(0, L"BUTTON", T(L"清空日志", L"Clear log"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 88, 26, hwnd,
                           reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LOG_CLEAR)), GetModuleHandleW(nullptr), nullptr);
 
       g_status = CreateWindowExW(0, STATUSCLASSNAMEW, nullptr, WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP, 0, 0, 0, 0,
                                  hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_STATUS)),
                                  GetModuleHandleW(nullptr), nullptr);
-      SetStatus(L"Ready");
+      SetStatus(T(L"就绪", L"Ready"));
 
       {
         const HFONT ui = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
@@ -2575,17 +3174,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         SendMessageW(g_scan_remove, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
         SendMessageW(g_scan_up, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
         SendMessageW(g_scan_down, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
-        SendMessageW(g_extra, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
         SendMessageW(g_run_target, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+        SendMessageW(g_extra, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
         SendMessageW(g_test_target, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
         SendMessageW(g_browse, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
-        SendMessageW(g_vars, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
-        SendMessageW(g_vars_tree, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
-        SendMessageW(g_lbl_vars, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
-        SendMessageW(g_opt_group, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
-        SendMessageW(g_opt_pick, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
-        SendMessageW(g_opt_custom, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
-        SendMessageW(g_opt_apply, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+        SendMessageW(g_lbl_build_dir, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+        SendMessageW(g_build_dir, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+        SendMessageW(g_lbl_install_dir, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+        SendMessageW(g_install_dir, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
         SendMessageW(g_lbl_extra, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
         SendMessageW(g_lbl_run, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
         SendMessageW(g_lbl_test, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
@@ -2595,12 +3191,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         SendMessageW(g_log_clear, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
       }
 
-      AppendLogRaw(
-          L"up-gui：在「当前工作目录 (CWD)」下调用同目录的 up.exe。\r\n"
-          L"「附加参数」可填例如 --scan test_projects（仓库根 + 多包扫描）。\r\n"
-          L"工具栏与「操作」菜单均可触发 configure / build / test / pack / run。\r\n"
-          L"运行目标与单元测试列表会在 configure 成功后自动刷新。\r\n"
-          L"Option 列表支持按前缀分组显示。\r\n\r\n");
+      AppendLogRaw(InitialWelcomeLogText());
       // CWD 默认留空，等待用户明确选择/输入。
       LayoutChildren(hwnd);
       return 0;
@@ -2691,10 +3282,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (!pack->output.empty())
           AppendLogRaw(pack->output);
         wchar_t tail[160]{};
-        swprintf_s(tail, L"\r\n[退出码 %lu]\r\n", static_cast<unsigned long>(pack->exit_code));
+        if (g_ui_lang_zh)
+          swprintf_s(tail, L"\r\n[退出码 %lu]\r\n", static_cast<unsigned long>(pack->exit_code));
+        else
+          swprintf_s(tail, L"\r\n[exit code %lu]\r\n", static_cast<unsigned long>(pack->exit_code));
         AppendLogRaw(tail);
         wchar_t st[96]{};
-        swprintf_s(st, L"Done (exit code %lu)", static_cast<unsigned long>(pack->exit_code));
+        if (g_ui_lang_zh)
+          swprintf_s(st, L"完成（退出码 %lu）", static_cast<unsigned long>(pack->exit_code));
+        else
+          swprintf_s(st, L"Done (exit code %lu)", static_cast<unsigned long>(pack->exit_code));
         SetStatus(st);
         if (pack->exit_code == 0 && g_last_up_args.rfind(L"configure", 0) == 0) {
           RefreshRunTargetListFromPath();
@@ -2718,21 +3315,36 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         PostMessageW(hwnd, WM_CLOSE, 0, 0);
         return 0;
       }
+      if (id == IDM_LANG_ZH) {
+        g_ui_lang_zh = true;
+        SaveGuiEnvSettings();
+        ApplyMainWindowLanguage(hwnd);
+        return 0;
+      }
+      if (id == IDM_LANG_EN) {
+        g_ui_lang_zh = false;
+        SaveGuiEnvSettings();
+        ApplyMainWindowLanguage(hwnd);
+        return 0;
+      }
       if (id == IDM_UP_HELP) {
         ShowUpHelpInfo(hwnd);
         return 0;
       }
       if (id == IDM_ABOUT) {
         MessageBoxW(hwnd,
-                    L"up-gui：调用同目录 up.exe 的本地外壳。\n布局：菜单栏、工具栏、当前工作目录(CWD)、Option、附加参数、运行目标列表、单元测试列表、日志、状态栏。",
-                    L"关于 up-gui", MB_ICONINFORMATION | MB_OK);
+                    T(L"up-gui：调用同目录 up.exe 的本地外壳。\n布局：菜单栏、工具栏、当前工作目录(CWD)、Build Dir、安装目录、运行目标与运行参数（同行）、单元测试列表、日志、状态栏；Option 在 configure 弹窗中编辑。",
+                        L"up-gui is a local shell that runs up.exe from the same folder.\n"
+                        L"Layout: menu bar, toolbar, working directory (CWD), build/install dirs, run targets and extra "
+                        L"args, tests, log, status bar; Options are edited in the configure dialog."),
+                    T(L"关于 up-gui", L"About up-gui"), MB_ICONINFORMATION | MB_OK);
         return 0;
       }
       if (id == IDC_ENV_SETTINGS) {
         if (ShowEnvSettingsDialog(hwnd))
-          SetStatus(L"Environment settings updated");
+          SetStatus(T(L"已更新编译环境设置", L"Environment settings updated"));
         else
-          SetStatus(L"Environment settings unchanged");
+          SetStatus(T(L"编译环境设置未更改", L"Environment settings unchanged"));
         return 0;
       }
       if (id == IDC_LOG_COPY) {
@@ -2744,14 +3356,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
           text.resize(static_cast<size_t>(len));
         }
         if (CopyTextToClipboard(hwnd, text))
-          SetStatus(L"Log copied");
+          SetStatus(T(L"已复制日志", L"Log copied"));
         else
-          SetStatus(L"Copy failed");
+          SetStatus(T(L"复制失败", L"Copy failed"));
         return 0;
       }
       if (id == IDC_LOG_CLEAR) {
         SetWindowTextW(g_log, L"");
-        SetStatus(L"Log cleared");
+        SetStatus(T(L"已清空日志", L"Log cleared"));
         return 0;
       }
 
@@ -2810,68 +3422,22 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         SendMessageW(g_scan_list, LB_SETCURSEL, static_cast<WPARAM>(dst), 0);
         return 0;
       }
-      if (id == IDC_OPT_GROUP) {
-        RebuildOptionsListView();
-        LayoutChildren(hwnd);
-        SetStatus(L"Option grouping updated");
-        return 0;
-      }
-      if (id == IDC_OPT_PICK && HIWORD(wParam) == CBN_SELCHANGE) {
-        const int idx = static_cast<int>(SendMessageW(g_opt_pick, CB_GETCURSEL, 0, 0));
-        if (idx != CB_ERR) {
-          const int n = static_cast<int>(SendMessageW(g_opt_pick, CB_GETLBTEXTLEN, static_cast<WPARAM>(idx), 0));
-          if (n > 0) {
-            std::wstring val(static_cast<size_t>(n), L'\0');
-            SendMessageW(g_opt_pick, CB_GETLBTEXT, static_cast<WPARAM>(idx), reinterpret_cast<LPARAM>(val.data()));
-            SetWindowTextW(g_opt_custom, val.c_str());
-          }
-        }
-        return 0;
-      }
-      if (id == IDC_OPT_APPLY) {
-        if (g_selected_option_idx < 0 || g_selected_option_idx >= static_cast<int>(g_options.size())) {
-          AppendLog(L"[错误] 请先在 Option 表中选择一个变量。\r\n");
-          return 0;
-        }
-        std::wstring newv;
-        GetEditText(g_opt_custom, newv);
-        TrimInPlace(newv);
-        if (newv.empty()) {
-          const int idx = static_cast<int>(SendMessageW(g_opt_pick, CB_GETCURSEL, 0, 0));
-          if (idx != CB_ERR) {
-            const int n = static_cast<int>(SendMessageW(g_opt_pick, CB_GETLBTEXTLEN, static_cast<WPARAM>(idx), 0));
-            if (n > 0) {
-              newv.assign(static_cast<size_t>(n), L'\0');
-              SendMessageW(g_opt_pick, CB_GETLBTEXT, static_cast<WPARAM>(idx), reinterpret_cast<LPARAM>(newv.data()));
-            }
-          }
-        }
-        if (newv.empty()) {
-          AppendLog(L"[错误] 请输入值或从候选中选择。\r\n");
-          return 0;
-        }
-        g_options[static_cast<size_t>(g_selected_option_idx)].value = newv;
-        const bool warned =
-            SoftValidateOptionValue(g_options[static_cast<size_t>(g_selected_option_idx)], newv);
-        RebuildOptionsListView();
-        if (!warned)
-          SetStatus(L"Option value updated");
-        return 0;
-      }
-      if (id == IDM_OPT_COPY_KEY || id == IDM_OPT_COPY_KEY_VALUE || id == IDM_OPT_RESET_DEFAULT) {
-        HandleOptionContextAction(hwnd, id);
-        return 0;
-      }
       if (id == IDC_CONFIGURE) {
-        RunUpAsync(L"configure");
+        if (ShowConfigureOptionDialog(hwnd))
+          RunUpAsync(L"configure");
         return 0;
       }
       if (id == IDC_BUILD) {
-        RunUpAsync(L"build");
+        std::wstring line = L"build";
+        if (!AppendBuildDirFlagOrAbort(line, true))
+          return 0;
+        RunUpAsync(line);
         return 0;
       }
       if (id == IDC_TEST) {
         std::wstring testarg = L"test";
+        if (!AppendInstallDirFlagOrAbort(testarg, true))
+          return 0;
         const int idx = static_cast<int>(SendMessageW(g_test_target, CB_GETCURSEL, 0, 0));
         if (idx != CB_ERR) {
           const int n = static_cast<int>(SendMessageW(g_test_target, CB_GETLBTEXTLEN, static_cast<WPARAM>(idx), 0));
@@ -2889,7 +3455,23 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         return 0;
       }
       if (id == IDC_PACK) {
-        RunUpAsync(L"pack");
+        std::wstring line = L"pack";
+        std::wstring inst;
+        if (g_install_dir)
+          GetEditText(g_install_dir, inst);
+        TrimInPlace(inst);
+        if (inst.empty()) {
+          AppendLog(L"[错误] pack 需要「安装目录」或 install 子目录名（对应 CLI：--install-dir-name）。\r\n");
+          return 0;
+        }
+        const std::wstring leaf = IntermediateLeafFromPathishEdit(inst);
+        if (leaf.empty()) {
+          AppendLog(L"[错误] 无法从安装目录得到有效的 --install-dir-name。\r\n");
+          return 0;
+        }
+        line += L" --install-dir-name ";
+        line += QuoteWinArg(leaf);
+        RunUpAsync(line);
         return 0;
       }
       if (id == IDC_RUN) {
@@ -2905,75 +3487,15 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         }
         std::wstring tgt(static_cast<size_t>(n), L'\0');
         SendMessageW(g_run_target, CB_GETLBTEXT, static_cast<WPARAM>(idx), reinterpret_cast<LPARAM>(tgt.data()));
-        std::wstring runarg = L"run ";
+        std::wstring runarg = L"run";
+        if (!AppendInstallDirFlagOrAbort(runarg, true))
+          return 0;
+        runarg += L' ';
         if (tgt.find(L' ') != std::wstring::npos)
           runarg += L"\"" + tgt + L"\"";
         else
           runarg += tgt;
         RunUpAsync(runarg);
-        return 0;
-      }
-      return 0;
-    }
-
-    case WM_CONTEXTMENU: {
-      HWND src = reinterpret_cast<HWND>(wParam);
-      if (src != g_vars_tree)
-        return 0;
-      POINT pt{};
-      pt.x = GET_X_LPARAM(lParam);
-      pt.y = GET_Y_LPARAM(lParam);
-      if (pt.x == -1 && pt.y == -1) {
-        RECT rc{};
-        GetWindowRect(g_vars_tree, &rc);
-        pt.x = rc.left + 12;
-        pt.y = rc.top + 12;
-      }
-      POINT local = pt;
-      ScreenToClient(g_vars_tree, &local);
-      TVHITTESTINFO hti{};
-      hti.pt = local;
-      TreeView_HitTest(g_vars_tree, &hti);
-      if (!hti.hItem)
-        return 0;
-      TreeView_SelectItem(g_vars_tree, hti.hItem);
-
-      HMENU menu = CreatePopupMenu();
-      AppendMenuW(menu, MF_STRING, IDM_OPT_COPY_KEY, L"复制变量名");
-      AppendMenuW(menu, MF_STRING, IDM_OPT_COPY_KEY_VALUE, L"复制 KEY=VALUE");
-      AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-      AppendMenuW(menu, MF_STRING, IDM_OPT_RESET_DEFAULT, L"重置默认值");
-      TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_LEFTALIGN, pt.x, pt.y, 0, hwnd, nullptr);
-      DestroyMenu(menu);
-      return 0;
-    }
-
-    case WM_NOTIFY: {
-      const auto* hdr = reinterpret_cast<NMHDR*>(lParam);
-      if (!hdr)
-        return 0;
-      if (hdr->idFrom == IDC_VARS && hdr->code == LVN_ITEMCHANGED) {
-        const int row = ListView_GetNextItem(g_vars, -1, LVNI_SELECTED);
-        if (row < 0 || row >= static_cast<int>(g_row_to_option_idx.size())) {
-          g_selected_option_idx = -1;
-          SyncOptionEditorFromSelection();
-          return 0;
-        }
-        g_selected_option_idx = g_row_to_option_idx[static_cast<size_t>(row)];
-        SyncOptionEditorFromSelection();
-        return 0;
-      }
-      if (hdr->idFrom == IDC_VARS_TREE && hdr->code == TVN_SELCHANGEDW) {
-        const auto* n = reinterpret_cast<const NMTREEVIEWW*>(lParam);
-        if (n && n->itemNew.hItem) {
-          TVITEMW item{};
-          item.hItem = n->itemNew.hItem;
-          item.mask = TVIF_PARAM;
-          if (TreeView_GetItem(g_vars_tree, &item) && item.lParam >= 0) {
-            g_selected_option_idx = static_cast<int>(item.lParam);
-            SyncOptionEditorFromSelection();
-          }
-        }
         return 0;
       }
       return 0;

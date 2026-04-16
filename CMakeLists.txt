@@ -56,30 +56,40 @@ if(MSVC)
   target_compile_options(up PRIVATE /utf-8)
 endif()
 
+# up-gui: thin shell around up.exe — MUST NOT compile, include, or link any file under src/.
+# Only paths under src_gui/ are allowed as up-gui sources (enforced below).
 set(UP_GUI_CORE_SOURCES
   src_gui/core/gui_core_actions.cpp
 )
-
 if(WIN32)
-  add_executable(up-gui WIN32
-    src_gui/up_gui_win32.cpp
-    ${UP_GUI_CORE_SOURCES}
-  )
-  target_link_libraries(up-gui PRIVATE shell32 ole32 comctl32 user32 gdi32 uuid)
+  set(UP_GUI_PLATFORM_SOURCES src_gui/up_gui_win32.cpp)
 elseif(APPLE)
-  add_executable(up-gui
+  set(UP_GUI_PLATFORM_SOURCES
     src_gui/main/main_cocoa.mm
     src_gui/platform/cocoa_gui.mm
-    ${UP_GUI_CORE_SOURCES}
   )
+else()
+  set(UP_GUI_PLATFORM_SOURCES
+    src_gui/main/main_x11.cpp
+    src_gui/platform/xlib_gui.cpp
+  )
+endif()
+set(UP_GUI_ALL_SOURCES ${UP_GUI_PLATFORM_SOURCES} ${UP_GUI_CORE_SOURCES})
+foreach(_up_gui_src IN LISTS UP_GUI_ALL_SOURCES)
+  if(NOT "${_up_gui_src}" MATCHES "^src_gui/")
+    message(FATAL_ERROR "up-gui: every source file must be under src_gui/ (got: ${_up_gui_src})")
+  endif()
+endforeach()
+
+if(WIN32)
+  add_executable(up-gui WIN32 ${UP_GUI_ALL_SOURCES})
+  target_link_libraries(up-gui PRIVATE shell32 ole32 comctl32 user32 gdi32 uuid)
+elseif(APPLE)
+  add_executable(up-gui ${UP_GUI_ALL_SOURCES})
   find_library(COCOA_FRAMEWORK Cocoa)
   target_link_libraries(up-gui PRIVATE ${COCOA_FRAMEWORK})
 else()
-  add_executable(up-gui
-    src_gui/main/main_x11.cpp
-    src_gui/platform/xlib_gui.cpp
-    ${UP_GUI_CORE_SOURCES}
-  )
+  add_executable(up-gui ${UP_GUI_ALL_SOURCES})
   find_package(X11 REQUIRED)
   target_link_libraries(up-gui PRIVATE X11::X11)
 endif()

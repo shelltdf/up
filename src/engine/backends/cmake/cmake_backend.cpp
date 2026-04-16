@@ -142,7 +142,8 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
     return 5;
   }
   f << cm.str();
-  std::cout << "Wrote " << out_cmake << "\n";
+  // Flush before a later system(cmake) so captured stdout does not splice into this line.
+  std::cout << "Wrote " << out_cmake.string() << std::endl;
   return 0;
 }
 

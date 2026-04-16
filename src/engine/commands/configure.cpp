@@ -17,6 +17,7 @@
 #include <sstream>
 #include <chrono>
 #include <ctime>
+#include <optional>
 #include <vector>
 
 namespace up {
@@ -286,7 +287,8 @@ std::map<std::string, std::string> merge_up_options(const std::map<std::string, 
 
 int cmd_configure(const std::filesystem::path& cwd,
                   const std::vector<std::string>& scan_roots,
-                  const std::vector<std::string>& opt_kvs) {
+                  const std::vector<std::string>& opt_kvs,
+                  const std::optional<std::string>& build_dir_name_override) {
   std::vector<std::filesystem::path> roots;
   if (scan_roots.empty())
     roots.push_back(cwd);
@@ -428,9 +430,14 @@ int cmd_configure(const std::filesystem::path& cwd,
     std::cerr << "configure: unsupported UP_TARGET_BUILD_SYSTEM=" << seed_build_system << " (expected cmake/ninja)\n";
     return 7;
   }
-  auto opts = merge_up_options(
-      load_cached_up_options(default_build_root(cwd, seed_build_system) / host_arch / "up_cache.txt"),
-      opt_kvs);
+  const std::filesystem::path build_root =
+      build_dir_name_override.has_value()
+          ? (default_build_root(cwd, seed_build_system) / std::filesystem::u8path(*build_dir_name_override))
+          : (default_build_root(cwd, seed_build_system) / "default");
+  if (!require_ascii_path(build_root))
+    return 6;
+
+  auto opts = merge_up_options(load_cached_up_options(build_root / "up_cache.txt"), opt_kvs);
   const std::string cpu = arch_from_target_cpu(option_or_compat(opts, "UP_TARGET_CPU_ARCH", "UP_CPU_ARCH", host_arch));
   const std::string system = lower_ascii(option_or_compat(opts, "UP_TARGET_SYSTEM", "UP_SYSTEM", detect_host_system_tag()));
   const std::string dyn = lower_ascii(option_or_compat(opts, "UP_TARGET_DYNAMIC_LIBRARY", "UP_DYNAMIC_LIBRARY", "OFF"));
@@ -449,14 +456,8 @@ int cmd_configure(const std::filesystem::path& cwd,
   const std::string build_system = lower_ascii(option_or_compat(
       opts, "UP_TARGET_BUILD_SYSTEM", "UP_BUILD_SYSTEM", seed_build_system));
   const std::string arch = compose_arch_tag(system, cpu, build_system, toolchain, link_mode, config_mode, crt_mode);
-  const auto build_root = default_build_root(cwd, build_system) / arch;
-  if (!require_ascii_path(build_root))
-    return 6;
   std::filesystem::create_directories(build_root);
   const auto cache_path = build_root / "up_cache.txt";
-  if (arch != host_arch) {
-    opts = merge_up_options(load_cached_up_options(cache_path), opt_kvs);
-  }
 
   PackageDesc primary_pkg;
   std::vector<LoadedTarget> pkg_targets;

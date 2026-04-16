@@ -259,7 +259,7 @@ int write_ninja_file(const ConfigureGraphModel& model) {
   nf << "\n";
   nf << "default install\n";
 
-  std::cout << "Wrote " << ninja_path << "\n";
+  std::cout << "Wrote " << ninja_path.string() << std::endl;
   return 0;
 }
 

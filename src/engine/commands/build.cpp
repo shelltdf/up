@@ -8,12 +8,19 @@
 
 namespace up {
 
-int cmd_build(const std::filesystem::path& cwd) {
-  const std::string build_system_hint = resolve_build_system_from_cache(cwd);
-  const auto build_root = default_build_root(cwd, build_system_hint);
-  const std::string arch = resolve_arch_from_cache(cwd, build_root);
-  const auto opts = load_up_options(build_root, arch);
-  const auto src_dir = build_root / arch;
+int cmd_build(const std::filesystem::path& cwd, const std::filesystem::path& build_dir) {
+  (void)cwd;
+  const auto bd = std::filesystem::absolute(build_dir);
+  const auto cache = bd / "up_cache.txt";
+  if (!std::filesystem::exists(cache)) {
+    std::cerr << "build: missing " << cache << " (run `up configure` for this --build-dir-name first)\n";
+    return 2;
+  }
+  const auto opts = load_up_options_from_build_dir(bd);
+  std::string arch = read_plain_cache_value(cache, "arch");
+  if (arch.empty())
+    arch = arch_from_options(opts);
+  const auto src_dir = bd;
   const auto inst = default_install_root(cwd) / arch;
   const std::string build_system =
       option_or_compat(opts, "UP_TARGET_BUILD_SYSTEM", "UP_BUILD_SYSTEM", "cmake");

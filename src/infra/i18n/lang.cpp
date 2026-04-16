@@ -29,21 +29,23 @@ void print_usage(std::ostream& os) {
   if (zh()) {
     os << "up — 通用包/构建编排（原型）\n\n"
           "用法:\n"
-          "  up configure [--scan <目录>]... [--opt KEY=VALUE]...\n"
-          "  up build\n"
-          "  up run <可执行目标名>\n"
-          "  up test [测试目标名]\n"
-          "  up pack\n"
+          "  up configure [--build-dir-name <名>] [--scan <目录>]... [--opt KEY=VALUE]...\n"
+          "    （<名> 为 .intermediate/build 下的子目录名；省略时默认为 default）\n"
+          "  up build --build-dir-name <名>\n"
+          "  up run --install-dir-name <名> <可执行目标名>  （<名> 为 .intermediate/install 下的子目录名）\n"
+          "  up test --install-dir-name <名> [测试目标名]\n"
+          "  up pack --install-dir-name <名>...  （可重复，多架构）\n"
           "  up project\n"
           "  up --help | -h | help\n";
   } else {
     os << "up — generic package / build orchestrator (prototype)\n\n"
           "Usage:\n"
-          "  up configure [--scan <dir>]... [--opt KEY=VALUE]...\n"
-          "  up build\n"
-          "  up run <target_executable_name>\n"
-          "  up test [test_target_name]\n"
-          "  up pack\n"
+          "  up configure [--build-dir-name <leaf>] [--scan <dir>]... [--opt KEY=VALUE]...\n"
+          "    (<leaf> is a subdirectory name under .intermediate/build; default: default)\n"
+          "  up build --build-dir-name <leaf>\n"
+          "  up run --install-dir-name <leaf> <target_executable_name>  (<leaf> under .intermediate/install)\n"
+          "  up test --install-dir-name <leaf> [test_target_name]\n"
+          "  up pack --install-dir-name <leaf>...  (repeatable; multi-arch)\n"
           "  up project\n"
           "  up --help | -h | help\n";
   }

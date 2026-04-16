@@ -13,7 +13,6 @@ struct UpLaunchPlan {
 };
 
 std::wstring quote_arg(const std::wstring& s);
-std::vector<std::wstring> merge_scan_dirs_with_cwd(const std::vector<std::wstring>& scan_dirs, const std::wstring& cwd);
 void append_scan_args(std::wstring& args_no_exe, const std::vector<std::wstring>& scan_dirs, const std::wstring& cwd);
 
 UpLaunchPlan build_launch_plan(const std::wstring& up_exe,
