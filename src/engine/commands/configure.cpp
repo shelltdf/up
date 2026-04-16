@@ -88,6 +88,25 @@ bool require_ascii_path(const std::filesystem::path& p) {
   return true;
 }
 
+// True if candidate is root or strictly inside root (canonical paths).
+bool path_is_under_tree(const std::filesystem::path& root, const std::filesystem::path& candidate) {
+  std::error_code ec;
+  const std::filesystem::path rc = std::filesystem::weakly_canonical(std::filesystem::absolute(root), ec);
+  const std::filesystem::path cc = std::filesystem::weakly_canonical(std::filesystem::absolute(candidate), ec);
+  if (ec || rc.empty())
+    return false;
+  const std::filesystem::path rel = std::filesystem::relative(cc, rc, ec);
+  if (ec)
+    return false;
+  if (rel.empty() || rel == ".")
+    return true;
+  for (const auto& seg : rel) {
+    if (seg == "..")
+      return false;
+  }
+  return true;
+}
+
 std::string arch_from_target_cpu(std::string v) {
   return normalize_cpu_arch_tag(v);
 }
@@ -579,19 +598,15 @@ int cmd_configure(const std::filesystem::path& cwd,
     return 4;
   }
 
+  // Prefer std::filesystem::relative: manual iterator compare breaks on Windows when one path is 8.3 and the other is long.
   const auto rel_to_cwd = [](std::filesystem::path base, std::filesystem::path p) {
-    p = std::filesystem::weakly_canonical(std::filesystem::absolute(p));
-    base = std::filesystem::weakly_canonical(std::filesystem::absolute(base));
-    std::filesystem::path out;
-    auto b = base.begin();
-    auto i = p.begin();
-    for (; b != base.end() && i != p.end() && *b == *i; ++b, ++i) {
-    }
-    for (; b != base.end(); ++b)
-      out /= "..";
-    for (; i != p.end(); ++i)
-      out /= *i;
-    return out.lexically_normal().generic_string();
+    std::error_code ec;
+    base = std::filesystem::weakly_canonical(std::filesystem::absolute(base), ec);
+    p = std::filesystem::weakly_canonical(std::filesystem::absolute(p), ec);
+    const std::filesystem::path rel = std::filesystem::relative(p, base, ec);
+    if (!ec)
+      return rel.lexically_normal().generic_string();
+    return p.lexically_normal().generic_string();
   };
 
   const auto include_base_dir = [](const std::filesystem::path& target_dir, const TargetDesc::IncludeEntry& inc) {
@@ -737,14 +752,24 @@ int cmd_configure(const std::filesystem::path& cwd,
   std::set<InstallFileRule> install_files;
   std::set<InstallDirRule> asset_dirs;
   std::set<InstallFileRule> asset_files;
+  std::error_code ec_skip;
+  const std::filesystem::path install_staging_root =
+      std::filesystem::weakly_canonical(std::filesystem::absolute(default_install_root(cwd)), ec_skip);
   for (const auto& lt : build_targets) {
     for (const auto& inc_entry : lt.desc.includes) {
       if (inc_entry.kind == "dir") {
         const auto inc = (lt.target_dir / inc_entry.from).lexically_normal();
+        if (!install_staging_root.empty() && path_is_under_tree(install_staging_root, inc)) {
+          std::cerr << "configure: warning: skipping include <dir> under .intermediate/install (would nest installs): "
+                    << to_posix_path_string(inc) << "\n";
+          continue;
+        }
         install_dirs.insert({rel_to_cwd(build_root, inc), install_dest(inc_entry.to), inc_entry.preprocess_command,
                              inc_entry.postprocess_command});
       } else if (inc_entry.kind == "file") {
         const auto f = (lt.target_dir / inc_entry.from).lexically_normal();
+        if (!install_staging_root.empty() && path_is_under_tree(install_staging_root, f))
+          continue;
         install_files.insert({rel_to_cwd(build_root, f), install_dest(inc_entry.to), inc_entry.preprocess_command,
                               inc_entry.postprocess_command});
       } else if (inc_entry.kind == "glob") {
@@ -754,18 +779,28 @@ int cmd_configure(const std::filesystem::path& cwd,
                     << " in target " << lt.desc.name << "\n";
           continue;
         }
-        for (const auto& f : files)
+        for (const auto& f : files) {
+          if (!install_staging_root.empty() && path_is_under_tree(install_staging_root, f))
+            continue;
           install_files.insert({rel_to_cwd(build_root, f), install_dest(inc_entry.to), inc_entry.preprocess_command,
                                 inc_entry.postprocess_command});
+        }
       }
     }
     for (const auto& ae : lt.desc.assets) {
       if (ae.kind == "dir") {
         const auto d = (lt.target_dir / ae.from).lexically_normal();
+        if (!install_staging_root.empty() && path_is_under_tree(install_staging_root, d)) {
+          std::cerr << "configure: warning: skipping asset <dir> under .intermediate/install: "
+                    << to_posix_path_string(d) << "\n";
+          continue;
+        }
         asset_dirs.insert(
             {rel_to_cwd(build_root, d), asset_install_dest(ae.to), ae.preprocess_command, ae.postprocess_command});
       } else if (ae.kind == "file") {
         const auto f = (lt.target_dir / ae.from).lexically_normal();
+        if (!install_staging_root.empty() && path_is_under_tree(install_staging_root, f))
+          continue;
         asset_files.insert(
             {rel_to_cwd(build_root, f), asset_install_dest(ae.to), ae.preprocess_command, ae.postprocess_command});
       } else if (ae.kind == "glob") {
@@ -775,9 +810,12 @@ int cmd_configure(const std::filesystem::path& cwd,
                     << "\n";
           continue;
         }
-        for (const auto& f : files)
+        for (const auto& f : files) {
+          if (!install_staging_root.empty() && path_is_under_tree(install_staging_root, f))
+            continue;
           asset_files.insert(
               {rel_to_cwd(build_root, f), asset_install_dest(ae.to), ae.preprocess_command, ae.postprocess_command});
+        }
       }
     }
   }
@@ -807,6 +845,18 @@ int cmd_configure(const std::filesystem::path& cwd,
         tm.source_rules.push_back({std::filesystem::absolute(src).generic_string(), s.preprocess_command, s.postprocess_command});
       }
     }
+    if (tm.source_paths.empty() && !lt.desc.sources.empty()) {
+      for (const auto& rel : lt.desc.sources) {
+        const auto src = (lt.target_dir / rel).lexically_normal();
+        tm.source_paths.push_back(std::filesystem::absolute(src).generic_string());
+        tm.source_rules.push_back({std::filesystem::absolute(src).generic_string(), "", ""});
+      }
+    }
+    if (tm.source_paths.empty()) {
+      std::cerr << "configure: target \"" << lt.desc.name << "\" has no resolved source files (check <sources> / globs in "
+                << to_posix_path_string(lt.target_dir / "target.xml") << ")\n";
+      return 5;
+    }
     std::set<std::string> inc_dirs;
     for (const auto& inc_entry : lt.desc.includes) {
       const auto inc = include_base_dir(lt.target_dir, inc_entry);
@@ -815,11 +865,27 @@ int cmd_configure(const std::filesystem::path& cwd,
     }
     tm.include_dirs.assign(inc_dirs.begin(), inc_dirs.end());
     if (lt.desc.type == "executable") {
-      tm.links = local_lib_names;
       auto eit = exe_extra_links.find(lt.desc.name);
-      if (eit != exe_extra_links.end()) {
-        for (const auto& n : eit->second)
-          tm.links.push_back(n);
+      if (eit != exe_extra_links.end() && !eit->second.empty()) {
+        tm.links = eit->second;
+      } else {
+        // Avoid linking every library to every executable (breaks e.g. zlib + zlibstatic together on MSVC).
+        // When UP_TARGET_DYNAMIC_LIBRARY implies static link preference, only link static_library targets; vice versa.
+        tm.links.clear();
+        for (const auto& pl : pkg_targets) {
+          if (!is_lib(pl.desc))
+            continue;
+          if (link_mode == "static" && pl.desc.type == "static_library")
+            tm.links.push_back(pl.desc.name);
+          else if (link_mode == "dynamic" && pl.desc.type == "shared_library")
+            tm.links.push_back(pl.desc.name);
+        }
+        if (tm.links.empty()) {
+          for (const auto& pl : pkg_targets) {
+            if (is_lib(pl.desc))
+              tm.links.push_back(pl.desc.name);
+          }
+        }
       }
       std::sort(tm.links.begin(), tm.links.end());
       tm.links.erase(std::unique(tm.links.begin(), tm.links.end()), tm.links.end());

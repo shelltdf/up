@@ -2,6 +2,7 @@
 #include "project_import_common.hpp"
 
 #include <filesystem>
+#include <map>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -36,6 +37,7 @@ void import_autotools(const std::filesystem::path& scan_root, const std::filesys
     }
   }
 
+  std::map<std::string, int> bucket_claims;
   for (const auto& prog : bins) {
     const std::string var = prog + "_SOURCES";
     std::regex src_re("^\\s*" + var + "\\s*=\\s*(.+)\\s*$");
@@ -61,8 +63,10 @@ void import_autotools(const std::filesystem::path& scan_root, const std::filesys
         if (!ec && std::filesystem::exists(ap))
           abs.push_back(ap);
       }
-      project_import::push_target(out, write_root, project_import::sanitize_id(prog), project_import::sanitize_id(prog),
-                                  "executable", abs, warnings);
+      const std::string tname = project_import::sanitize_id(prog);
+      const std::string bucket =
+          project_import::resolve_target_xml_bucket(write_root, scan_root, tname, abs, bucket_claims);
+      project_import::push_target(out, write_root, bucket, tname, "executable", abs, warnings);
       break;
     }
   }

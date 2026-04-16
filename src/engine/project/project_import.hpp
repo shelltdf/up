@@ -23,7 +23,8 @@ struct ProbeResult {
 
 struct ImportedPackage {
   std::string package_name;
-  // Each entry: subdirectory name (under package root) and target description; paths in desc are relative to that subdir.
+  // Each entry: path under write_root (posix, may contain '/') where target.xml lives, plus TargetDesc whose paths are
+  // relative to write_root / that path.
   std::vector<std::pair<std::string, TargetDesc>> targets;
   std::vector<std::string> warnings;
 };

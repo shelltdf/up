@@ -65,7 +65,7 @@ int run_archive_pack(const PackBackendContext& ctx) {
 int run_build_backend(const BuildBackendContext& ctx, int failure_return_code) {
   const std::string command =
       equals_ci(ctx.build_system, "ninja") ? build_ninja_install_command(ctx) : build_cmake_build_command(ctx);
-  std::cout << command << "\n";
+  std::cout << command << "\n" << std::flush;
   const int code = std::system(command.c_str());
   if (code != 0) {
     std::cerr << "build: " << (equals_ci(ctx.build_system, "ninja") ? "ninja" : "cmake")

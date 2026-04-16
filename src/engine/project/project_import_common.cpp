@@ -6,9 +6,32 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 
 namespace up::project_import {
+
+namespace {
+
+std::string bucket_registry_key(const std::string& posix_rel_under_write_root) {
+  return posix_rel_under_write_root.empty() ? std::string(".") : posix_rel_under_write_root;
+}
+
+bool relative_path_has_parent_escape(const std::filesystem::path& rel) {
+  for (const auto& seg : rel) {
+    if (seg == "..")
+      return true;
+  }
+  return false;
+}
+
+std::string claim_dot_targets_bucket(const std::string& target_name, std::map<std::string, int>& bucket_claims) {
+  const std::string b = std::string(".targets/") + sanitize_id(target_name);
+  ++bucket_claims[bucket_registry_key(b)];
+  return b;
+}
+
+}  // namespace
 
 std::string read_file_text(const std::filesystem::path& path, std::string& error) {
   std::ifstream in(path, std::ios::binary);
@@ -67,6 +90,46 @@ bool looks_like_source_token(const std::string& t) {
   if (dot == std::string::npos)
     return false;
   return is_src_ext(t.substr(dot));
+}
+
+std::string resolve_target_xml_bucket(const std::filesystem::path& write_root,
+                                      const std::filesystem::path& preferred_dir_abs, const std::string& target_name,
+                                      const std::vector<std::filesystem::path>& abs_sources,
+                                      std::map<std::string, int>& bucket_claims) {
+  std::error_code ec;
+  std::filesystem::path wr = std::filesystem::weakly_canonical(write_root, ec);
+  if (ec)
+    wr = std::filesystem::absolute(write_root);
+  std::filesystem::path pref = std::filesystem::weakly_canonical(preferred_dir_abs, ec);
+  if (ec)
+    pref = std::filesystem::absolute(preferred_dir_abs);
+
+  const auto rel_opt = try_relative(wr, pref);
+  if (!rel_opt)
+    return claim_dot_targets_bucket(target_name, bucket_claims);
+
+  std::filesystem::path norm = rel_opt->lexically_normal();
+  std::string preferred_posix;
+  if (norm.empty() || norm == ".")
+    preferred_posix.clear();
+  else
+    preferred_posix = posix_str(norm);
+
+  const std::filesystem::path base = wr / preferred_posix;
+  for (const auto& abs : abs_sources) {
+    std::filesystem::path ap = std::filesystem::weakly_canonical(abs, ec);
+    if (ec)
+      ap = std::filesystem::absolute(abs);
+    const auto rp = try_relative(base, ap);
+    if (!rp || relative_path_has_parent_escape(*rp))
+      return claim_dot_targets_bucket(target_name, bucket_claims);
+  }
+
+  const std::string key = bucket_registry_key(preferred_posix);
+  if (bucket_claims[key] > 0)
+    return claim_dot_targets_bucket(target_name, bucket_claims);
+  ++bucket_claims[key];
+  return preferred_posix;
 }
 
 void push_target(ImportedPackage& out, const std::filesystem::path& write_root, const std::string& subdir,

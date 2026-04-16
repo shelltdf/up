@@ -3,6 +3,7 @@
 
 #include <cctype>
 #include <filesystem>
+#include <map>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -69,8 +70,11 @@ void import_qmake(const std::filesystem::path& pro_file, const std::filesystem::
       ty = "static_library";
   }
 
-  const std::string sub = project_import::sanitize_id(target);
-  project_import::push_target(out, write_root, sub, sub, ty, abs, warnings);
+  const std::string tname = project_import::sanitize_id(target);
+  std::map<std::string, int> bucket_claims;
+  const std::string bucket =
+      project_import::resolve_target_xml_bucket(write_root, pro_file.parent_path(), tname, abs, bucket_claims);
+  project_import::push_target(out, write_root, bucket, tname, ty, abs, warnings);
   if (out.targets.empty()) {
     warnings.push_back("qmake: no SOURCES found; falling back.");
     error.clear();

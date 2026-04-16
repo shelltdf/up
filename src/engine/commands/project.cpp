@@ -54,7 +54,8 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
       std::cerr << "project: unknown option: " << a << "\n"
                 << "  --dry-run       print probe result and XML; do not write files\n"
                 << "  --force         overwrite existing package.xml / target.xml\n"
-                << "  --output-dir <path>  package root for generated files (default: current directory)\n"
+                << "  --output-dir <path>  package root for generated files (default: cwd). target.xml is placed next\n"
+                << "                         to each target's CMake/.pro tree when possible, else under .targets/<name>/.\n"
                 << "  --package-name <name>  override <package name=\"...\">\n";
       return 2;
     }

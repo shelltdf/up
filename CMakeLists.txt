@@ -26,6 +26,7 @@ add_executable(up
   src/engine/project/project_probe.cpp
   src/engine/commands/commands_common.cpp
   src/engine/backends/cmake/cmake_backend.cpp
+  src/engine/backends/cmake/cmake_third_party_heuristics.cpp
   src/engine/backends/ninja/ninja_backend.cpp
   src/engine/backends/test/ctest_backend.cpp
   src/engine/backends/archive/archive_backend.cpp
@@ -43,6 +44,7 @@ add_executable(up
   src/engine/commands/commands_common.hpp
   src/engine/backends/core/backend_types.hpp
   src/engine/backends/cmake/cmake_backend.hpp
+  src/engine/backends/cmake/cmake_third_party_heuristics.hpp
   src/engine/backends/ninja/ninja_backend.hpp
   src/engine/backends/test/ctest_backend.hpp
   src/engine/backends/archive/archive_backend.hpp

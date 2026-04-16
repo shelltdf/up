@@ -2,6 +2,7 @@
 #include "project_import_common.hpp"
 
 #include <filesystem>
+#include <map>
 #include <regex>
 #include <string>
 #include <vector>
@@ -53,7 +54,6 @@ void import_source_fallback(const std::filesystem::path& scan_root, const std::f
     if (file_contains_main(f))
       ++mains;
   }
-  const std::string sub = "imported";
   std::string ty = "static_library";
   if (mains == 1)
     ty = "executable";
@@ -63,7 +63,30 @@ void import_source_fallback(const std::filesystem::path& scan_root, const std::f
   }
 
   const std::string tname = project_import::sanitize_id(out.package_name);
-  project_import::push_target(out, write_root, sub, tname, ty, files, warnings);
+  std::filesystem::path common = files[0].parent_path();
+  for (size_t i = 1; i < files.size(); ++i) {
+    const auto d = files[i].parent_path();
+    while (!common.empty()) {
+      const auto rp = project_import::try_relative(common, d);
+      bool ok = false;
+      if (rp) {
+        ok = true;
+        for (const auto& seg : *rp) {
+          if (seg == "..") {
+            ok = false;
+            break;
+          }
+        }
+      }
+      if (ok)
+        break;
+      common = common.parent_path();
+    }
+  }
+  std::map<std::string, int> bucket_claims;
+  const std::string bucket =
+      project_import::resolve_target_xml_bucket(write_root, common, tname, files, bucket_claims);
+  project_import::push_target(out, write_root, bucket, tname, ty, files, warnings);
   if (out.targets.empty()) {
     error = "failed to build target from sources";
     return;
