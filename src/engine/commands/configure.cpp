@@ -1,6 +1,6 @@
 #include "configure.hpp"
 
-#include "backend_dispatch.hpp"
+#include "core/backend_dispatch.hpp"
 #include "lang.hpp"
 #include "path_check.hpp"
 #include "paths.hpp"

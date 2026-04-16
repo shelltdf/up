@@ -17,11 +17,11 @@ add_executable(up
   src/engine/commands/pack.cpp
   src/engine/commands/project.cpp
   src/engine/commands/commands_common.cpp
-  src/engine/backends/cmake_backend.cpp
-  src/engine/backends/ninja_backend.cpp
-  src/engine/backends/ctest_backend.cpp
-  src/engine/backends/archive_backend.cpp
-  src/engine/backends/backend_dispatch.cpp
+  src/engine/backends/cmake/cmake_backend.cpp
+  src/engine/backends/ninja/ninja_backend.cpp
+  src/engine/backends/test/ctest_backend.cpp
+  src/engine/backends/archive/archive_backend.cpp
+  src/engine/backends/core/backend_dispatch.cpp
   src/infra/i18n/lang.cpp
   src/infra/platform/path_check.cpp
   src/engine/xml/simple_xml.cpp
@@ -33,12 +33,12 @@ add_executable(up
   src/engine/commands/pack.hpp
   src/engine/commands/project.hpp
   src/engine/commands/commands_common.hpp
-  src/engine/backends/backend_types.hpp
-  src/engine/backends/cmake_backend.hpp
-  src/engine/backends/ninja_backend.hpp
-  src/engine/backends/ctest_backend.hpp
-  src/engine/backends/archive_backend.hpp
-  src/engine/backends/backend_dispatch.hpp
+  src/engine/backends/core/backend_types.hpp
+  src/engine/backends/cmake/cmake_backend.hpp
+  src/engine/backends/ninja/ninja_backend.hpp
+  src/engine/backends/test/ctest_backend.hpp
+  src/engine/backends/archive/archive_backend.hpp
+  src/engine/backends/core/backend_dispatch.hpp
   src/infra/platform/paths.hpp
   src/engine/xml/simple_xml.hpp
 )

@@ -1,4 +1,4 @@
-#include "ninja_backend.hpp"
+#include "ninja/ninja_backend.hpp"
 
 #include <filesystem>
 #include <fstream>

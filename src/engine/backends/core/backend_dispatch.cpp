@@ -1,10 +1,10 @@
-#include "backend_dispatch.hpp"
+#include "core/backend_dispatch.hpp"
 
-#include "archive_backend.hpp"
-#include "cmake_backend.hpp"
+#include "archive/archive_backend.hpp"
+#include "cmake/cmake_backend.hpp"
 #include "commands_common.hpp"
-#include "ctest_backend.hpp"
-#include "ninja_backend.hpp"
+#include "ninja/ninja_backend.hpp"
+#include "test/ctest_backend.hpp"
 
 #include <cstdlib>
 #include <filesystem>
