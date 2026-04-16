@@ -1,9 +1,9 @@
-#pragma once
+﻿#pragma once
 
 #include <string>
 #include <vector>
 
-namespace hello_lib {
+namespace hello_simple_lib {
 
 std::string version();
 std::string normalize_name(std::string name);
@@ -30,4 +30,4 @@ class Greeter {
 
 std::vector<int> make_range(int n);
 
-}  // namespace hello_lib
+}  // namespace hello_simple_lib

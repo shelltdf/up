@@ -1,4 +1,4 @@
-# up User Manual
+﻿# up User Manual
 
 This manual is for first-time users of `up`. It helps you understand and run `up` from scratch with both CLI and `up-gui`.
 
@@ -34,7 +34,7 @@ cmake --build _build --config Release
 
 - Build tree: `.intermediate/build/<arch>/`
 - Install tree: `.intermediate/install/<arch>/`
-- You should see `hello_demo` logs including calls into `hello_foo`, `hello_lib`, and `rock_stack`.
+- You should see `hello_demo` logs including calls into `hello_foo`, `hello_simple_lib`, and `rock_stack`.
 
 ---
 
@@ -254,4 +254,5 @@ New:
 ### Q6: single-package configure fails but repo-level scan works
 
 Cross-package dependencies are usually invisible in single-package scan scope. Run from a higher-level directory and include all required packages via `--scan`.
+
 

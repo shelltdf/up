@@ -1,9 +1,9 @@
-#include "../hello_lib/hello_lib.hpp"
+﻿#include "../hello_simple_lib/hello_simple_lib.hpp"
 
 #include <cassert>
 
 int main() {
-  using namespace hello_lib;
+  using namespace hello_simple_lib;
 
   assert(version() == "0.1.0");
   assert(normalize_name("HeLLo") == "hello");

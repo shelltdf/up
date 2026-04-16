@@ -1,0 +1,4 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<package name="hello_simple_lib" version="0.1.0">
+  <!-- 独立 C++ 库包：提供库、工具可执行程序与单元测试 -->
+</package>

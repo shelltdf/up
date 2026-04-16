@@ -1,7 +1,7 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <package name="hello_demo" version="0.1.0">
   <!-- 每个子目录至多一个 target.xml，且须在本 package 目录树内；依赖示例 -->
   <dependency name="none" optional="true"/>
-  <dependency name="hello_lib"/>
+  <dependency name="hello_simple_lib"/>
   <dependency name="rock_stack"/>
 </package>

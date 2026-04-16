@@ -1,9 +1,9 @@
-#include "hello_lib.hpp"
+﻿#include "hello_simple_lib.hpp"
 
 #include <algorithm>
 #include <cctype>
 
-namespace hello_lib {
+namespace hello_simple_lib {
 
 std::string version() { return "0.1.0"; }
 
@@ -29,4 +29,4 @@ std::vector<int> make_range(int n) {
   return out;
 }
 
-}  // namespace hello_lib
+}  // namespace hello_simple_lib

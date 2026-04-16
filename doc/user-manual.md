@@ -34,7 +34,7 @@ cmake --build _build --config Release
 
 - 构建与生成目录：`.intermediate/build/<arch>/`
 - 安装结果目录：`.intermediate/install/<arch>/`
-- 如果运行成功，你会看到 `hello_demo` 的输出日志（含 `hello_foo`、`hello_lib`、`rock_stack` 调用）
+- 如果运行成功，你会看到 `hello_demo` 的输出日志（含 `hello_foo`、`hello_simple_lib`、`rock_stack` 调用）
 
 ### 步骤 4：继续深入
 
@@ -300,3 +300,4 @@ up run rock_app_one
 3. [`doc/package-target-xml-spec.md`](package-target-xml-spec.md)（字段级规范）
 4. [`DESIGN.md`](../DESIGN.md)（设计背景与路线）
 5. [`test_projects/README.md`](../test_projects/README.md)（可执行示例）
+

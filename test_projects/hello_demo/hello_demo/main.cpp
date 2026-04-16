@@ -1,11 +1,11 @@
-// -----------------------------------------------------------------------------
-// hello_demo: hello_foo (local), hello_lib + rock_stack (cross-package smoke test)
+﻿// -----------------------------------------------------------------------------
+// hello_demo: hello_foo (local), hello_simple_lib + rock_stack (cross-package smoke test)
 // -----------------------------------------------------------------------------
 
 #include <iostream>
 
 #include <foo.hpp>
-#include <hello_lib.hpp>
+#include <hello_simple_lib.hpp>
 #include <rock_base.hpp>
 #include <rock_bus.hpp>
 #include <rock_net.hpp>
@@ -18,10 +18,10 @@ int main() {
   Foo foo("hello_demo");
   foo.greet();
 
-  // --- hello_lib (cross-package) ---------------------------------------------
-  std::cout << "[hello_demo] hello_lib::version=" << hello_lib::version() << "\n";
-  std::cout << "[hello_demo] hello_lib::add(7, 5)=" << hello_lib::add(7, 5) << "\n";
-  hello_lib::Greeter greeter("hello_demo");
+  // --- hello_simple_lib (cross-package) ----------------------------------------
+  std::cout << "[hello_demo] hello_simple_lib::version=" << hello_simple_lib::version() << "\n";
+  std::cout << "[hello_demo] hello_simple_lib::add(7, 5)=" << hello_simple_lib::add(7, 5) << "\n";
+  hello_simple_lib::Greeter greeter("hello_demo");
   std::cout << "[hello_demo] " << greeter.greet("cross_package") << "\n";
 
   // --- rock_stack: rockBase / rockNet / rockBus (headers under rock_stack/include/...)

@@ -1,14 +1,14 @@
-#include "../hello_lib/hello_lib.hpp"
+﻿#include "../hello_simple_lib/hello_simple_lib.hpp"
 
 #include <iostream>
 
 int main() {
-  using namespace hello_lib;
+  using namespace hello_simple_lib;
 
   Counter counter(5);
   counter.increment();
 
-  Greeter greeter("hello_lib_tool");
+  Greeter greeter("hello_simple_lib_tool");
   std::cout << greeter.greet(normalize_name("WORLD")) << "\n";
   std::cout << "version=" << version() << ", sum=" << add(10, 20) << ", counter=" << counter.value() << "\n";
 
