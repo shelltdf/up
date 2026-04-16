@@ -121,6 +121,7 @@ HWND g_log_clear{};
 std::atomic<bool> g_running{};
 std::wstring g_last_up_args;
 std::wstring g_status_text = L"Ready";
+unsigned long g_run_seq = 0;
 std::vector<int> g_row_to_option_idx;
 int g_selected_option_idx = -1;
 bool g_dragging_log_splitter = false;
@@ -268,6 +269,16 @@ void AppendLog(const std::wstring& text) {
   if (!IsWindow(g_hwnd))
     return;
   PostMessageW(g_hwnd, WM_APPEND_LOG, 0, reinterpret_cast<LPARAM>(new std::wstring(text)));
+}
+
+std::wstring NowTimeStamp() {
+  SYSTEMTIME st{};
+  GetLocalTime(&st);
+  wchar_t buf[64]{};
+  swprintf_s(buf, L"%04u-%02u-%02u %02u:%02u:%02u", static_cast<unsigned>(st.wYear), static_cast<unsigned>(st.wMonth),
+             static_cast<unsigned>(st.wDay), static_cast<unsigned>(st.wHour), static_cast<unsigned>(st.wMinute),
+             static_cast<unsigned>(st.wSecond));
+  return buf;
 }
 
 std::wstring DirOfModule() {
@@ -1773,6 +1784,8 @@ void RunUpAsync(std::wstring args_no_exe) {
 
   HWND hwnd = g_hwnd;
   g_last_up_args = args_no_exe;
+  const unsigned long run_no = ++g_run_seq;
+  AppendLog(L"\r\n==== Run #" + std::to_wstring(run_no) + L" @ " + NowTimeStamp() + L" ====\r\n");
   if (plan.use_vcvars)
     AppendLog(L"\r\n> [vcvars] " + vcvars + L"\r\n");
   AppendLog(L"\r\n> " + plan.display_command + L"\r\n");
