@@ -34,6 +34,7 @@ constexpr wchar_t kTitle[] = L"up-gui";
 constexpr int IDC_PATH = 101;
 constexpr int IDC_BROWSE = 102;
 constexpr int IDC_CONFIGURE = 103;
+constexpr int IDC_PROJECT = 139;
 constexpr int IDC_BUILD = 104;
 constexpr int IDC_TEST = 105;
 constexpr int IDC_RUN = 106;
@@ -2254,6 +2255,7 @@ void SetUiRunning(bool running) {
     EnableMenuItem(menu, IDM_EXIT, ena);
     EnableMenuItem(menu, IDM_ABOUT, running ? gray : ena);
     EnableMenuItem(menu, IDM_UP_HELP, running ? gray : ena);
+    EnableMenuItem(menu, IDC_PROJECT, running ? gray : ena);
     EnableMenuItem(menu, IDC_CONFIGURE, running ? gray : ena);
     EnableMenuItem(menu, IDC_BUILD, running ? gray : ena);
     EnableMenuItem(menu, IDC_TEST, running ? gray : ena);
@@ -2264,6 +2266,27 @@ void SetUiRunning(bool running) {
     EnableMenuItem(menu, IDM_LANG_EN, ena);
   }
   SetStatus(running ? T(L"正在运行 up…", L"Running up…") : T(L"就绪", L"Ready"));
+}
+
+bool FinishConfigureArgsForRun(std::wstring& args_no_exe, std::wstring& err_out) {
+  if (args_no_exe.rfind(L"configure", 0) != 0)
+    return true;
+  AppendConfigureScanDirs(args_no_exe);
+  AppendConfigureOptions(args_no_exe);
+  AppendConfigureEnvArgs(args_no_exe);
+  const std::wstring up = UpExePath();
+  std::wstring cwd;
+  GetEditText(g_path, cwd);
+  std::wstring arch_leaf;
+  std::wstring qerr;
+  if (!QueryConfigureBuildDirNameFromUpExe(up, cwd, arch_leaf, qerr)) {
+    err_out = (g_ui_lang_zh ? L"[错误] 无法从 up.exe 计算 --build-dir-name: " : L"[Error] Cannot resolve --build-dir-name from up.exe: ") +
+              qerr + L"\r\n";
+    return false;
+  }
+  args_no_exe += L" --build-dir-name ";
+  args_no_exe += QuoteWinArg(arch_leaf);
+  return true;
 }
 
 void RunUpAsync(std::wstring args_no_exe) {
@@ -2286,22 +2309,12 @@ void RunUpAsync(std::wstring args_no_exe) {
   GetEditText(g_extra, extra);
   TrimInPlace(extra);
 
-  if (args_no_exe.rfind(L"configure", 0) == 0)
-    AppendConfigureScanDirs(args_no_exe);
-  if (args_no_exe.rfind(L"configure", 0) == 0)
-    AppendConfigureOptions(args_no_exe);
-  if (args_no_exe.rfind(L"configure", 0) == 0)
-    AppendConfigureEnvArgs(args_no_exe);
   if (args_no_exe.rfind(L"configure", 0) == 0) {
-    std::wstring arch_leaf;
-    std::wstring qerr;
-    if (!QueryConfigureBuildDirNameFromUpExe(up, cwd, arch_leaf, qerr)) {
-      AppendLog((g_ui_lang_zh ? L"[错误] 无法从 up.exe 计算 --build-dir-name: " : L"[Error] Cannot resolve --build-dir-name from up.exe: ") +
-                qerr + L"\r\n");
+    std::wstring err;
+    if (!FinishConfigureArgsForRun(args_no_exe, err)) {
+      AppendLog(err);
       return;
     }
-    args_no_exe += L" --build-dir-name ";
-    args_no_exe += QuoteWinArg(arch_leaf);
   }
 
   std::wstring run_app = up;
@@ -2719,6 +2732,7 @@ void CreateMainMenu(HWND hwnd) {
   AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(file), T(L"文件(&F)", L"&File"));
 
   HMENU tools = CreateMenu();
+  AppendMenuW(tools, MF_STRING, IDC_PROJECT, T(L"工程(&J)", L"pro&ject"));
   AppendMenuW(tools, MF_STRING, IDC_CONFIGURE, T(L"配置(&C)", L"&configure"));
   AppendMenuW(tools, MF_STRING, IDC_BUILD, T(L"编译(&B)", L"&build"));
   AppendMenuW(tools, MF_STRING, IDC_TEST, T(L"测试(&T)", L"&test"));
@@ -3218,6 +3232,7 @@ void CreateToolbarButtons(HWND tb) {
     const wchar_t* text;
   };
   const Entry entries[] = {
+      {IDC_PROJECT, STD_FILEOPEN, T(L"工程", L"project")},
       {IDC_CONFIGURE, STD_PROPERTIES, T(L"配置", L"configure")},
       {IDC_BUILD, STD_REPLACE, T(L"编译", L"build")},
       {IDC_RUN, STD_FILENEW, T(L"运行", L"run")},
@@ -3748,6 +3763,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         SendMessageW(g_scan_list, LB_DELETESTRING, static_cast<WPARAM>(idx), 0);
         SendMessageW(g_scan_list, LB_INSERTSTRING, static_cast<WPARAM>(dst), reinterpret_cast<LPARAM>(s.c_str()));
         SendMessageW(g_scan_list, LB_SETCURSEL, static_cast<WPARAM>(dst), 0);
+        return 0;
+      }
+      if (id == IDC_PROJECT) {
+        RunUpAsync(L"project");
         return 0;
       }
       if (id == IDC_CONFIGURE) {

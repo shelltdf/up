@@ -137,6 +137,26 @@ static void run_up_async(const std::string& args_no_exe) {
   set_status("Running up…");
 }
 
+static std::string build_configure_args_line() {
+  const std::string cwd = unix_shared::path_to_portable_utf8(ns_to_utf8([g_tf_cwd stringValue]));
+  if (cwd.empty()) {
+    log_line("[error] Set CWD first.");
+    return {};
+  }
+  std::string leaf, qerr;
+  if (!unix_shared::query_print_build_dir_name(g_up_exe, std::filesystem::path(cwd), ns_to_utf8([g_tf_build stringValue]),
+                                              g_persist, leaf, qerr)) {
+    log_line("[error] print-build-dir-name: " + qerr);
+    return {};
+  }
+  std::string args = "configure";
+  unix_shared::append_scan_args_utf8(args, collect_scans(), cwd);
+  unix_shared::append_configure_env_opts(g_persist, args);
+  args += " --build-dir-name ";
+  args += unix_shared::shell_single_quote(leaf);
+  return args;
+}
+
 @interface UpGuiCtrl : NSObject <NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate>
 @end
 
@@ -181,25 +201,17 @@ static void run_up_async(const std::string& args_no_exe) {
   }
 }
 
+- (void)doProject:(id)sender {
+  (void)sender;
+  run_up_async("project");
+}
+
 - (void)doConfigure:(id)sender {
   (void)sender;
-  const std::string cwd = unix_shared::path_to_portable_utf8(ns_to_utf8([g_tf_cwd stringValue]));
-  if (cwd.empty()) {
-    log_line("[error] Set CWD first.");
+  const std::string cfg = build_configure_args_line();
+  if (cfg.empty())
     return;
-  }
-  std::string leaf, qerr;
-  if (!unix_shared::query_print_build_dir_name(g_up_exe, std::filesystem::path(cwd), ns_to_utf8([g_tf_build stringValue]),
-                                              g_persist, leaf, qerr)) {
-    log_line("[error] print-build-dir-name: " + qerr);
-    return;
-  }
-  std::string args = "configure";
-  unix_shared::append_scan_args_utf8(args, collect_scans(), cwd);
-  unix_shared::append_configure_env_opts(g_persist, args);
-  args += " --build-dir-name ";
-  args += unix_shared::shell_single_quote(leaf);
-  run_up_async(args);
+  run_up_async(cfg);
 }
 
 - (void)doBuild:(id)sender {
@@ -326,14 +338,48 @@ static void build_window() {
   NSView* root = [win contentView];
   [root setAutoresizesSubviews:YES];
 
+  NSMenu* mainBar = [[NSMenu alloc] initWithTitle:@""];
+  NSMenuItem* appItem = [[NSMenuItem alloc] initWithTitle:@"up-gui" action:nil keyEquivalent:@""];
+  NSMenu* appMenu = [[NSMenu alloc] initWithTitle:@"up-gui"];
+  NSMenuItem* quitItem = [[NSMenuItem alloc] initWithTitle:@"Quit up-gui" action:@selector(terminate:) keyEquivalent:@"q"];
+  [quitItem setTarget:NSApp];
+  [appMenu addItem:quitItem];
+  [appItem setSubmenu:appMenu];
+  [mainBar addItem:appItem];
+  NSMenuItem* actTop = [[NSMenuItem alloc] initWithTitle:@"Actions" action:nil keyEquivalent:@""];
+  NSMenu* actMenu = [[NSMenu alloc] initWithTitle:@"Actions"];
+  NSMenuItem* m;
+  m = [[NSMenuItem alloc] initWithTitle:@"Project" action:@selector(doProject:) keyEquivalent:@"j"];
+  [m setTarget:ctrl];
+  [actMenu addItem:m];
+  m = [[NSMenuItem alloc] initWithTitle:@"Configure" action:@selector(doConfigure:) keyEquivalent:@"k"];
+  [m setTarget:ctrl];
+  [actMenu addItem:m];
+  m = [[NSMenuItem alloc] initWithTitle:@"Build" action:@selector(doBuild:) keyEquivalent:@"b"];
+  [m setTarget:ctrl];
+  [actMenu addItem:m];
+  m = [[NSMenuItem alloc] initWithTitle:@"Run" action:@selector(doRun:) keyEquivalent:@"r"];
+  [m setTarget:ctrl];
+  [actMenu addItem:m];
+  m = [[NSMenuItem alloc] initWithTitle:@"Test" action:@selector(doTest:) keyEquivalent:@"t"];
+  [m setTarget:ctrl];
+  [actMenu addItem:m];
+  m = [[NSMenuItem alloc] initWithTitle:@"Pack" action:@selector(doPack:) keyEquivalent:@"p"];
+  [m setTarget:ctrl];
+  [actMenu addItem:m];
+  [actTop setSubmenu:actMenu];
+  [mainBar addItem:actTop];
+  [NSApp setMainMenu:mainBar];
+
   __block CGFloat y = H - 40;
+  NSButton* b0 = makeBtn(@"Project", ctrl, @selector(doProject:));
   NSButton* b1 = makeBtn(@"Configure", ctrl, @selector(doConfigure:));
   NSButton* b2 = makeBtn(@"Build", ctrl, @selector(doBuild:));
   NSButton* b3 = makeBtn(@"Run", ctrl, @selector(doRun:));
   NSButton* b4 = makeBtn(@"Test", ctrl, @selector(doTest:));
   NSButton* b5 = makeBtn(@"Pack", ctrl, @selector(doPack:));
   CGFloat x = 20;
-  for (NSButton* b in @[ b1, b2, b3, b4, b5 ]) {
+  for (NSButton* b in @[ b0, b1, b2, b3, b4, b5 ]) {
     [b setFrame:NSMakeRect(x, y, 100, 28)];
     [root addSubview:b];
     x += 108;

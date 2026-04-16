@@ -194,25 +194,37 @@ void run_up_line_async(const std::string& args_no_exe) {
   set_status("Running up…");
 }
 
-void on_configure(GtkWidget*, gpointer) {
+// 返回非空则为完整 configure 参数行（不含可执行文件路径）；失败时写日志并返回空。
+std::string build_configure_args_line() {
   const std::string cwd = unix_shared::path_to_portable_utf8(get_entry(g_entry_cwd));
   if (cwd.empty()) {
     log_line("[error] Set CWD first.");
-    return;
+    return {};
   }
   std::string leaf;
   std::string qerr;
   if (!unix_shared::query_print_build_dir_name(g_up_exe, std::filesystem::path(cwd), get_entry(g_entry_build), g_persist,
                                               leaf, qerr)) {
     log_line("[error] print-build-dir-name: " + qerr);
-    return;
+    return {};
   }
   std::string args = "configure";
   unix_shared::append_scan_args_utf8(args, collect_scans(), cwd);
   unix_shared::append_configure_env_opts(g_persist, args);
   args += " --build-dir-name ";
   args += unix_shared::shell_single_quote(leaf);
-  run_up_line_async(args);
+  return args;
+}
+
+void on_project(GtkWidget*, gpointer) {
+  run_up_line_async("project");
+}
+
+void on_configure(GtkWidget*, gpointer) {
+  const std::string cfg = build_configure_args_line();
+  if (cfg.empty())
+    return;
+  run_up_line_async(cfg);
 }
 
 void on_build(GtkWidget*, gpointer) {
@@ -295,12 +307,31 @@ static void activate(GtkApplication* app, gpointer) {
   GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
   gtk_container_add(GTK_CONTAINER(w), vbox);
 
+  GtkWidget* mb = gtk_menu_bar_new();
+  GtkWidget* mi_actions = gtk_menu_item_new_with_mnemonic("_Actions");
+  GtkWidget* menu_actions = gtk_menu_new();
+  gtk_menu_item_set_submenu(GTK_MENU_ITEM(mi_actions), menu_actions);
+  auto add_menu = [&](const char* label, void (*cb)(GtkWidget*, gpointer)) {
+    GtkWidget* it = gtk_menu_item_new_with_mnemonic(label);
+    g_signal_connect(it, "activate", G_CALLBACK(cb), nullptr);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu_actions), it);
+  };
+  add_menu("_Project", on_project);
+  add_menu("_Configure", on_configure);
+  add_menu("_Build", on_build);
+  add_menu("_Run", on_run);
+  add_menu("_Test", on_test);
+  add_menu("_Pack", on_pack);
+  gtk_menu_shell_append(GTK_MENU_SHELL(mb), mi_actions);
+  gtk_box_pack_start(GTK_BOX(vbox), mb, FALSE, FALSE, 0);
+
   GtkWidget* bar = gtk_toolbar_new();
   auto add_tb = [&](const char* label, void (*cb)(GtkWidget*, gpointer)) {
     GtkToolItem* b = gtk_tool_button_new(nullptr, label);
     g_signal_connect(b, "clicked", G_CALLBACK(cb), nullptr);
     gtk_toolbar_insert(GTK_TOOLBAR(bar), b, -1);
   };
+  add_tb("Project", on_project);
   add_tb("Configure", on_configure);
   add_tb("Build", on_build);
   add_tb("Run", on_run);
