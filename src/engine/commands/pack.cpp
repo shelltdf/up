@@ -1,12 +1,11 @@
 #include "pack.hpp"
 
+#include "backend_dispatch.hpp"
 #include "commands_common.hpp"
 #include "paths.hpp"
 
-#include <cstdlib>
 #include <filesystem>
 #include <iostream>
-#include <sstream>
 
 namespace up {
 
@@ -27,28 +26,8 @@ int cmd_pack(const std::filesystem::path& cwd) {
     return 3;
   }
 
-#if defined(_WIN32)
-  const auto archive = dst_dir / ("up-" + arch + ".zip");
-  if (std::filesystem::exists(archive))
-    std::filesystem::remove(archive, ec);
-  std::ostringstream cmd;
-  cmd << "powershell -NoProfile -Command \"Compress-Archive -Path '"
-      << (src / "*").string() << "' -DestinationPath '" << archive.string() << "' -Force\"";
-#else
-  const auto archive = dst_dir / ("up-" + arch + ".tar.gz");
-  if (std::filesystem::exists(archive))
-    std::filesystem::remove(archive, ec);
-  std::ostringstream cmd;
-  cmd << "tar -czf \"" << archive.string() << "\" -C \"" << src.string() << "\" .";
-#endif
-
-  const int code = std::system(cmd.str().c_str());
-  if (code != 0) {
-    std::cerr << "pack: archive command failed with code " << code << "\n";
-    return static_cast<unsigned>(code) > 255u ? 1 : code;
-  }
-  std::cout << "pack: " << src << " -> " << archive << "\n";
-  return 0;
+  const PackBackendContext backend_ctx{src, dst_dir, arch};
+  return run_pack_backend(backend_ctx);
 }
 
 }  // namespace up

@@ -1,11 +1,10 @@
 #include "build.hpp"
+#include "backend_dispatch.hpp"
 #include "commands_common.hpp"
 #include "paths.hpp"
 
-#include <cstdlib>
 #include <filesystem>
 #include <iostream>
-#include <sstream>
 
 namespace up {
 
@@ -30,17 +29,7 @@ int cmd_build(const std::filesystem::path& cwd) {
       std::cerr << "build: run `up configure` first (missing " << (src_dir / "out" / "build.ninja") << ")\n";
       return 2;
     }
-    std::ostringstream ninja_cmd;
-    ninja_cmd << "ninja -C \"" << (src_dir / "out").string() << "\" install";
-    std::cout << ninja_cmd.str() << "\n";
-    const int code = std::system(ninja_cmd.str().c_str());
-    if (code != 0) {
-      std::cerr << "build: ninja failed with code " << code << "\n";
-      return static_cast<unsigned>(code) > 255u ? 1 : code;
-    }
-    return 0;
-  }
-  if (!std::filesystem::exists(src_dir / "CMakeLists.txt")) {
+  } else if (!std::filesystem::exists(src_dir / "CMakeLists.txt")) {
     std::cerr << "build: run `up configure` first (missing " << (src_dir / "CMakeLists.txt") << ")\n";
     return 2;
   }
@@ -48,39 +37,14 @@ int cmd_build(const std::filesystem::path& cwd) {
   const bool use_debug = equals_ci(option_or_compat(opts, "UP_TARGET_DEBUG", "UP_DEBUG", "OFF"), "ON");
   const std::string config_name = use_debug ? "Debug" : "Release";
 
-  std::ostringstream cmd;
-  cmd << "cmake -S \"" << src_dir.string() << "\" -B \"" << bin_dir.string() << "\" -DCMAKE_INSTALL_PREFIX=\""
-      << inst.string() << "\"";
-  if (equals_ci(build_system, "ninja")) {
-    cmd << " -G Ninja";
-  } else if (!cmake_generator.empty()) {
-    cmd << " -G \"" << cmake_generator << "\"";
-  }
-
-  for (const auto& kv : opts) {
-    cmd << " -D" << kv.first << "=\"" << kv.second << "\"";
-  }
-
   bool multi_config = contains_ci(cmake_generator, "visual studio") || contains_ci(cmake_generator, "multi-config");
 #if defined(_WIN32)
   if (equals_ci(build_system, "cmake") && cmake_generator.empty())
     multi_config = true;  // default VS generator on Windows
 #endif
-  if (!multi_config)
-    cmd << " -DCMAKE_BUILD_TYPE=" << config_name;
-
-  cmd << " && cmake --build \"" << bin_dir.string() << "\"";
-  if (multi_config)
-    cmd << " --config " << config_name;
-  cmd << " --target install";
-
-  std::cout << cmd.str() << "\n";
-  const int code = std::system(cmd.str().c_str());
-  if (code != 0) {
-    std::cerr << "build: cmake failed with code " << code << "\n";
-    return static_cast<unsigned>(code) > 255u ? 1 : code;
-  }
-  return 0;
+  BuildBackendContext backend_ctx{
+      src_dir, bin_dir, inst, opts, build_system, cmake_generator, config_name, multi_config};
+  return run_build_backend(backend_ctx, 1);
 }
 
 }  // namespace up

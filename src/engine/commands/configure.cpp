@@ -1,5 +1,6 @@
 #include "configure.hpp"
 
+#include "backend_dispatch.hpp"
 #include "lang.hpp"
 #include "path_check.hpp"
 #include "paths.hpp"
@@ -893,11 +894,6 @@ int cmd_configure(const std::filesystem::path& cwd,
   const std::string dbg_cfg = lower_ascii(option_or_compat(opts, "UP_TARGET_DEBUG", "UP_DEBUG", "OFF"));
   const std::string config_name = (dbg_cfg == "on" || dbg_cfg == "1" || dbg_cfg == "true") ? "Debug" : "Release";
 
-  std::ostringstream cfg;
-  cfg << "cmake -S \"" << build_root.string() << "\" -B \"" << out_dir.string() << "\"";
-  if (!cmake_generator.empty())
-    cfg << " -G \"" << cmake_generator << "\"";
-
   bool multi_config = false;
   const std::string gen_lc = lower_ascii(cmake_generator);
   if (gen_lc.find("visual studio") != std::string::npos || gen_lc.find("multi-config") != std::string::npos)
@@ -906,16 +902,9 @@ int cmd_configure(const std::filesystem::path& cwd,
   if (cmake_generator.empty())
     multi_config = true;
 #endif
-  if (!multi_config)
-    cfg << " -DCMAKE_BUILD_TYPE=" << config_name;
-
-  const int cfg_code = std::system(cfg.str().c_str());
-  if (cfg_code != 0) {
-    std::cerr << "configure: cmake configure failed with code " << cfg_code << "\n";
-    return static_cast<unsigned>(cfg_code) > 255u ? 1 : cfg_code;
-  }
-
-  return 0;
+  const ConfigureBackendContext backend_ctx{
+      build_root, out_dir, cmake_generator, config_name, multi_config};
+  return run_configure_backend(backend_ctx);
 }
 
 }  // namespace up
