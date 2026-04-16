@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace up {
 
@@ -36,6 +37,37 @@ struct ConfigureBackendContext {
   std::string cmake_generator;
   std::string config_name;
   bool multi_config = false;
+};
+
+struct ConfigureTargetModel {
+  std::string name;
+  std::string type;
+  std::vector<std::string> source_paths;
+  std::vector<std::string> include_dirs;
+  std::vector<std::string> links;
+};
+
+struct ConfigureInstallDirRule {
+  std::string src;
+  std::string dst;
+};
+
+struct ConfigureInstallFileRule {
+  std::string src;
+  std::string dst;
+};
+
+struct ConfigureGraphModel {
+  std::string build_system;
+  std::string package_name;
+  std::string config_mode;
+  std::filesystem::path build_root;
+  std::filesystem::path out_dir;
+  std::filesystem::path install_root;
+  std::vector<ConfigureTargetModel> targets;
+  std::vector<std::string> install_exe_names;
+  std::vector<ConfigureInstallDirRule> install_dir_rules;
+  std::vector<ConfigureInstallFileRule> install_file_rules;
 };
 
 }  // namespace up

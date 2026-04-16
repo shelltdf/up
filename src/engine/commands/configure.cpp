@@ -116,186 +116,6 @@ bool equals_ci(std::string a, std::string b) {
   return a == b;
 }
 
-std::string sanitize_name(std::string s) {
-  for (char& c : s) {
-    const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-';
-    if (!ok)
-      c = '_';
-  }
-  return s;
-}
-
-std::string quote_ninja_path(const std::filesystem::path& p) {
-  std::string s = p.generic_string();
-  std::string out;
-  out.reserve(s.size());
-  for (char c : s) {
-    if (c == ' ')
-      out += "$ ";
-    else if (c == ':')
-      out += "$:";
-    else
-      out.push_back(c);
-  }
-  return out;
-}
-
-int write_ninja_file(const std::filesystem::path& build_root,
-                     const std::filesystem::path& install_root,
-                     const std::vector<LoadedTarget>& pkg_targets,
-                     const std::string& config_mode) {
-  const auto out_dir = build_root / "out";
-  std::filesystem::create_directories(out_dir);
-  const auto ninja_path = out_dir / "build.ninja";
-  std::ofstream nf(ninja_path);
-  if (!nf) {
-    std::cerr << "cannot write " << ninja_path << "\n";
-    return 5;
-  }
-
-  const bool debug = (config_mode == "debug");
-  nf << "ninja_required_version = 1.7\n";
-#if defined(_WIN32)
-  nf << "cxx = cl\n";
-  nf << "cflags = /nologo /EHsc /std:c++17 " << (debug ? "/Zi /Od" : "/O2") << "\n";
-  nf << "ldflags = /nologo\n\n";
-  nf << "rule cxx\n";
-  nf << "  command = $cxx /c $cflags /Fo$out $in\n";
-  nf << "  description = CXX $out\n\n";
-  nf << "rule link_exe\n";
-  nf << "  command = link $ldflags /OUT:$out $in $libs\n";
-  nf << "  description = LINK $out\n\n";
-  nf << "rule link_shared\n";
-  nf << "  command = link $ldflags /DLL /OUT:$out $in $libs\n";
-  nf << "  description = SHARED $out\n\n";
-  nf << "rule link_static\n";
-  nf << "  command = lib /nologo /OUT:$out $in\n";
-  nf << "  description = STATIC $out\n\n";
-  nf << "rule copy\n";
-  nf << "  command = cmd /c if not exist \"$outdir\" mkdir \"$outdir\" && copy /Y \"$in\" \"$out\" >nul\n";
-  nf << "  description = COPY $out\n\n";
-#else
-  nf << "cxx = c++\n";
-  nf << "cflags = -std=c++17 " << (debug ? "-g -O0" : "-O2") << "\n\n";
-  nf << "rule cxx\n";
-  nf << "  command = $cxx -MMD -MF $out.d -c $cflags -o $out $in\n";
-  nf << "  depfile = $out.d\n";
-  nf << "  description = CXX $out\n\n";
-  nf << "rule link_exe\n";
-  nf << "  command = $cxx -o $out $in $libs\n";
-  nf << "  description = LINK $out\n\n";
-  nf << "rule link_shared\n";
-  nf << "  command = $cxx -shared -o $out $in $libs\n";
-  nf << "  description = SHARED $out\n\n";
-  nf << "rule link_static\n";
-  nf << "  command = ar rcs $out $in\n";
-  nf << "  description = STATIC $out\n\n";
-  nf << "rule copy\n";
-  nf << "  command = mkdir -p \"$outdir\" && cp -f $in $out\n";
-  nf << "  description = COPY $out\n\n";
-#endif
-
-  std::vector<std::pair<std::string, std::string>> lib_outputs;
-  std::vector<std::pair<std::string, std::string>> exe_outputs;
-  std::vector<std::string> all_outputs;
-
-  for (const auto& lt : pkg_targets) {
-    std::vector<std::string> objs;
-    for (size_t i = 0; i < lt.desc.sources.size(); ++i) {
-      const auto src = (lt.target_dir / lt.desc.sources[i]).lexically_normal();
-      const std::string obj_name = sanitize_name(lt.desc.name) + "_" + std::to_string(i)
-#if defined(_WIN32)
-                                   + ".obj";
-#else
-                                   + ".o";
-#endif
-      const auto obj = out_dir / "obj" / obj_name;
-      std::filesystem::create_directories(obj.parent_path());
-      const auto src_n = quote_ninja_path(src);
-      const auto obj_n = quote_ninja_path(obj);
-      nf << "build " << obj_n << ": cxx " << src_n << "\n";
-      objs.push_back(obj_n);
-      all_outputs.push_back(obj_n);
-    }
-
-    std::ostringstream in_list;
-    for (size_t i = 0; i < objs.size(); ++i) {
-      if (i)
-        in_list << " ";
-      in_list << objs[i];
-    }
-
-    std::string out_file;
-    std::string rule;
-    if (lt.desc.type == "static_library") {
-#if defined(_WIN32)
-      out_file = quote_ninja_path(out_dir / (lt.desc.name + ".lib"));
-#else
-      out_file = quote_ninja_path(out_dir / ("lib" + lt.desc.name + ".a"));
-#endif
-      rule = "link_static";
-      lib_outputs.push_back({lt.desc.name, out_file});
-    } else if (lt.desc.type == "shared_library") {
-#if defined(_WIN32)
-      out_file = quote_ninja_path(out_dir / (lt.desc.name + ".dll"));
-#else
-      out_file = quote_ninja_path(out_dir / ("lib" + lt.desc.name + ".so"));
-#endif
-      rule = "link_shared";
-      lib_outputs.push_back({lt.desc.name, out_file});
-    } else {
-#if defined(_WIN32)
-      out_file = quote_ninja_path(out_dir / (lt.desc.name + ".exe"));
-#else
-      out_file = quote_ninja_path(out_dir / lt.desc.name);
-#endif
-      rule = "link_exe";
-      exe_outputs.push_back({lt.desc.name, out_file});
-    }
-
-    nf << "build " << out_file << ": " << rule;
-    if (!objs.empty())
-      nf << " " << in_list.str();
-    nf << "\n";
-    if (lt.desc.type == "executable" || lt.desc.type == "shared_library") {
-      if (!lib_outputs.empty()) {
-        nf << "  libs =";
-        for (const auto& kv : lib_outputs)
-          nf << " " << kv.second;
-        nf << "\n";
-      }
-    }
-    all_outputs.push_back(out_file);
-  }
-
-  const auto install_bin = install_root / "bin";
-  std::vector<std::string> install_outputs;
-  for (const auto& ex : exe_outputs) {
-    std::string out_name = ex.first;
-#if defined(_WIN32)
-    out_name += ".exe";
-#endif
-    const auto dst = quote_ninja_path(install_bin / out_name);
-    nf << "build " << dst << ": copy " << ex.second << "\n";
-    nf << "  outdir = " << quote_ninja_path((install_root / "bin")) << "\n";
-    install_outputs.push_back(dst);
-  }
-
-  nf << "\nbuild all: phony";
-  for (const auto& x : all_outputs)
-    nf << " " << x;
-  nf << "\n";
-
-  nf << "build install: phony";
-  for (const auto& x : install_outputs)
-    nf << " " << x;
-  nf << "\n";
-  nf << "default install\n";
-
-  std::cout << "Wrote " << ninja_path << "\n";
-  return 0;
-}
-
 void write_up_cache(const std::filesystem::path& cache_path,
                     const std::filesystem::path& cwd,
                     const std::string& arch,
@@ -726,107 +546,11 @@ int cmd_configure(const std::filesystem::path& cwd,
   std::vector<LoadedTarget> build_targets = pkg_targets;
   for (const auto& lt : extra_lib_targets)
     build_targets.push_back(lt);
-  const auto inst = default_install_root(cwd) / arch;
-  if (equals_ci(build_system, "ninja")) {
-    const int code = write_ninja_file(build_root, inst, build_targets, config_mode);
-    if (code != 0)
-      return code;
-    write_up_cache(cache_path, cwd, arch, primary_pkg.name, build_root / "out" / "build.ninja", roots, opts);
-    return 0;
-  }
-
-  std::ostringstream cm;
-  cm << "cmake_minimum_required(VERSION 3.20)\n";
-  cm << "project(" << primary_pkg.name << " LANGUAGES CXX)\n";
-  cm << "set(CMAKE_CXX_STANDARD 17)\n";
-  cm << "set(CMAKE_CXX_STANDARD_REQUIRED ON)\n";
-
-  for (const auto& lt : build_targets) {
-    const auto& t = lt.desc;
-    if (!is_lib(t))
-      continue;
-    const char* kind = (t.type == "shared_library") ? "SHARED" : "STATIC";
-    cm << "add_library(" << t.name << " " << kind;
-    for (const auto& s : t.sources) {
-      const auto src = (lt.target_dir / s).lexically_normal();
-      cm << " \"" << rel_to_cwd(build_root, src) << "\"";
-    }
-    cm << ")\n";
-    if (!t.includes.empty()) {
-      std::set<std::string> inc_dirs;
-      for (const auto& inc_entry : t.includes) {
-        const auto inc = include_base_dir(lt.target_dir, inc_entry);
-        if (!inc.empty())
-          inc_dirs.insert(rel_to_cwd(build_root, inc));
-      }
-      if (!inc_dirs.empty()) {
-      cm << "target_include_directories(" << t.name << " PUBLIC";
-      for (const auto& inc : inc_dirs) {
-        cm << " \"" << inc << "\"";
-      }
-      cm << ")\n";
-      }
-    }
-  }
-
   std::vector<std::string> local_lib_names;
   for (const auto& lt : pkg_targets) {
     if (is_lib(lt.desc))
       local_lib_names.push_back(lt.desc.name);
   }
-
-  for (const auto& lt : pkg_targets) {
-    const auto& t = lt.desc;
-    if (t.type != "executable")
-      continue;
-    cm << "add_executable(" << t.name;
-    for (const auto& s : t.sources) {
-      const auto src = (lt.target_dir / s).lexically_normal();
-      cm << " \"" << rel_to_cwd(build_root, src) << "\"";
-    }
-    cm << ")\n";
-    std::vector<std::string> links = local_lib_names;
-    auto eit = exe_extra_links.find(t.name);
-    if (eit != exe_extra_links.end()) {
-      for (const auto& n : eit->second)
-        links.push_back(n);
-    }
-    std::sort(links.begin(), links.end());
-    links.erase(std::unique(links.begin(), links.end()), links.end());
-    if (!links.empty()) {
-      cm << "target_link_libraries(" << t.name << " PRIVATE";
-      for (const auto& n : links)
-        cm << " " << n;
-      cm << ")\n";
-    }
-    if (!t.includes.empty()) {
-      std::set<std::string> inc_dirs;
-      for (const auto& inc_entry : t.includes) {
-        const auto inc = include_base_dir(lt.target_dir, inc_entry);
-        if (!inc.empty())
-          inc_dirs.insert(rel_to_cwd(build_root, inc));
-      }
-      if (!inc_dirs.empty()) {
-      cm << "target_include_directories(" << t.name << " PRIVATE";
-      for (const auto& inc : inc_dirs) {
-        cm << " \"" << inc << "\"";
-      }
-      cm << ")\n";
-      }
-    }
-  }
-
-  cm << "include(CTest)\n";
-  cm << "enable_testing()\n";
-  for (const auto& lt : pkg_targets) {
-    if (lt.desc.type != "executable")
-      continue;
-    cm << "add_test(NAME " << lt.desc.name << " COMMAND $<TARGET_FILE:" << lt.desc.name << ">)\n";
-  }
-  cm << "install(TARGETS";
-  for (const auto& exe_name : install_exe_names)
-    cm << " " << exe_name;
-  cm << " RUNTIME DESTINATION bin)\n";
   struct InstallDirRule {
     std::string src;
     std::string dst;
@@ -847,7 +571,7 @@ int cmd_configure(const std::filesystem::path& cwd,
   };
   std::set<InstallDirRule> install_dirs;
   std::set<InstallFileRule> install_files;
-  for (const auto& lt : pkg_targets) {
+  for (const auto& lt : build_targets) {
     for (const auto& inc_entry : lt.desc.includes) {
       if (inc_entry.kind == "dir") {
         const auto inc = (lt.target_dir / inc_entry.from).lexically_normal();
@@ -867,28 +591,59 @@ int cmd_configure(const std::filesystem::path& cwd,
       }
     }
   }
-  for (const auto& rule : install_dirs) {
-    cm << "install(DIRECTORY \"" << rule.src << "/\" DESTINATION " << rule.dst
-       << " FILES_MATCHING PATTERN \"*.h\" PATTERN \"*.hh\" PATTERN \"*.hpp\" PATTERN \"*.hxx\")\n";
-  }
-  for (const auto& rule : install_files) {
-    cm << "install(FILES \"" << rule.src << "\" DESTINATION " << rule.dst << ")\n";
-  }
 
-  const auto out_cmake = build_root / "CMakeLists.txt";
-  {
-    std::ofstream f(out_cmake);
-    if (!f) {
-      std::cerr << "cannot write " << out_cmake << "\n";
-      return 5;
+  ConfigureGraphModel graph_model;
+  graph_model.build_system = build_system;
+  graph_model.package_name = primary_pkg.name;
+  graph_model.config_mode = config_mode;
+  graph_model.build_root = build_root;
+  graph_model.out_dir = build_root / "out";
+  graph_model.install_root = default_install_root(cwd) / arch;
+  graph_model.install_exe_names = install_exe_names;
+  for (const auto& lt : build_targets) {
+    ConfigureTargetModel tm;
+    tm.name = lt.desc.name;
+    tm.type = lt.desc.type;
+    for (const auto& s : lt.desc.sources) {
+      const auto src = (lt.target_dir / s).lexically_normal();
+      tm.source_paths.push_back(std::filesystem::absolute(src).generic_string());
     }
-    f << cm.str();
+    std::set<std::string> inc_dirs;
+    for (const auto& inc_entry : lt.desc.includes) {
+      const auto inc = include_base_dir(lt.target_dir, inc_entry);
+      if (!inc.empty())
+        inc_dirs.insert(std::filesystem::absolute(inc).generic_string());
+    }
+    tm.include_dirs.assign(inc_dirs.begin(), inc_dirs.end());
+    if (lt.desc.type == "executable") {
+      tm.links = local_lib_names;
+      auto eit = exe_extra_links.find(lt.desc.name);
+      if (eit != exe_extra_links.end()) {
+        for (const auto& n : eit->second)
+          tm.links.push_back(n);
+      }
+      std::sort(tm.links.begin(), tm.links.end());
+      tm.links.erase(std::unique(tm.links.begin(), tm.links.end()), tm.links.end());
+    }
+    graph_model.targets.push_back(std::move(tm));
   }
-  std::cout << "Wrote " << out_cmake << "\n";
-  write_up_cache(cache_path, cwd, arch, primary_pkg.name, out_cmake, roots, opts);
+  for (const auto& rule : install_dirs)
+    graph_model.install_dir_rules.push_back({rule.src, rule.dst});
+  for (const auto& rule : install_files)
+    graph_model.install_file_rules.push_back({rule.src, rule.dst});
+
+  const int gen_code = run_generate_backend(graph_model);
+  if (gen_code != 0)
+    return gen_code;
+
+  const auto generated_file = equals_ci(build_system, "ninja") ? (graph_model.out_dir / "build.ninja")
+                                                                : (graph_model.build_root / "CMakeLists.txt");
+  write_up_cache(cache_path, cwd, arch, primary_pkg.name, generated_file, roots, opts);
+  if (equals_ci(build_system, "ninja"))
+    return 0;
 
   // In cmake mode, configure backend files immediately (e.g. .sln on Windows).
-  const auto out_dir = build_root / "out";
+  const auto out_dir = graph_model.out_dir;
   std::filesystem::create_directories(out_dir);
   const std::string cmake_generator = option_or_compat(opts, "UP_CMAKE_GENERATOR", "", "");
   const std::string dbg_cfg = lower_ascii(option_or_compat(opts, "UP_TARGET_DEBUG", "UP_DEBUG", "OFF"));

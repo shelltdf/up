@@ -80,6 +80,13 @@ int run_pack_backend(const PackBackendContext& ctx) {
   return 0;
 }
 
+int run_generate_backend(const ConfigureGraphModel& model) {
+  if (equals_ci(model.build_system, "ninja")) {
+    return write_ninja_file(model);
+  }
+  return write_cmake_lists(model);
+}
+
 int run_configure_backend(const ConfigureBackendContext& ctx) {
   const std::string command = build_cmake_configure_command(ctx);
   const int code = std::system(command.c_str());
