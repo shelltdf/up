@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<target name="data_loader" type="executable">
+  <sources>
+    <file>main.cpp</file>
+  </sources>
+  <includes>
+    <glob from="../assets/*.*" to="hello_data_files"/>
+  </includes>
+</target>

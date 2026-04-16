@@ -12,6 +12,7 @@
 | [hello_demo/](hello_demo/) | 演示本包 `hello_foo` + 跨包 `hello_simple_lib`、`rock_stack`、`hello_parent_child` 的联合调用与测试。 |
 | [rock_stack/](rock_stack/) | 演示 `include/src/app/test` 布局及 `includes` 的 `dir/file/glob` 三种 `from/to` 写法。 |
 | [hello_parent_child/](hello_parent_child/) | 演示父子嵌套包（父包依赖子包）与跨包目标引用 `pkg:target`。 |
+| [hello_data_files/](hello_data_files/) | 演示 `xml/json/svg` 数据文件随安装产物落盘并由可执行程序启动加载。 |
 
 ### 包依赖关系
 
@@ -22,6 +23,7 @@ flowchart LR
   rock_stack["rock_stack"]
   hello_parent_child["hello_parent_child"]
   hello_parent_child_child["hello_parent_child_child"]
+  hello_data_files["hello_data_files"]
   hello_demo --> hello_simple_lib
   hello_demo --> rock_stack
   hello_demo --> hello_parent_child
@@ -33,6 +35,7 @@ flowchart LR
 - `hello_demo`：依赖 `hello_simple_lib`、`rock_stack`、`hello_parent_child`（另有可选占位 `none`）。
 - `hello_parent_child_child`：无包级依赖（子包）。
 - `hello_parent_child`：依赖 `hello_parent_child_child`（父包）。
+- `hello_data_files`：无包级依赖（资源文件安装与运行时加载示例）。
 
 ---
 
@@ -94,6 +97,18 @@ flowchart LR
 
 ---
 
+## hello_data_files
+
+定位：演示 `target.xml` 中 `includes` 的 `glob from/to` 用法，把非代码资源（`xml/json/svg`）安装到前缀目录并由程序运行时读取。
+
+- 包名：`hello_data_files`
+- 目标：`data_loader`（`executable`）
+- 资源目录：`hello_data_files/assets/`
+- 安装规则：`<glob from="../assets/*.*" to="hello_data_files"/>`
+- 运行时读取路径：`<install_prefix>/include/hello_data_files/`
+
+---
+
 ## 在仓库根目录执行（已构建 `up.exe`）
 
 ```powershell
@@ -101,6 +116,15 @@ flowchart LR
 .\_build\Release\up.exe build
 .\_build\Release\up.exe test
 .\_build\Release\up.exe run hello_demo
+```
+
+单独验证数据文件安装与加载（在 `test_projects` 目录内）：
+
+```powershell
+Set-Location test_projects
+..\_build\Release\up.exe configure --scan .
+..\_build\Release\up.exe build
+..\_build\Release\up.exe run data_loader
 ```
 
 仅验证父子包示例（在 `test_projects` 目录内）：
