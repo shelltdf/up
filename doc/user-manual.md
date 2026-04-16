@@ -1,0 +1,302 @@
+﻿# up 用户手册
+
+本手册面向第一次接触 `up` 的用户，目标是让你从零开始理解并完成一次完整使用（CLI 与 up-gui 两条路径）。
+
+- 设计文档：[`DESIGN.md`](../DESIGN.md)
+- XML 规范：[`doc/package-target-xml-spec.md`](package-target-xml-spec.md)
+- 示例工程：[`test_projects/README.md`](../test_projects/README.md)
+
+---
+
+## 0. 10 分钟快速上手
+
+如果你只想尽快跑起来，按下面做即可。
+
+### 步骤 1：构建 `up.exe`
+
+在仓库根目录执行：
+
+```powershell
+cmake -S . -B _build -G "Visual Studio 17 2022" -A x64
+cmake --build _build --config Release
+```
+
+### 步骤 2：跑通示例工程
+
+```powershell
+.\_build\Release\up.exe configure --scan test_projects
+.\_build\Release\up.exe build
+.\_build\Release\up.exe test
+.\_build\Release\up.exe run hello_demo
+```
+
+### 步骤 3：检查结果
+
+- 构建与生成目录：`.intermediate/build/<arch>/`
+- 安装结果目录：`.intermediate/install/<arch>/`
+- 如果运行成功，你会看到 `hello_demo` 的输出日志（含 `hello_foo`、`hello_lib`、`rock_stack` 调用）
+
+### 步骤 4：继续深入
+
+- 读概念与细节：从本文 **第 1 节** 开始
+- 查 XML 字段定义：[`doc/package-target-xml-spec.md`](package-target-xml-spec.md)
+
+---
+
+## 1. 概述：这是什么，为什么做
+
+`up`（uni-package）是一个“用数据描述构建行为”的包与构建编排工具。你通过 `package.xml` 和 `target.xml` 描述包、目标、依赖，`up` 负责：
+
+1. 扫描描述文件并建立包/目标关系
+2. 生成后端构建文件（当前主要是 CMake，也支持 Ninja）
+3. 执行构建、测试、运行、打包
+
+### 为什么做这个软件
+
+在 C/C++ 项目里，常见痛点是：
+
+- 多个库与可执行程序的关系越来越复杂
+- 依赖声明分散在不同脚本中，可读性差
+- 构建后端切换成本高
+
+`up` 的核心思路是“数据即行为”：
+
+- 用 XML 把结构和依赖写清楚
+- 用统一命令驱动 configure/build/test/run/pack
+- 让工程组织更可视、更可迁移
+
+### 和仓库脚本的边界
+
+仓库根目录的 `build.py` / `install.py` 只负责构建并安装宿主工具 `up.exe` / `up-gui.exe`。它们**不会**构建 `test_projects` 里的示例包。
+
+---
+
+## 2. 细节逻辑：系统如何工作
+
+下面是 `up` 的主流程：
+
+1. **扫描**：在 `cwd`（或 `--scan` 指定目录）递归查找 `package.xml` 和 `target.xml`
+2. **归属**：每个 `target.xml` 归属到路径上最近的 `package.xml`
+3. **校验**：
+   - 包依赖是否在扫描集中存在
+   - 目标依赖是否能解析到库目标
+4. **生成**：在 `.intermediate/build/<arch>/` 生成构建文件
+5. **执行**：`build` 产物安装到 `.intermediate/install/<arch>/`
+6. **后续**：`run` / `test` / `pack` 基于安装与构建元数据继续工作
+
+### 目录流转（相对执行命令时的 cwd）
+
+- `.intermediate/build/<arch>/`：生成与构建目录
+- `.intermediate/install/<arch>/`：安装目录（`bin/`、`include/`）
+- `.intermediate/pack/<arch>/`：打包产物目录
+
+### 关于后端
+
+- **CMake 模式**：生成 `CMakeLists.txt` 再调用 CMake
+- **Ninja 模式**：直接生成 `out/build.ninja`
+
+---
+
+## 3. 概念介绍
+
+### 3.1 package 与 target
+
+- **package**：由 `package.xml` 定义，表示一个包（带包级依赖）
+- **target**：由 `target.xml` 定义，表示构建目标
+  - `executable`
+  - `static_library`
+  - `shared_library`
+
+### 3.2 依赖层次
+
+- **包级依赖**：写在 `package.xml` 的 `<dependency name="..."/>`
+- **目标级依赖**：写在 `target.xml` 的 `<dependency name="..."/>`
+  - 同包引用：`<dependency name="myLib"/>`
+  - 跨包引用：`<dependency name="otherPkg:otherLib"/>`
+
+### 3.3 includes 新语法（from/to）
+
+`<includes>` 里统一使用自闭合条目：
+
+- `<dir from="..." to="..."/>`
+- `<file from="..." to="..."/>`
+- `<glob from="..." to="..."/>`
+
+语义：
+
+- `from`：相对 `target.xml` 所在目录
+- `to`：安装到 `include/` 下的子目录（可省略）
+
+旧写法 `<dir>...</dir>` 已不支持。
+
+### 3.4 arch 标签
+
+`<arch>` 不是单纯 CPU 字符串，而是组合信息（系统、CPU、构建后端、工具链、Debug/Release、CRT 等），用于区分不同构建配置目录。
+
+---
+
+## 4. 主要使用方法
+
+下面按“先构建工具，再使用工具”展开。
+
+### 4.1 准备环境
+
+- CMake 3.20+
+- C++17 编译器
+- Windows 推荐 Visual Studio 2022 + MSVC
+
+### 4.2 构建 up（仓库根目录）
+
+方式 A：手工 CMake
+
+```powershell
+cmake -S . -B _build -G "Visual Studio 17 2022" -A x64
+cmake --build _build --config Release
+```
+
+方式 B：Python 脚本
+
+```powershell
+python build.py
+python install.py --prefix dist
+python package.py
+```
+
+### 4.3 CLI 快速上手（推荐先跑示例）
+
+在仓库根目录运行：
+
+```powershell
+.\_build\Release\up.exe configure --scan test_projects
+.\_build\Release\up.exe build
+.\_build\Release\up.exe test
+.\_build\Release\up.exe run hello_demo
+```
+
+常用命令：
+
+- `up configure [--scan <dir>]... [--opt KEY=VALUE]...`
+- `up build`
+- `up run <target-name>`
+- `up test [test-target-name]`
+- `up pack`
+- `up project`（预留）
+
+### 4.4 在单包目录工作
+
+如果你已在某个包目录（例如 `test_projects\rock_stack`）并已将 `up` 加入 PATH，可直接：
+
+```powershell
+up configure
+up build
+up test
+up run rock_app_one
+```
+
+### 4.5 up-gui 快速上手
+
+`up-gui` 是 Win32 图形壳，核心仍是调用 `up.exe`。
+
+建议流程：
+
+1. 打开 `up-gui`
+2. 在“编译环境设置”中检查/选择：
+   - Build system
+   - Compiler
+   - 可选 Android / emsdk 路径
+3. 选择工作目录（package 或 test_projects 根）
+4. 点击 `Configure`
+5. 点击 `Build`
+6. 视需要执行 `Test` / `Run`
+
+说明：GUI 会把设置转成 `--opt` 参数传给 `up.exe`。
+
+### 4.6 常见工作流模板
+
+#### 模板 A：新增一个库目标
+
+1. 新建子目录（例如 `myLib/`）
+2. 放入 `target.xml` 与源码
+3. 在需要的可执行目标里声明 `<dependency name="myLib"/>`
+4. `up configure && up build && up test`
+
+#### 模板 B：新增跨包依赖
+
+1. 在 `package.xml` 声明包依赖
+2. 在 `target.xml` 用 `otherPkg:otherTarget` 引用
+3. 确保 configure 扫描范围包含两个包
+
+#### 模板 C：调试 includes 安装布局
+
+1. 用 `from/to` 声明 `dir/file/glob`
+2. `up configure && up build`
+3. 检查 `.intermediate/install/<arch>/include/` 是否符合预期
+
+---
+
+## 5. 常见问题问答（FAQ）
+
+### Q1：`configure` 报“required dependency package not found in scan set”
+
+**原因**：目标引用了外包，但扫描范围里没有该包。  
+**处理**：
+
+- 扩大 `--scan` 范围，确保依赖包被扫描到
+- 并确认 `package.xml` 已声明对应包级依赖
+
+### Q2：路径相关报错（非 ASCII 路径）
+
+**原因**：当前实现对路径有 ASCII 限制，避免后端工具链不一致问题。  
+**处理**：把工程路径迁到仅英文路径目录后重试。
+
+### Q3：`run` 找不到目标
+
+**常见原因**：
+
+- 目标名写错
+- 尚未 `build` 成功
+- 当前目录对应的是另一个 package
+
+**建议**：先 `up test` 或查看 build 输出中的目标名，再执行 `up run <name>`。
+
+### Q4：`test` 没有发现测试
+
+`up` 当前通过 CTest 执行测试；通常可执行目标会被注册为测试条目。若无测试：
+
+- 确认 configure/build 成功
+- 确认目标确实是 `executable`
+- 在正确的包/扫描范围下运行
+
+### Q5：includes 旧写法报错
+
+如果你还在用：
+
+```xml
+<includes>
+  <dir>../../include/xxx</dir>
+</includes>
+```
+
+请改为新写法：
+
+```xml
+<includes>
+  <dir from="../../include/xxx" to="xxx"/>
+</includes>
+```
+
+`file`、`glob` 同理都用 `from/to`。
+
+### Q6：为什么单包 configure 过不了，整仓扫描却可以
+
+因为单包目录通常看不到跨包依赖目标。对于跨包依赖场景，请在更高层目录执行并用 `--scan` 覆盖所有相关包。
+
+---
+
+## 附：建议阅读顺序
+
+1. 本文（用户手册）
+2. [`README.md`](../README.md)（命令总览与仓库入口）
+3. [`doc/package-target-xml-spec.md`](package-target-xml-spec.md)（字段级规范）
+4. [`DESIGN.md`](../DESIGN.md)（设计背景与路线）
+5. [`test_projects/README.md`](../test_projects/README.md)（可执行示例）

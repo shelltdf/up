@@ -4,6 +4,6 @@
     <file>rock_net.cpp</file>
   </sources>
   <includes>
-    <dir>../../include/rockNet</dir>
+    <file from="../../include/rockNet/rock_net.hpp" to="rockNet"/>
   </includes>
 </target>

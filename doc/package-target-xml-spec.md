@@ -78,12 +78,42 @@
 
 说明：**当前解析器不依赖 `<sources>` 父节点**，只要文件中存在符合模式的 `<file>...</file>` 即会收录；使用 `<sources>` 仅为可读性与与 DESIGN 叙述一致。
 
-### 3.3 头文件路径 `<includes>` / `<dir>`
+### 3.3 头文件输入与安装输出 `<includes>`
 
-- 任意 **` <dir>相对路径</dir> `** 形式的片段会被收集为 **include 目录**（同样**相对于 `target.xml` 所在目录**）。
-- 生成 CMake 时，对**库**目标会生成 **`target_include_directories(... PUBLIC ...)`**；对**可执行**目标为 **`PRIVATE`**（若该 target 自身声明了 `dir`）。
+`<includes>` 统一使用 **`from/to`** 自闭合条目，支持三种类型：
 
-同样，**不强制**要求外层 `<includes>` 包裹；建议写上以便阅读。
+- **`<dir from="..." to="..."/>`**
+- **`<file from="..." to="..."/>`**
+- **`<glob from="..." to="..."/>`**
+
+其中：
+
+- **`from`**：必填，路径相对 `target.xml` 所在目录。
+- **`to`**：可选，安装目标目录，相对安装前缀下的 `include/`；空值或省略表示安装到 `include/` 根。
+
+示例：
+
+```xml
+<includes>
+  <dir from="../../include/rockBase" to="rockBase"/>
+  <file from="../../include/common/version.hpp" to="common"/>
+  <glob from="../../include/rockBase/*.hpp" to="rockBase"/>
+</includes>
+```
+
+编译期（CMake 生成）：
+
+- `dir.from` 直接作为 include 目录。
+- `file.from` 取父目录作为 include 目录。
+- `glob.from` 取 glob 基目录作为 include 目录。
+
+安装期（CMake 生成）：
+
+- `dir` 生成目录安装规则：`install(DIRECTORY ... DESTINATION include/<to>)`。
+- `file` 生成文件安装规则：`install(FILES ... DESTINATION include/<to>)`。
+- `glob` 在 configure 阶段解析匹配文件并按文件安装到 `include/<to>`（无匹配会给 warning）。
+
+> 兼容性说明：旧写法 `<includes><dir>path</dir></includes>` 已不再支持；若仍使用会在 configure 阶段报错。
 
 ### 3.4 目标依赖 `<dependency name="..."/>`
 

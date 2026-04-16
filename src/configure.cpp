@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <vector>
@@ -626,6 +627,93 @@ int cmd_configure(const std::filesystem::path& cwd,
     return out.lexically_normal().generic_string();
   };
 
+  const auto include_base_dir = [](const std::filesystem::path& target_dir, const TargetDesc::IncludeEntry& inc) {
+    const auto src = (target_dir / inc.from).lexically_normal();
+    if (inc.kind == "dir")
+      return src;
+    if (inc.kind == "file")
+      return src.parent_path();
+    if (inc.kind == "glob")
+      return src.parent_path();
+    return std::filesystem::path();
+  };
+
+  const auto install_dest = [](const std::string& to) {
+    if (to.empty())
+      return std::string("include");
+    std::string out = to;
+    for (char& c : out) {
+      if (c == '\\')
+        c = '/';
+    }
+    while (!out.empty() && out.front() == '/')
+      out.erase(out.begin());
+    while (!out.empty() && out.back() == '/')
+      out.pop_back();
+    if (out.empty())
+      return std::string("include");
+    return std::string("include/") + out;
+  };
+
+  const auto wildcard_to_regex = [](const std::string& wildcard) {
+    std::string re = "^";
+    for (char c : wildcard) {
+      switch (c) {
+        case '*':
+          re += ".*";
+          break;
+        case '?':
+          re += ".";
+          break;
+        case '.':
+          re += "\\.";
+          break;
+        case '\\':
+          re += "\\\\";
+          break;
+        case '+':
+        case '(':
+        case ')':
+        case '^':
+        case '$':
+        case '|':
+        case '{':
+        case '}':
+        case '[':
+        case ']':
+          re.push_back('\\');
+          re.push_back(c);
+          break;
+        default:
+          re.push_back(c);
+          break;
+      }
+    }
+    re += "$";
+    return re;
+  };
+
+  const auto glob_matches = [&](const std::filesystem::path& target_dir, const std::string& wildcard_expr) {
+    std::vector<std::filesystem::path> files;
+    std::filesystem::path expr = (target_dir / wildcard_expr).lexically_normal();
+    const std::filesystem::path parent = expr.parent_path();
+    const std::string pat = expr.filename().string();
+    std::error_code ec;
+    if (!std::filesystem::exists(parent, ec))
+      return files;
+    std::regex re(wildcard_to_regex(pat));
+    for (std::filesystem::directory_iterator it(parent, std::filesystem::directory_options::skip_permission_denied, ec), end;
+         !ec && it != end; ++it) {
+      if (!it->is_regular_file())
+        continue;
+      const std::string name = it->path().filename().string();
+      if (std::regex_match(name, re))
+        files.push_back(it->path());
+    }
+    std::sort(files.begin(), files.end());
+    return files;
+  };
+
   auto is_lib = [](const TargetDesc& t) {
     return t.type == "static_library" || t.type == "shared_library";
   };
@@ -663,13 +751,20 @@ int cmd_configure(const std::filesystem::path& cwd,
       cm << " \"" << rel_to_cwd(build_root, src) << "\"";
     }
     cm << ")\n";
-    if (!t.include_dirs.empty()) {
+    if (!t.includes.empty()) {
+      std::set<std::string> inc_dirs;
+      for (const auto& inc_entry : t.includes) {
+        const auto inc = include_base_dir(lt.target_dir, inc_entry);
+        if (!inc.empty())
+          inc_dirs.insert(rel_to_cwd(build_root, inc));
+      }
+      if (!inc_dirs.empty()) {
       cm << "target_include_directories(" << t.name << " PUBLIC";
-      for (const auto& d : t.include_dirs) {
-        const auto inc = (lt.target_dir / d).lexically_normal();
-        cm << " \"" << rel_to_cwd(build_root, inc) << "\"";
+      for (const auto& inc : inc_dirs) {
+        cm << " \"" << inc << "\"";
       }
       cm << ")\n";
+      }
     }
   }
 
@@ -703,13 +798,20 @@ int cmd_configure(const std::filesystem::path& cwd,
         cm << " " << n;
       cm << ")\n";
     }
-    if (!t.include_dirs.empty()) {
+    if (!t.includes.empty()) {
+      std::set<std::string> inc_dirs;
+      for (const auto& inc_entry : t.includes) {
+        const auto inc = include_base_dir(lt.target_dir, inc_entry);
+        if (!inc.empty())
+          inc_dirs.insert(rel_to_cwd(build_root, inc));
+      }
+      if (!inc_dirs.empty()) {
       cm << "target_include_directories(" << t.name << " PRIVATE";
-      for (const auto& d : t.include_dirs) {
-        const auto inc = (lt.target_dir / d).lexically_normal();
-        cm << " \"" << rel_to_cwd(build_root, inc) << "\"";
+      for (const auto& inc : inc_dirs) {
+        cm << " \"" << inc << "\"";
       }
       cm << ")\n";
+      }
     }
   }
 
@@ -724,16 +826,52 @@ int cmd_configure(const std::filesystem::path& cwd,
   for (const auto& exe_name : install_exe_names)
     cm << " " << exe_name;
   cm << " RUNTIME DESTINATION bin)\n";
-  std::set<std::string> install_include_dirs;
+  struct InstallDirRule {
+    std::string src;
+    std::string dst;
+    bool operator<(const InstallDirRule& other) const {
+      if (dst != other.dst)
+        return dst < other.dst;
+      return src < other.src;
+    }
+  };
+  struct InstallFileRule {
+    std::string src;
+    std::string dst;
+    bool operator<(const InstallFileRule& other) const {
+      if (dst != other.dst)
+        return dst < other.dst;
+      return src < other.src;
+    }
+  };
+  std::set<InstallDirRule> install_dirs;
+  std::set<InstallFileRule> install_files;
   for (const auto& lt : pkg_targets) {
-    for (const auto& d : lt.desc.include_dirs) {
-      const auto inc = (lt.target_dir / d).lexically_normal();
-      install_include_dirs.insert(rel_to_cwd(build_root, inc));
+    for (const auto& inc_entry : lt.desc.includes) {
+      if (inc_entry.kind == "dir") {
+        const auto inc = (lt.target_dir / inc_entry.from).lexically_normal();
+        install_dirs.insert({rel_to_cwd(build_root, inc), install_dest(inc_entry.to)});
+      } else if (inc_entry.kind == "file") {
+        const auto f = (lt.target_dir / inc_entry.from).lexically_normal();
+        install_files.insert({rel_to_cwd(build_root, f), install_dest(inc_entry.to)});
+      } else if (inc_entry.kind == "glob") {
+        const auto files = glob_matches(lt.target_dir, inc_entry.from);
+        if (files.empty()) {
+          std::cerr << "configure: warning: include glob matched no files: " << inc_entry.from
+                    << " in target " << lt.desc.name << "\n";
+          continue;
+        }
+        for (const auto& f : files)
+          install_files.insert({rel_to_cwd(build_root, f), install_dest(inc_entry.to)});
+      }
     }
   }
-  for (const auto& inc : install_include_dirs) {
-    cm << "install(DIRECTORY \"" << inc
-       << "/\" DESTINATION include FILES_MATCHING PATTERN \"*.h\" PATTERN \"*.hh\" PATTERN \"*.hpp\" PATTERN \"*.hxx\")\n";
+  for (const auto& rule : install_dirs) {
+    cm << "install(DIRECTORY \"" << rule.src << "/\" DESTINATION " << rule.dst
+       << " FILES_MATCHING PATTERN \"*.h\" PATTERN \"*.hh\" PATTERN \"*.hpp\" PATTERN \"*.hxx\")\n";
+  }
+  for (const auto& rule : install_files) {
+    cm << "install(FILES \"" << rule.src << "\" DESTINATION " << rule.dst << ")\n";
   }
 
   const auto out_cmake = build_root / "CMakeLists.txt";

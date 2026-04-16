@@ -4,6 +4,6 @@
     <file>foo.cpp</file>
   </sources>
   <includes>
-    <dir>.</dir>
+    <dir from="."/>
   </includes>
 </target>

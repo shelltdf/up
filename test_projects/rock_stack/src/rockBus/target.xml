@@ -4,6 +4,6 @@
     <file>rock_bus.cpp</file>
   </sources>
   <includes>
-    <dir>../../include/rockBus</dir>
+    <glob from="../../include/rockBus/*.hpp" to="rockBus"/>
   </includes>
 </target>

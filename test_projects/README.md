@@ -72,7 +72,7 @@ flowchart LR
 
 ## rock_stack
 
-**定位**：演示 **`include/<库名>/`**、**`src/<库名>/`**、**`app/`**、**`test/`** 的常见拆分：每个库的 **`target.xml` 与对应 `.cpp` 同放在 `src/rockBase/`**（及 `rockNet`、`rockBus`）；头文件在 **`include/rockBase/`** 等，由 `target.xml` 中 **`<dir>../../include/rockBase</dir>`**（相对 `target.xml` 所在目录）加入包含路径；应用与测试各占用独立子目录，每目录一个 `target.xml`。
+**定位**：演示 **`include/<库名>/`**、**`src/<库名>/`**、**`app/`**、**`test/`** 的常见拆分：每个库的 **`target.xml` 与对应 `.cpp` 同放在 `src/rockBase/`**（及 `rockNet`、`rockBus`）；头文件在 **`include/rockBase/`** 等，通过新语法 **`<dir from=\"../../include/rockBase\" to=\"rockBase\"/>`** 声明包含与安装输出；应用与测试各占用独立子目录，每目录一个 `target.xml`。
 
 **包元数据**（`package.xml`）：包名 `rock_stack`，版本 `0.1.0`，无包级依赖。
 
@@ -81,7 +81,7 @@ flowchart LR
 | 区域 | 路径 | 说明 |
 |------|------|------|
 | 头文件 | `include/rockBase/`、`include/rockNet/`、`include/rockBus/` | 各库对外头文件（如 `rock_base.hpp`），供 `#include <rock_base.hpp>` 等。 |
-| 库 | `src/rockBase/`、`src/rockNet/`、`src/rockBus/` | 各目录内 **`target.xml` + `rock_*.cpp`**；`<file>` 为同目录源文件。三库 API 互相独立（适应当前 `configure` 不为静态库生成库间链接的行为）。 |
+| 库 | `src/rockBase/`、`src/rockNet/`、`src/rockBus/` | 各目录内 **`target.xml` + `rock_*.cpp`**；`<includes>` 使用 `from/to`，并在本包示例 `dir` / `file` / `glob` 三种写法，三库 API 互相独立。 |
 | 应用 | `app/rock_app_one/`、`app/rock_app_two/` | 两个可执行程序，各一 `target.xml` + `main.cpp`；同包可执行程序会链接本包全部静态库。 |
 | 测试 | `test/rockBase_test/`、`test/rockNet_test/`、`test/rockBus_test/` | 每库一个可执行单测（`assert`），由 CTest / `up test` 运行。 |
 

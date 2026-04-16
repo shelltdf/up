@@ -4,6 +4,6 @@
     <file>rock_base.cpp</file>
   </sources>
   <includes>
-    <dir>../../include/rockBase</dir>
+    <dir from="../../include/rockBase" to="rockBase"/>
   </includes>
 </target>

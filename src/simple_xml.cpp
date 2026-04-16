@@ -1,5 +1,6 @@
 #include "simple_xml.hpp"
 
+#include <cctype>
 #include <fstream>
 #include <regex>
 #include <sstream>
@@ -26,6 +27,16 @@ bool attr_string(const std::string& xml, const char* name, std::string& out) {
     return false;
   out = m[1].str();
   return true;
+}
+
+std::string trim_copy(std::string s) {
+  size_t b = 0;
+  while (b < s.size() && std::isspace(static_cast<unsigned char>(s[b])))
+    ++b;
+  size_t e = s.size();
+  while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1])))
+    --e;
+  return s.substr(b, e - b);
 }
 
 }  // namespace
@@ -92,9 +103,51 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
   for (std::sregex_iterator it(raw.begin(), raw.end(), dep_re), end; it != end; ++it)
     out.dependencies.push_back((*it)[1].str());
 
-  std::regex inc_re(R"rx(<dir\s*>\s*([^<]+)\s*</dir\s*>)rx");
-  for (std::sregex_iterator it(raw.begin(), raw.end(), inc_re), end; it != end; ++it)
-    out.include_dirs.push_back((*it)[1].str());
+  const size_t includes_open = raw.find("<includes");
+  if (includes_open != std::string::npos) {
+    const size_t includes_open_gt = raw.find('>', includes_open);
+    if (includes_open_gt == std::string::npos) {
+      error = "invalid <includes> tag";
+      return false;
+    }
+    const size_t includes_close = raw.find("</includes>", includes_open_gt + 1);
+    if (includes_close == std::string::npos) {
+      error = "missing </includes> closing tag";
+      return false;
+    }
+    const std::string body = raw.substr(includes_open_gt + 1, includes_close - includes_open_gt - 1);
+    std::regex item_re(R"rx(<\s*([A-Za-z_][A-Za-z0-9_]*)\s*([^>]*)/>)rx");
+    for (std::sregex_iterator it(body.begin(), body.end(), item_re), end; it != end; ++it) {
+      TargetDesc::IncludeEntry inc;
+      inc.kind = trim_copy((*it)[1].str());
+      if (!(inc.kind == "dir" || inc.kind == "file" || inc.kind == "glob")) {
+        error = "unsupported includes entry: " + inc.kind + " (expected dir/file/glob)";
+        return false;
+      }
+      const std::string attrs = (*it)[2].str();
+      if (!attr_string(attrs, "from", inc.from)) {
+        error = "includes entry requires from attribute";
+        return false;
+      }
+      inc.from = trim_copy(inc.from);
+      if (inc.from.empty()) {
+        error = "includes entry from attribute cannot be empty";
+        return false;
+      }
+      if (!attr_string(attrs, "to", inc.to))
+        inc.to.clear();
+      else
+        inc.to = trim_copy(inc.to);
+      out.includes.push_back(std::move(inc));
+    }
+
+    // old style is intentionally not supported anymore
+    std::regex old_style_re(R"rx(<\s*dir\s*>\s*[^<]+\s*</\s*dir\s*>)rx");
+    if (std::regex_search(body, old_style_re)) {
+      error = "old <includes><dir>path</dir></includes> syntax is not supported; use <dir from=\"...\" to=\"...\"/>";
+      return false;
+    }
+  }
 
   error.clear();
   return true;

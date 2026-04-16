@@ -4,6 +4,6 @@
     <file>hello_lib.cpp</file>
   </sources>
   <includes>
-    <dir>.</dir>
+    <dir from="."/>
   </includes>
 </target>

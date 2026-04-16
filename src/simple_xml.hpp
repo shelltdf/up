@@ -14,11 +14,17 @@ struct PackageDesc {
 };
 
 struct TargetDesc {
+  struct IncludeEntry {
+    std::string kind;  // dir | file | glob
+    std::string from;  // relative to target.xml directory
+    std::string to;    // relative to install include/
+  };
+
   std::string name;
   std::string type;  // executable | static_library | shared_library
   std::vector<std::string> sources;
   std::vector<std::string> dependencies;  // package:target or target(same package)
-  std::vector<std::string> include_dirs;  // relative to target.xml directory
+  std::vector<IncludeEntry> includes;
 };
 
 // Minimal attribute scanner for root elements (no full XML parser dependency).
