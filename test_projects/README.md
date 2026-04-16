@@ -114,13 +114,15 @@ flowchart LR
 
 ## meta_codegen
 
-定位：演示元编程/代码生成工具链。包含 3 个可执行程序：
+定位：演示元编程/代码生成工具链。包含 4 个可执行程序：
 
 - `moc`：输入 `.h`，输出对应 `.meta.cpp`
 - `uic`：输入 `.ui`，输出对应 `.h` + `.cpp`
 - `rc`：输入 `.rc`，输出对应 `.h` + `.cpp`
+- `meta_codegen_demo`：校验生成文件存在且含预期符号（端到端 smoke test）
 
 示例输入位于：`meta_codegen/samples/`
+工具目录已合并为：`meta_codegen/meta_tool/{moc,uic,rc}/`
 
 ---
 
@@ -151,6 +153,7 @@ Set-Location test_projects
 ..\_build\Release\up.exe run moc .\meta_codegen\samples\widget.h .\meta_codegen\samples\widget.meta.cpp
 ..\_build\Release\up.exe run uic .\meta_codegen\samples\main_panel.ui .\meta_codegen\samples\ui_main_panel.h .\meta_codegen\samples\ui_main_panel.cpp
 ..\_build\Release\up.exe run rc .\meta_codegen\samples\app.rc .\meta_codegen\samples\rc_app.h .\meta_codegen\samples\rc_app.cpp
+..\_build\Release\up.exe run meta_codegen_demo
 ```
 
 仅验证父子包示例（在 `test_projects` 目录内）：
