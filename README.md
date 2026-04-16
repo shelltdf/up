@@ -86,7 +86,7 @@ python package.py
 ├── README.md           # 本文件
 ├── mindmap.mmd         # 设计思维导图
 ├── src/                # up CLI 源码（*.hpp 与 *.cpp）
-├── src_gui/            # up-gui 外壳（Windows: up_gui_win32.cpp）
+├── src_gui/            # up-gui 外壳（Windows: up_gui_win32.cpp；Linux: GTK3；macOS: Cocoa；共享 gui_unix_shared）
 └── test_projects/      # 测试包集合（每子目录一包）
 ```
 

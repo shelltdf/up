@@ -1,7 +1,7 @@
 namespace up::gui::platform::cocoa {
-int run();
+int run(int argc, char** argv);
 }
 
-int main() {
-  return up::gui::platform::cocoa::run();
+int main(int argc, char** argv) {
+  return up::gui::platform::cocoa::run(argc, argv);
 }

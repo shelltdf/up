@@ -1,12 +1,422 @@
-#include "../core/gui_core_actions.hpp"
+// macOS Cocoa：与 GTK/Linux 端一致的 up-gui 主窗口（同一 up_gui_settings.txt 与 configure 传参）。
 
-#include <iostream>
+#import <Cocoa/Cocoa.h>
+
+#include "../core/gui_unix_shared.hpp"
+
+#include <atomic>
+#include <filesystem>
+#include <string>
+#include <thread>
+#include <vector>
 
 namespace up::gui::platform::cocoa {
 
-int run() {
-  // Stage-1 shell: platform windowing is intentionally thin and delegates behavior to core.
-  std::cout << "up-gui cocoa shell is enabled. Core bridge ready.\n";
+std::atomic<bool> g_busy{false};
+
+PersistedEnv g_persist{};
+std::filesystem::path g_settings_file;
+std::filesystem::path g_up_exe;
+
+NSTextField* g_tf_cwd;
+NSTextField* g_tf_build;
+NSTextField* g_tf_install;
+NSTextField* g_tf_extra;
+NSTextField* g_tf_run;
+NSTextField* g_tf_test;
+NSTableView* g_table_scan;
+NSMutableArray<NSString*>* g_scan_rows;
+NSTextView* g_log;
+NSTextField* g_status;
+
+static void trim_ascii(std::string& s) {
+  while (!s.empty() && (s.front() == ' ' || s.front() == '\t'))
+    s.erase(0, 1);
+  while (!s.empty() && (s.back() == ' ' || s.back() == '\t'))
+    s.pop_back();
+}
+
+static std::string ns_to_utf8(NSString* s) {
+  if (!s)
+    return {};
+  return std::string([s UTF8String]);
+}
+
+static NSString* utf8_to_ns(const std::string& s) {
+  return [NSString stringWithUTF8String:s.c_str()];
+}
+
+static void log_append(NSString* line) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (g_log) {
+      NSTextStorage* st = [g_log textStorage];
+      [st appendAttributedString:[[NSAttributedString alloc] initWithString:line]];
+      [g_log scrollRangeToVisible:NSMakeRange([[g_log string] length], 0)];
+    }
+  });
+}
+
+static void log_line(const std::string& s) {
+  log_append([NSString stringWithUTF8String:(s + "\n").c_str()]);
+}
+
+static void set_status(const char* s) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (g_status)
+      [g_status setStringValue:[NSString stringWithUTF8String:s]];
+  });
+}
+
+static std::vector<std::string> collect_scans() {
+  std::vector<std::string> out;
+  for (NSString* row in g_scan_rows)
+    if (row.length)
+      out.push_back([row UTF8String]);
+  return out;
+}
+
+static void save_ui() {
+  g_persist.browse_cwd = unix_shared::path_to_portable_utf8(ns_to_utf8([g_tf_cwd stringValue]));
+  unix_shared::save_settings(g_settings_file, g_persist);
+}
+
+static void append_install_dir_flag(std::string& args, const std::string& inst_edit, std::string& err) {
+  std::string inst = unix_shared::path_to_portable_utf8(inst_edit);
+  trim_ascii(inst);
+  if (inst.empty()) {
+    err = "Install Dir empty";
+    return;
+  }
+  const std::string leaf = unix_shared::intermediate_leaf_from_build_dir_field(inst);
+  if (leaf.empty()) {
+    err = "Invalid install dir leaf";
+    return;
+  }
+  args += " --install-dir-name ";
+  args += unix_shared::shell_single_quote(leaf);
+}
+
+static void run_up_async(const std::string& args_no_exe) {
+  if (g_busy.exchange(true)) {
+    log_line("[busy] previous run still in progress");
+    g_busy = false;
+    return;
+  }
+  const std::string cwd = unix_shared::path_to_portable_utf8(ns_to_utf8([g_tf_cwd stringValue]));
+  if (cwd.empty()) {
+    log_line("[error] Set CWD first.");
+    g_busy = false;
+    return;
+  }
+  if (!std::filesystem::exists(g_up_exe)) {
+    log_line("[error] `up` not found next to this executable.");
+    g_busy = false;
+    return;
+  }
+  std::string extra = ns_to_utf8([g_tf_extra stringValue]);
+  trim_ascii(extra);
+
+  std::thread([args_no_exe, cwd, extra]() {
+    const std::filesystem::path cwd_p(cwd);
+    std::string cmd = unix_shared::shell_single_quote(g_up_exe.generic_string()) + " " + args_no_exe;
+    if (!extra.empty())
+      cmd += " " + extra;
+    std::string out;
+    int code = -1;
+    const bool ok = unix_shared::run_shell_in_dir(cwd_p, cmd, out, code);
+    if (!ok)
+      log_line("[error] failed to spawn shell");
+    else {
+      if (!out.empty())
+        log_line(out);
+      log_line("[exit " + std::to_string(code) + "]");
+    }
+    g_busy = false;
+    set_status("Ready");
+  }).detach();
+  set_status("Running up…");
+}
+
+@interface UpGuiCtrl : NSObject <NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate>
+@end
+
+@implementation UpGuiCtrl
+
+- (void)browseCwd:(id)sender {
+  (void)sender;
+  NSOpenPanel* p = [NSOpenPanel openPanel];
+  [p setCanChooseFiles:NO];
+  [p setCanChooseDirectories:YES];
+  [p setAllowsMultipleSelection:NO];
+  if ([p runModal] == NSModalResponseOK) {
+    NSURL* u = [[p URLs] firstObject];
+    if (u) {
+      std::string path = unix_shared::path_to_portable_utf8([[u path] UTF8String]);
+      [g_tf_cwd setStringValue:utf8_to_ns(path)];
+    }
+  }
+}
+
+- (void)scanAdd:(id)sender {
+  (void)sender;
+  NSOpenPanel* pan = [NSOpenPanel openPanel];
+  [pan setCanChooseDirectories:YES];
+  [pan setCanChooseFiles:NO];
+  if ([pan runModal] == NSModalResponseOK) {
+    NSURL* u = [[pan URLs] firstObject];
+    if (u) {
+      NSString* path = [u path];
+      [g_scan_rows addObject:path];
+      [g_table_scan reloadData];
+    }
+  }
+}
+
+- (void)scanRemove:(id)sender {
+  (void)sender;
+  const NSInteger row = [g_table_scan selectedRow];
+  if (row >= 0 && row < (NSInteger)[g_scan_rows count]) {
+    [g_scan_rows removeObjectAtIndex:static_cast<NSUInteger>(row)];
+    [g_table_scan reloadData];
+  }
+}
+
+- (void)doConfigure:(id)sender {
+  (void)sender;
+  const std::string cwd = unix_shared::path_to_portable_utf8(ns_to_utf8([g_tf_cwd stringValue]));
+  if (cwd.empty()) {
+    log_line("[error] Set CWD first.");
+    return;
+  }
+  std::string leaf, qerr;
+  if (!unix_shared::query_print_build_dir_name(g_up_exe, std::filesystem::path(cwd), ns_to_utf8([g_tf_build stringValue]),
+                                              g_persist, leaf, qerr)) {
+    log_line("[error] print-build-dir-name: " + qerr);
+    return;
+  }
+  std::string args = "configure";
+  unix_shared::append_scan_args_utf8(args, collect_scans(), cwd);
+  unix_shared::append_configure_env_opts(g_persist, args);
+  args += " --build-dir-name ";
+  args += unix_shared::shell_single_quote(leaf);
+  run_up_async(args);
+}
+
+- (void)doBuild:(id)sender {
+  (void)sender;
+  std::string args = "build";
+  const std::string leaf = unix_shared::intermediate_leaf_from_build_dir_field(ns_to_utf8([g_tf_build stringValue]));
+  if (leaf.empty()) {
+    log_line("[error] Set Build Dir first.");
+    return;
+  }
+  args += " --build-dir-name ";
+  args += unix_shared::shell_single_quote(leaf);
+  run_up_async(args);
+}
+
+- (void)doRun:(id)sender {
+  (void)sender;
+  std::string tgt = ns_to_utf8([g_tf_run stringValue]);
+  trim_ascii(tgt);
+  if (tgt.empty()) {
+    log_line("[error] Run target empty.");
+    return;
+  }
+  std::string err, args = "run";
+  append_install_dir_flag(args, ns_to_utf8([g_tf_install stringValue]), err);
+  if (!err.empty()) {
+    log_line("[error] " + err);
+    return;
+  }
+  args += " ";
+  args += unix_shared::shell_single_quote(tgt);
+  run_up_async(args);
+}
+
+- (void)doTest:(id)sender {
+  (void)sender;
+  std::string tgt = ns_to_utf8([g_tf_test stringValue]);
+  trim_ascii(tgt);
+  std::string err, args = "test";
+  append_install_dir_flag(args, ns_to_utf8([g_tf_install stringValue]), err);
+  if (!err.empty()) {
+    log_line("[error] " + err);
+    return;
+  }
+  if (!tgt.empty()) {
+    args += " ";
+    args += unix_shared::shell_single_quote(tgt);
+  }
+  run_up_async(args);
+}
+
+- (void)doPack:(id)sender {
+  (void)sender;
+  std::string err, args = "pack";
+  append_install_dir_flag(args, ns_to_utf8([g_tf_install stringValue]), err);
+  if (!err.empty()) {
+    log_line("[error] " + err);
+    return;
+  }
+  run_up_async(args);
+}
+
+- (NSInteger)numberOfRowsInTableView:(NSTableView*)tv {
+  (void)tv;
+  return (NSInteger)[g_scan_rows count];
+}
+
+- (id)tableView:(NSTableView*)tv objectValueForTableColumn:(NSTableColumn*)col row:(NSInteger)row {
+  (void)tv;
+  (void)col;
+  if (row < 0 || row >= (NSInteger)[g_scan_rows count])
+    return @"";
+  return g_scan_rows[static_cast<NSUInteger>(row)];
+}
+
+- (void)windowWillClose:(NSNotification*)n {
+  (void)n;
+  save_ui();
+  [NSApp terminate:nil];
+}
+
+@end
+
+static NSButton* makeBtn(NSString* title, id target, SEL act) {
+  NSButton* b = [[NSButton alloc] initWithFrame:NSZeroRect];
+  [b setTitle:title];
+  [b setBezelStyle:NSBezelStyleRounded];
+  [b setTarget:target];
+  [b setAction:act];
+  return b;
+}
+
+static NSTextField* makeLabel(NSString* t) {
+  NSTextField* f = [[NSTextField alloc] initWithFrame:NSZeroRect];
+  [f setStringValue:t];
+  [f setBezeled:NO];
+  [f setDrawsBackground:NO];
+  [f setEditable:NO];
+  [f setSelectable:NO];
+  return f;
+}
+
+static NSTextField* makeField() {
+  NSTextField* f = [[NSTextField alloc] initWithFrame:NSZeroRect];
+  [f setEditable:YES];
+  return f;
+}
+
+static void build_window() {
+  g_settings_file = unix_shared::settings_path_near_executable();
+  g_up_exe = unix_shared::executable_parent_dir() / "up";
+  (void)unix_shared::load_settings(g_settings_file, g_persist);
+  g_scan_rows = [NSMutableArray array];
+
+  const CGFloat W = 920, H = 680;
+  NSRect rect = NSMakeRect(100, 100, W, H);
+  NSWindow* win = [[NSWindow alloc] initWithContentRect:rect styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+                                                                            NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable)
+                                                backing:NSBackingStoreBuffered defer:NO];
+  [win setTitle:@"up-gui"];
+  UpGuiCtrl* ctrl = [[UpGuiCtrl alloc] init];
+  [win setDelegate:ctrl];
+
+  NSView* root = [win contentView];
+  [root setAutoresizesSubviews:YES];
+
+  __block CGFloat y = H - 40;
+  NSButton* b1 = makeBtn(@"Configure", ctrl, @selector(doConfigure:));
+  NSButton* b2 = makeBtn(@"Build", ctrl, @selector(doBuild:));
+  NSButton* b3 = makeBtn(@"Run", ctrl, @selector(doRun:));
+  NSButton* b4 = makeBtn(@"Test", ctrl, @selector(doTest:));
+  NSButton* b5 = makeBtn(@"Pack", ctrl, @selector(doPack:));
+  CGFloat x = 20;
+  for (NSButton* b in @[ b1, b2, b3, b4, b5 ]) {
+    [b setFrame:NSMakeRect(x, y, 100, 28)];
+    [root addSubview:b];
+    x += 108;
+  }
+  y -= 44;
+
+  auto place_row = ^(NSString* label, NSTextField** field, BOOL browse, CGFloat height) {
+    NSTextField* lab = makeLabel(label);
+    [lab setFrame:NSMakeRect(20, y - height + 4, 100, height)];
+    [root addSubview:lab];
+    *field = makeField();
+    [*field setFrame:NSMakeRect(130, y - height, W - 170 - (browse ? 100 : 0), height)];
+    [root addSubview:*field];
+    if (browse) {
+      NSButton* bb = makeBtn(@"Browse…", ctrl, @selector(browseCwd:));
+      [bb setFrame:NSMakeRect(W - 120, y - height, 90, height)];
+      [root addSubview:bb];
+    }
+    y -= height + 8;
+  };
+
+  place_row(@"CWD", &g_tf_cwd, YES, 24);
+  y -= 8;
+
+  NSTextField* scanLab = makeLabel(@"Scan");
+  [scanLab setFrame:NSMakeRect(20, y - 100, 100, 20)];
+  [root addSubview:scanLab];
+  g_table_scan = [[NSTableView alloc] initWithFrame:NSMakeRect(130, y - 100, W - 260, 100)];
+  NSTableColumn* col = [[NSTableColumn alloc] initWithIdentifier:@"p"];
+  [[col headerCell] setStringValue:@"Scan roots"];
+  [col setWidth:W - 280];
+  [g_table_scan addTableColumn:col];
+  [g_table_scan setDataSource:ctrl];
+  [g_table_scan setDelegate:ctrl];
+  NSScrollView* sv = [[NSScrollView alloc] initWithFrame:NSMakeRect(130, y - 100, W - 260, 100)];
+  [sv setDocumentView:g_table_scan];
+  [sv setHasVerticalScroller:YES];
+  [root addSubview:sv];
+  NSButton* sa = makeBtn(@"+Add", ctrl, @selector(scanAdd:));
+  [sa setFrame:NSMakeRect(W - 120, y - 40, 90, 28)];
+  [root addSubview:sa];
+  NSButton* sd = makeBtn(@"-Remove", ctrl, @selector(scanRemove:));
+  [sd setFrame:NSMakeRect(W - 120, y - 80, 90, 28)];
+  [root addSubview:sd];
+  y -= 120;
+
+  place_row(@"Build dir", &g_tf_build, NO, 24);
+  place_row(@"Install dir", &g_tf_install, NO, 24);
+  place_row(@"Extra args", &g_tf_extra, NO, 24);
+  place_row(@"Run target", &g_tf_run, NO, 24);
+  place_row(@"Test name", &g_tf_test, NO, 24);
+
+  NSScrollView* logScroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(20, 80, W - 40, y - 100)];
+  [logScroll setHasVerticalScroller:YES];
+  g_log = [[NSTextView alloc] initWithFrame:[[logScroll contentView] bounds]];
+  [g_log setEditable:NO];
+  [g_log setFont:[NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular]];
+  [logScroll setDocumentView:g_log];
+  [root addSubview:logScroll];
+
+  g_status = makeField();
+  [g_status setEditable:NO];
+  [g_status setFrame:NSMakeRect(20, 20, W - 40, 24)];
+  [g_status setStringValue:@"Ready"];
+  [root addSubview:g_status];
+
+  if (!g_persist.browse_cwd.empty())
+    [g_tf_cwd setStringValue:utf8_to_ns(g_persist.browse_cwd)];
+
+  [win makeKeyAndOrderFront:nil];
+  log_line("up-gui (Cocoa) — settings: " + g_settings_file.generic_string());
+}
+
+int run(int argc, char** argv) {
+  (void)argc;
+  (void)argv;
+  @autoreleasepool {
+    [NSApplication sharedApplication];
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+    build_window();
+    [NSApp activateIgnoringOtherApps:YES];
+    [NSApp run];
+  }
   return 0;
 }
 

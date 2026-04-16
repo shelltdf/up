@@ -67,11 +67,15 @@ elseif(APPLE)
   set(UP_GUI_PLATFORM_SOURCES
     src_gui/main/main_cocoa.mm
     src_gui/platform/cocoa_gui.mm
+    src_gui/core/gui_unix_shared.cpp
   )
 else()
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
   set(UP_GUI_PLATFORM_SOURCES
-    src_gui/main/main_x11.cpp
-    src_gui/platform/xlib_gui.cpp
+    src_gui/main/main_unix.cpp
+    src_gui/platform/gtk_gui.cpp
+    src_gui/core/gui_unix_shared.cpp
   )
 endif()
 set(UP_GUI_ALL_SOURCES ${UP_GUI_PLATFORM_SOURCES} ${UP_GUI_CORE_SOURCES})
@@ -90,8 +94,9 @@ elseif(APPLE)
   target_link_libraries(up-gui PRIVATE ${COCOA_FRAMEWORK})
 else()
   add_executable(up-gui ${UP_GUI_ALL_SOURCES})
-  find_package(X11 REQUIRED)
-  target_link_libraries(up-gui PRIVATE X11::X11)
+  target_include_directories(up-gui PRIVATE ${GTK3_INCLUDE_DIRS})
+  target_link_libraries(up-gui PRIVATE ${GTK3_LIBRARIES})
+  target_compile_options(up-gui PRIVATE ${GTK3_CFLAGS_OTHER})
 endif()
 target_include_directories(up-gui PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/src_gui"
