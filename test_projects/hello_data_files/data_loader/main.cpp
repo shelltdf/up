@@ -22,19 +22,28 @@ std::string first_line_of(const fs::path& p) {
 }
 
 fs::path resolve_data_root(const fs::path& exe_path) {
-  // Installed run: <prefix>/bin/data_loader.exe -> <prefix>/include/hello_data_files
-  fs::path data_root = exe_path.parent_path().parent_path() / "include" / "hello_data_files";
+  // Installed run: <prefix>/bin/data_loader.exe -> <prefix>/assets/hello_data_files
+  fs::path data_root = exe_path.parent_path().parent_path() / "assets" / "hello_data_files";
+  if (fs::exists(data_root)) {
+    return data_root;
+  }
+  // Backward compatibility with previous include-based demo install path.
+  data_root = exe_path.parent_path().parent_path() / "include" / "hello_data_files";
   if (fs::exists(data_root)) {
     return data_root;
   }
 
   // CTest run from build tree: .../.intermediate/build/<arch>/out/Release/data_loader.exe
-  // -> .../.intermediate/install/<arch>/include/hello_data_files
+  // -> .../.intermediate/install/<arch>/assets/hello_data_files
   for (fs::path p = exe_path.parent_path(); !p.empty(); p = p.parent_path()) {
     if (p.filename() == "out" && !p.parent_path().empty()) {
       const fs::path arch_dir = p.parent_path();
       const fs::path build_dir = arch_dir.parent_path();
       if (!build_dir.empty() && build_dir.filename() == "build") {
+        data_root = build_dir.parent_path() / "install" / arch_dir.filename() / "assets" / "hello_data_files";
+        if (fs::exists(data_root)) {
+          return data_root;
+        }
         data_root = build_dir.parent_path() / "install" / arch_dir.filename() / "include" / "hello_data_files";
         if (fs::exists(data_root)) {
           return data_root;

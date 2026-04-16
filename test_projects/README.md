@@ -105,13 +105,15 @@ flowchart LR
 
 ## hello_data_files
 
-定位：演示 `target.xml` 中 `includes` 的 `glob from/to` 用法，把非代码资源（`xml/json/svg`）安装到前缀目录并由程序运行时读取。
+定位：演示 `target.xml` 中 `assets` 的 `glob from/to` 用法，把非代码资源（`xml/json/svg`）安装到前缀目录并由程序运行时读取。
 
 - 包名：`hello_data_files`
-- 目标：`data_loader`（`executable`）
+- 目标：
+  - `data_loader`（`executable`，依赖 `hello_data_assets`）
+  - `hello_data_assets`（`asset_bundle`，资源安装目标）
 - 资源目录：`hello_data_files/assets/`
-- 安装规则：`<glob from="../assets/*.*" to="hello_data_files"/>`
-- 运行时读取路径：`<install_prefix>/include/hello_data_files/`
+- 安装规则：`hello_data_assets/target.xml` 中声明 `<assets><glob from="./*.*" to="assets/hello_data_files"/></assets>`
+- 运行时读取路径：`<install_prefix>/assets/hello_data_files/`
 
 ---
 

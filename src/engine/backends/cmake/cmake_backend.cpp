@@ -41,6 +41,7 @@ std::string build_cmake_configure_command(const ConfigureBackendContext& ctx) {
 
 int write_cmake_lists(const ConfigureGraphModel& model) {
   std::ostringstream cm;
+  int command_idx = 0;
   cm << "cmake_minimum_required(VERSION 3.20)\n";
   cm << "project(" << model.package_name << " LANGUAGES CXX)\n";
   cm << "set(CMAKE_CXX_STANDARD 17)\n";
@@ -59,6 +60,18 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
       for (const auto& inc : t.include_dirs)
         cm << " \"" << inc << "\"";
       cm << ")\n";
+    }
+    for (const auto& s : t.source_rules) {
+      if (!s.preprocess_command.empty()) {
+        const std::string stamp = "pre_stamp_" + std::to_string(command_idx++);
+        cm << "add_custom_command(OUTPUT " << stamp << " COMMAND " << s.preprocess_command
+           << " COMMAND ${CMAKE_COMMAND} -E touch " << stamp << " DEPENDS \"" << s.path << "\")\n";
+        cm << "add_custom_target(pre_target_" << command_idx << " DEPENDS " << stamp << ")\n";
+        cm << "add_dependencies(" << t.name << " pre_target_" << command_idx << ")\n";
+      }
+      if (!s.postprocess_command.empty()) {
+        cm << "add_custom_command(TARGET " << t.name << " POST_BUILD COMMAND " << s.postprocess_command << ")\n";
+      }
     }
   }
 
@@ -94,10 +107,32 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
     cm << " " << exe_name;
   cm << " RUNTIME DESTINATION bin)\n";
   for (const auto& rule : model.install_dir_rules) {
+    if (!rule.preprocess_command.empty())
+      cm << "add_custom_target(pre_include_dir_" << command_idx++ << " COMMAND " << rule.preprocess_command << ")\n";
+    if (!rule.postprocess_command.empty())
+      cm << "add_custom_target(post_include_dir_" << command_idx++ << " COMMAND " << rule.postprocess_command << ")\n";
     cm << "install(DIRECTORY \"" << rule.src << "/\" DESTINATION " << rule.dst
        << " FILES_MATCHING PATTERN \"*.h\" PATTERN \"*.hh\" PATTERN \"*.hpp\" PATTERN \"*.hxx\")\n";
   }
   for (const auto& rule : model.install_file_rules) {
+    if (!rule.preprocess_command.empty())
+      cm << "add_custom_target(pre_include_file_" << command_idx++ << " COMMAND " << rule.preprocess_command << ")\n";
+    if (!rule.postprocess_command.empty())
+      cm << "add_custom_target(post_include_file_" << command_idx++ << " COMMAND " << rule.postprocess_command << ")\n";
+    cm << "install(FILES \"" << rule.src << "\" DESTINATION " << rule.dst << ")\n";
+  }
+  for (const auto& rule : model.asset_dir_rules) {
+    if (!rule.preprocess_command.empty())
+      cm << "add_custom_target(pre_asset_dir_" << command_idx++ << " COMMAND " << rule.preprocess_command << ")\n";
+    if (!rule.postprocess_command.empty())
+      cm << "add_custom_target(post_asset_dir_" << command_idx++ << " COMMAND " << rule.postprocess_command << ")\n";
+    cm << "install(DIRECTORY \"" << rule.src << "/\" DESTINATION " << rule.dst << ")\n";
+  }
+  for (const auto& rule : model.asset_file_rules) {
+    if (!rule.preprocess_command.empty())
+      cm << "add_custom_target(pre_asset_file_" << command_idx++ << " COMMAND " << rule.preprocess_command << ")\n";
+    if (!rule.postprocess_command.empty())
+      cm << "add_custom_target(post_asset_file_" << command_idx++ << " COMMAND " << rule.postprocess_command << ")\n";
     cm << "install(FILES \"" << rule.src << "\" DESTINATION " << rule.dst << ")\n";
   }
 

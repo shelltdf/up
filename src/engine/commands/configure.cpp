@@ -29,6 +29,10 @@ void collect_desc_files(const std::filesystem::path& root, std::vector<std::file
                                                          std::filesystem::directory_options::skip_permission_denied),
        end;
        it != end; ++it) {
+    if (it->is_directory() && it->path().filename() == ".intermediate") {
+      it.disable_recursion_pending();
+      continue;
+    }
     if (!it->is_regular_file())
       continue;
     const auto p = it->path();
@@ -215,6 +219,21 @@ int cmd_configure(const std::filesystem::path& cwd,
   for (const auto& r : roots) {
     collect_desc_files(r, package_files, target_files);
   }
+  {
+    auto dedup = [](std::vector<std::filesystem::path>& v) {
+      std::set<std::string> seen;
+      std::vector<std::filesystem::path> out;
+      out.reserve(v.size());
+      for (const auto& p : v) {
+        const std::string key = std::filesystem::absolute(p).lexically_normal().generic_string();
+        if (seen.insert(key).second)
+          out.push_back(p);
+      }
+      v = std::move(out);
+    };
+    dedup(package_files);
+    dedup(target_files);
+  }
 
   for (const auto& p : package_files) {
     if (!require_ascii_path(p))
@@ -278,7 +297,7 @@ int cmd_configure(const std::filesystem::path& cwd,
     lt.desc = std::move(td);
     const std::string key = pkg_name + ":" + lt.desc.name;
     if (target_index.count(key)) {
-      std::cerr << "configure: duplicate target key: " << key << "\n";
+      std::cerr << "configure: duplicate target key: " << key << " at " << tpath << "\n";
       return 3;
     }
     target_index[key] = all_targets.size();
@@ -385,7 +404,7 @@ int cmd_configure(const std::filesystem::path& cwd,
     }
   }
 
-  std::set<std::string> extra_lib_keys;
+  std::set<std::string> extra_target_keys;
   for (const auto& lt : pkg_targets) {
     const std::string self_key = lt.package_name + ":" + lt.desc.name;
     for (const auto& dep_ref : lt.desc.dependencies) {
@@ -407,17 +426,19 @@ int cmd_configure(const std::filesystem::path& cwd,
         return 3;
       }
       const auto& dep_lt = all_targets[it->second];
-      if (!(dep_lt.desc.type == "static_library" || dep_lt.desc.type == "shared_library")) {
-        std::cerr << "configure: target dependency must reference a library target: " << dep_key << "\n";
+      const bool dep_is_link_lib = (dep_lt.desc.type == "static_library" || dep_lt.desc.type == "shared_library");
+      const bool dep_is_asset_bundle = (dep_lt.desc.type == "asset_bundle");
+      if (!(dep_is_link_lib || dep_is_asset_bundle)) {
+        std::cerr << "configure: target dependency must reference a library or asset_bundle target: " << dep_key << "\n";
         return 3;
       }
-      if (dep_key != self_key)
+      if (dep_key != self_key && dep_is_link_lib)
         exe_extra_links[lt.desc.name].push_back(dep_lt.desc.name);
       if (dep_pkg != primary_pkg.name)
-        extra_lib_keys.insert(dep_key);
+        extra_target_keys.insert(dep_key);
     }
   }
-  for (const auto& k : extra_lib_keys) {
+  for (const auto& k : extra_target_keys) {
     const auto it = target_index.find(k);
     if (it != target_index.end())
       extra_lib_targets.push_back(all_targets[it->second]);
@@ -474,6 +495,20 @@ int cmd_configure(const std::filesystem::path& cwd,
     if (out.empty())
       return std::string("include");
     return std::string("include/") + out;
+  };
+  const auto asset_install_dest = [](const std::string& to) {
+    std::string out = to;
+    for (char& c : out) {
+      if (c == '\\')
+        c = '/';
+    }
+    while (!out.empty() && out.front() == '/')
+      out.erase(out.begin());
+    while (!out.empty() && out.back() == '/')
+      out.pop_back();
+    if (out.empty())
+      return std::string("assets");
+    return out;
   };
 
   const auto wildcard_to_regex = [](const std::string& wildcard) {
@@ -554,6 +589,8 @@ int cmd_configure(const std::filesystem::path& cwd,
   struct InstallDirRule {
     std::string src;
     std::string dst;
+    std::string preprocess_command;
+    std::string postprocess_command;
     bool operator<(const InstallDirRule& other) const {
       if (dst != other.dst)
         return dst < other.dst;
@@ -563,6 +600,8 @@ int cmd_configure(const std::filesystem::path& cwd,
   struct InstallFileRule {
     std::string src;
     std::string dst;
+    std::string preprocess_command;
+    std::string postprocess_command;
     bool operator<(const InstallFileRule& other) const {
       if (dst != other.dst)
         return dst < other.dst;
@@ -571,14 +610,18 @@ int cmd_configure(const std::filesystem::path& cwd,
   };
   std::set<InstallDirRule> install_dirs;
   std::set<InstallFileRule> install_files;
+  std::set<InstallDirRule> asset_dirs;
+  std::set<InstallFileRule> asset_files;
   for (const auto& lt : build_targets) {
     for (const auto& inc_entry : lt.desc.includes) {
       if (inc_entry.kind == "dir") {
         const auto inc = (lt.target_dir / inc_entry.from).lexically_normal();
-        install_dirs.insert({rel_to_cwd(build_root, inc), install_dest(inc_entry.to)});
+        install_dirs.insert({rel_to_cwd(build_root, inc), install_dest(inc_entry.to), inc_entry.preprocess_command,
+                             inc_entry.postprocess_command});
       } else if (inc_entry.kind == "file") {
         const auto f = (lt.target_dir / inc_entry.from).lexically_normal();
-        install_files.insert({rel_to_cwd(build_root, f), install_dest(inc_entry.to)});
+        install_files.insert({rel_to_cwd(build_root, f), install_dest(inc_entry.to), inc_entry.preprocess_command,
+                              inc_entry.postprocess_command});
       } else if (inc_entry.kind == "glob") {
         const auto files = glob_matches(lt.target_dir, inc_entry.from);
         if (files.empty()) {
@@ -587,7 +630,29 @@ int cmd_configure(const std::filesystem::path& cwd,
           continue;
         }
         for (const auto& f : files)
-          install_files.insert({rel_to_cwd(build_root, f), install_dest(inc_entry.to)});
+          install_files.insert({rel_to_cwd(build_root, f), install_dest(inc_entry.to), inc_entry.preprocess_command,
+                                inc_entry.postprocess_command});
+      }
+    }
+    for (const auto& ae : lt.desc.assets) {
+      if (ae.kind == "dir") {
+        const auto d = (lt.target_dir / ae.from).lexically_normal();
+        asset_dirs.insert(
+            {rel_to_cwd(build_root, d), asset_install_dest(ae.to), ae.preprocess_command, ae.postprocess_command});
+      } else if (ae.kind == "file") {
+        const auto f = (lt.target_dir / ae.from).lexically_normal();
+        asset_files.insert(
+            {rel_to_cwd(build_root, f), asset_install_dest(ae.to), ae.preprocess_command, ae.postprocess_command});
+      } else if (ae.kind == "glob") {
+        const auto files = glob_matches(lt.target_dir, ae.from);
+        if (files.empty()) {
+          std::cerr << "configure: warning: asset glob matched no files: " << ae.from << " in target " << lt.desc.name
+                    << "\n";
+          continue;
+        }
+        for (const auto& f : files)
+          asset_files.insert(
+              {rel_to_cwd(build_root, f), asset_install_dest(ae.to), ae.preprocess_command, ae.postprocess_command});
       }
     }
   }
@@ -604,9 +669,18 @@ int cmd_configure(const std::filesystem::path& cwd,
     ConfigureTargetModel tm;
     tm.name = lt.desc.name;
     tm.type = lt.desc.type;
-    for (const auto& s : lt.desc.sources) {
-      const auto src = (lt.target_dir / s).lexically_normal();
-      tm.source_paths.push_back(std::filesystem::absolute(src).generic_string());
+    for (const auto& s : lt.desc.source_entries) {
+      if (s.kind == "glob") {
+        const auto files = glob_matches(lt.target_dir, s.from);
+        for (const auto& sf : files) {
+          tm.source_paths.push_back(std::filesystem::absolute(sf).generic_string());
+          tm.source_rules.push_back({std::filesystem::absolute(sf).generic_string(), s.preprocess_command, s.postprocess_command});
+        }
+      } else {
+        const auto src = (lt.target_dir / s.from).lexically_normal();
+        tm.source_paths.push_back(std::filesystem::absolute(src).generic_string());
+        tm.source_rules.push_back({std::filesystem::absolute(src).generic_string(), s.preprocess_command, s.postprocess_command});
+      }
     }
     std::set<std::string> inc_dirs;
     for (const auto& inc_entry : lt.desc.includes) {
@@ -628,9 +702,13 @@ int cmd_configure(const std::filesystem::path& cwd,
     graph_model.targets.push_back(std::move(tm));
   }
   for (const auto& rule : install_dirs)
-    graph_model.install_dir_rules.push_back({rule.src, rule.dst});
+    graph_model.install_dir_rules.push_back({rule.src, rule.dst, rule.preprocess_command, rule.postprocess_command});
   for (const auto& rule : install_files)
-    graph_model.install_file_rules.push_back({rule.src, rule.dst});
+    graph_model.install_file_rules.push_back({rule.src, rule.dst, rule.preprocess_command, rule.postprocess_command});
+  for (const auto& rule : asset_dirs)
+    graph_model.asset_dir_rules.push_back({rule.src, rule.dst, rule.preprocess_command, rule.postprocess_command});
+  for (const auto& rule : asset_files)
+    graph_model.asset_file_rules.push_back({rule.src, rule.dst, rule.preprocess_command, rule.postprocess_command});
 
   const int gen_code = run_generate_backend(graph_model);
   if (gen_code != 0)

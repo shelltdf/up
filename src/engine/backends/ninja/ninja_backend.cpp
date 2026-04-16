@@ -69,6 +69,9 @@ int write_ninja_file(const ConfigureGraphModel& model) {
   nf << "rule copy\n";
   nf << "  command = cmd /c if not exist \"$outdir\" mkdir \"$outdir\" && copy /Y \"$in\" \"$out\" >nul\n";
   nf << "  description = COPY $out\n\n";
+  nf << "rule run_cmd\n";
+  nf << "  command = cmd /c $cmd && if not exist \"$outdir\" mkdir \"$outdir\" && type nul > \"$out\"\n";
+  nf << "  description = RUN $cmd\n\n";
 #else
   nf << "cxx = c++\n";
   nf << "cflags = -std=c++17 " << (debug ? "-g -O0" : "-O2") << "\n\n";
@@ -88,13 +91,19 @@ int write_ninja_file(const ConfigureGraphModel& model) {
   nf << "rule copy\n";
   nf << "  command = mkdir -p \"$outdir\" && cp -f $in $out\n";
   nf << "  description = COPY $out\n\n";
+  nf << "rule run_cmd\n";
+  nf << "  command = sh -lc \"$cmd\" && mkdir -p \"$outdir\" && touch \"$out\"\n";
+  nf << "  description = RUN $cmd\n\n";
 #endif
 
   std::vector<std::pair<std::string, std::string>> lib_outputs;
   std::vector<std::pair<std::string, std::string>> exe_outputs;
   std::vector<std::string> all_outputs;
+  int cmd_idx = 0;
 
   for (const auto& t : model.targets) {
+    if (t.type == "asset_bundle")
+      continue;
     std::vector<std::string> objs;
     for (size_t i = 0; i < t.source_paths.size(); ++i) {
       const auto src = std::filesystem::path(t.source_paths[i]);
@@ -108,7 +117,19 @@ int write_ninja_file(const ConfigureGraphModel& model) {
       std::filesystem::create_directories(obj.parent_path());
       const auto src_n = quote_ninja_path(src);
       const auto obj_n = quote_ninja_path(obj);
-      nf << "build " << obj_n << ": cxx " << src_n << "\n";
+      std::string implicit_dep;
+      if (i < t.source_rules.size() && !t.source_rules[i].preprocess_command.empty()) {
+        const auto stamp = quote_ninja_path(model.out_dir / "cmd" / ("pre_" + std::to_string(cmd_idx++) + ".stamp"));
+        nf << "build " << stamp << ": run_cmd " << src_n << "\n";
+        nf << "  cmd = " << t.source_rules[i].preprocess_command << "\n";
+        nf << "  outdir = " << quote_ninja_path(model.out_dir / "cmd") << "\n";
+        implicit_dep = stamp;
+        all_outputs.push_back(stamp);
+      }
+      nf << "build " << obj_n << ": cxx " << src_n;
+      if (!implicit_dep.empty())
+        nf << " | " << implicit_dep;
+      nf << "\n";
       objs.push_back(obj_n);
       all_outputs.push_back(obj_n);
     }
@@ -161,6 +182,15 @@ int write_ninja_file(const ConfigureGraphModel& model) {
       }
     }
     all_outputs.push_back(out_file);
+    for (const auto& s : t.source_rules) {
+      if (!s.postprocess_command.empty()) {
+        const auto stamp = quote_ninja_path(model.out_dir / "cmd" / ("post_" + std::to_string(cmd_idx++) + ".stamp"));
+        nf << "build " << stamp << ": run_cmd " << out_file << "\n";
+        nf << "  cmd = " << s.postprocess_command << "\n";
+        nf << "  outdir = " << quote_ninja_path(model.out_dir / "cmd") << "\n";
+        all_outputs.push_back(stamp);
+      }
+    }
   }
 
   const auto install_bin = model.install_root / "bin";
@@ -174,6 +204,48 @@ int write_ninja_file(const ConfigureGraphModel& model) {
     nf << "build " << dst << ": copy " << ex.second << "\n";
     nf << "  outdir = " << quote_ninja_path((model.install_root / "bin")) << "\n";
     install_outputs.push_back(dst);
+  }
+  for (const auto& rule : model.install_file_rules) {
+    const auto src = quote_ninja_path(std::filesystem::path(rule.src));
+    const auto dst = quote_ninja_path(model.install_root / rule.dst / std::filesystem::path(rule.src).filename());
+    if (!rule.preprocess_command.empty()) {
+      const auto stamp = quote_ninja_path(model.out_dir / "cmd" / ("inc_pre_" + std::to_string(cmd_idx++) + ".stamp"));
+      nf << "build " << stamp << ": run_cmd " << src << "\n";
+      nf << "  cmd = " << rule.preprocess_command << "\n";
+      nf << "  outdir = " << quote_ninja_path(model.out_dir / "cmd") << "\n";
+      all_outputs.push_back(stamp);
+    }
+    nf << "build " << dst << ": copy " << src << "\n";
+    nf << "  outdir = " << quote_ninja_path((model.install_root / rule.dst)) << "\n";
+    install_outputs.push_back(dst);
+    if (!rule.postprocess_command.empty()) {
+      const auto stamp = quote_ninja_path(model.out_dir / "cmd" / ("inc_post_" + std::to_string(cmd_idx++) + ".stamp"));
+      nf << "build " << stamp << ": run_cmd " << dst << "\n";
+      nf << "  cmd = " << rule.postprocess_command << "\n";
+      nf << "  outdir = " << quote_ninja_path(model.out_dir / "cmd") << "\n";
+      all_outputs.push_back(stamp);
+    }
+  }
+  for (const auto& rule : model.asset_file_rules) {
+    const auto src = quote_ninja_path(std::filesystem::path(rule.src));
+    const auto dst = quote_ninja_path(model.install_root / rule.dst / std::filesystem::path(rule.src).filename());
+    if (!rule.preprocess_command.empty()) {
+      const auto stamp = quote_ninja_path(model.out_dir / "cmd" / ("asset_pre_" + std::to_string(cmd_idx++) + ".stamp"));
+      nf << "build " << stamp << ": run_cmd " << src << "\n";
+      nf << "  cmd = " << rule.preprocess_command << "\n";
+      nf << "  outdir = " << quote_ninja_path(model.out_dir / "cmd") << "\n";
+      all_outputs.push_back(stamp);
+    }
+    nf << "build " << dst << ": copy " << src << "\n";
+    nf << "  outdir = " << quote_ninja_path((model.install_root / rule.dst)) << "\n";
+    install_outputs.push_back(dst);
+    if (!rule.postprocess_command.empty()) {
+      const auto stamp = quote_ninja_path(model.out_dir / "cmd" / ("asset_post_" + std::to_string(cmd_idx++) + ".stamp"));
+      nf << "build " << stamp << ": run_cmd " << dst << "\n";
+      nf << "  cmd = " << rule.postprocess_command << "\n";
+      nf << "  outdir = " << quote_ninja_path(model.out_dir / "cmd") << "\n";
+      all_outputs.push_back(stamp);
+    }
   }
 
   nf << "\nbuild all: phony";

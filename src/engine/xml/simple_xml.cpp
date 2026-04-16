@@ -39,6 +39,18 @@ std::string trim_copy(std::string s) {
   return s.substr(b, e - b);
 }
 
+void parse_stage_commands(const std::string& body, std::string& pre, std::string& post) {
+  std::smatch m;
+  if (std::regex_search(body, m, std::regex(R"rx(<\s*preprocess\s+[^>]*command\s*=\s*"([^"]+)"[^>]*/>)rx")))
+    pre = trim_copy(m[1].str());
+  else
+    pre.clear();
+  if (std::regex_search(body, m, std::regex(R"rx(<\s*postprocess\s+[^>]*command\s*=\s*"([^"]+)"[^>]*/>)rx")))
+    post = trim_copy(m[1].str());
+  else
+    post.clear();
+}
+
 }  // namespace
 
 bool load_package_xml(const std::filesystem::path& path, PackageDesc& out, std::string& error) {
@@ -95,9 +107,43 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
   if (!attr_string(tgt_head, "type", out.type))
     out.type = "executable";
 
-  std::regex file_re(R"rx(<file\s*>\s*([^<]+)\s*</file\s*>)rx");
-  for (std::sregex_iterator it(raw.begin(), raw.end(), file_re), end; it != end; ++it)
-    out.sources.push_back((*it)[1].str());
+  const size_t sources_open = raw.find("<sources");
+  if (sources_open != std::string::npos) {
+    const size_t sources_open_gt = raw.find('>', sources_open);
+    const size_t sources_close = raw.find("</sources>", sources_open_gt + 1);
+    if (sources_open_gt == std::string::npos || sources_close == std::string::npos) {
+      error = "invalid <sources> block";
+      return false;
+    }
+    const std::string body = raw.substr(sources_open_gt + 1, sources_close - sources_open_gt - 1);
+    std::regex src_re(R"rx(<\s*(file|glob)\s*([^>]*)>([\s\S]*?)</\s*\1\s*>)rx");
+    for (std::sregex_iterator it(body.begin(), body.end(), src_re), end; it != end; ++it) {
+      TargetDesc::SourceEntry se;
+      se.kind = trim_copy((*it)[1].str());
+      const std::string attrs = (*it)[2].str();
+      std::string inner = (*it)[3].str();
+      parse_stage_commands(inner, se.preprocess_command, se.postprocess_command);
+      inner = std::regex_replace(inner, std::regex(R"rx(<\s*preprocess\s+[^>]*/>)rx"), "");
+      inner = std::regex_replace(inner, std::regex(R"rx(<\s*postprocess\s+[^>]*/>)rx"), "");
+      inner = trim_copy(inner);
+      if (!attr_string(attrs, "from", se.from))
+        se.from = inner;
+      se.from = trim_copy(se.from);
+      if (se.from.empty()) {
+        error = "sources entry requires file path or from attribute";
+        return false;
+      }
+      out.source_entries.push_back(se);
+      if (se.kind == "file")
+        out.sources.push_back(se.from);
+    }
+  } else {
+    std::regex file_re(R"rx(<file\s*>\s*([^<]+)\s*</file\s*>)rx");
+    for (std::sregex_iterator it(raw.begin(), raw.end(), file_re), end; it != end; ++it) {
+      out.sources.push_back((*it)[1].str());
+      out.source_entries.push_back({"file", trim_copy((*it)[1].str()), "", ""});
+    }
+  }
 
   std::regex dep_re(R"rx(<dependency\s+[^>]*name\s*=\s*"([^"]*)"[^>]*/>)rx");
   for (std::sregex_iterator it(raw.begin(), raw.end(), dep_re), end; it != end; ++it)
@@ -116,7 +162,7 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
       return false;
     }
     const std::string body = raw.substr(includes_open_gt + 1, includes_close - includes_open_gt - 1);
-    std::regex item_re(R"rx(<\s*([A-Za-z_][A-Za-z0-9_]*)\s*([^>]*)/>)rx");
+    std::regex item_re(R"rx(<\s*([A-Za-z_][A-Za-z0-9_]*)\s*([^>]*?)(?:/>|>([\s\S]*?)</\s*\1\s*>))rx");
     for (std::sregex_iterator it(body.begin(), body.end(), item_re), end; it != end; ++it) {
       TargetDesc::IncludeEntry inc;
       inc.kind = trim_copy((*it)[1].str());
@@ -138,6 +184,7 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
         inc.to.clear();
       else
         inc.to = trim_copy(inc.to);
+      parse_stage_commands((*it)[3].str(), inc.preprocess_command, inc.postprocess_command);
       out.includes.push_back(std::move(inc));
     }
 
@@ -146,6 +193,38 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
     if (std::regex_search(body, old_style_re)) {
       error = "old <includes><dir>path</dir></includes> syntax is not supported; use <dir from=\"...\" to=\"...\"/>";
       return false;
+    }
+  }
+
+  const size_t assets_open = raw.find("<assets");
+  if (assets_open != std::string::npos) {
+    const size_t assets_open_gt = raw.find('>', assets_open);
+    const size_t assets_close = raw.find("</assets>", assets_open_gt + 1);
+    if (assets_open_gt == std::string::npos || assets_close == std::string::npos) {
+      error = "invalid <assets> block";
+      return false;
+    }
+    const std::string body = raw.substr(assets_open_gt + 1, assets_close - assets_open_gt - 1);
+    std::regex item_re(R"rx(<\s*([A-Za-z_][A-Za-z0-9_]*)\s*([^>]*?)(?:/>|>([\s\S]*?)</\s*\1\s*>))rx");
+    for (std::sregex_iterator it(body.begin(), body.end(), item_re), end; it != end; ++it) {
+      TargetDesc::AssetEntry ae;
+      ae.kind = trim_copy((*it)[1].str());
+      if (!(ae.kind == "dir" || ae.kind == "file" || ae.kind == "glob")) {
+        error = "unsupported assets entry: " + ae.kind + " (expected dir/file/glob)";
+        return false;
+      }
+      const std::string attrs = (*it)[2].str();
+      if (!attr_string(attrs, "from", ae.from)) {
+        error = "assets entry requires from attribute";
+        return false;
+      }
+      ae.from = trim_copy(ae.from);
+      if (!attr_string(attrs, "to", ae.to))
+        ae.to.clear();
+      else
+        ae.to = trim_copy(ae.to);
+      parse_stage_commands((*it)[3].str(), ae.preprocess_command, ae.postprocess_command);
+      out.assets.push_back(std::move(ae));
     }
   }
 

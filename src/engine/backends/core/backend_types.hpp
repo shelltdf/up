@@ -45,9 +45,15 @@ struct ConfigureBackendContext {
 };
 
 struct ConfigureTargetModel {
+  struct SourceRule {
+    std::string path;
+    std::string preprocess_command;
+    std::string postprocess_command;
+  };
   std::string name;
   std::string type;
   std::vector<std::string> source_paths;
+  std::vector<SourceRule> source_rules;
   std::vector<std::string> include_dirs;
   std::vector<std::string> links;
 };
@@ -55,11 +61,15 @@ struct ConfigureTargetModel {
 struct ConfigureInstallDirRule {
   std::string src;
   std::string dst;
+  std::string preprocess_command;
+  std::string postprocess_command;
 };
 
 struct ConfigureInstallFileRule {
   std::string src;
   std::string dst;
+  std::string preprocess_command;
+  std::string postprocess_command;
 };
 
 struct ConfigureGraphModel {
@@ -73,6 +83,8 @@ struct ConfigureGraphModel {
   std::vector<std::string> install_exe_names;
   std::vector<ConfigureInstallDirRule> install_dir_rules;
   std::vector<ConfigureInstallFileRule> install_file_rules;
+  std::vector<ConfigureInstallDirRule> asset_dir_rules;
+  std::vector<ConfigureInstallFileRule> asset_file_rules;
 };
 
 }  // namespace up

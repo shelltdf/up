@@ -3,7 +3,5 @@
   <sources>
     <file>main.cpp</file>
   </sources>
-  <includes>
-    <glob from="../assets/*.*" to="hello_data_files"/>
-  </includes>
+  <dependency name="hello_data_assets"/>
 </target>

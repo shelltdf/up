@@ -105,3 +105,13 @@
 | 鏁版嵁缁撴瀯 | `src/simple_xml.hpp`锛坄PackageDesc` / `TargetDesc`锛?|
 
 鍚庣画鑻ュ紩鍏?XSD/JSON Schema锛屽彲鍦ㄦ湰鏂囦欢椤堕儴澧炲姞鐗堟湰鍙蜂笌鍙樻洿璁板綍銆?
+
+---
+
+## 8. assets and process stages (phase 1)
+
+- `target.xml` supports `<assets>` with `dir/file/glob` entries.
+- Each `sources` / `includes` / `assets` entry can optionally define:
+  - `<preprocess command="..."/>`
+  - `<postprocess command="..."/>`
+- In phase 1, each stage accepts a single `command` only.
