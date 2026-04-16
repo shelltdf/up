@@ -9,20 +9,25 @@ if(MSVC)
 endif()
 
 add_executable(up
-  src/main.cpp
-  src/configure.cpp
-  src/build.cpp
-  src/lang.cpp
-  src/path_check.cpp
-  src/simple_xml.cpp
-  src/paths.cpp
-  src/build.hpp
-  src/configure.hpp
-  src/paths.hpp
-  src/simple_xml.hpp
+  src/cli/main.cpp
+  src/engine/commands/configure.cpp
+  src/engine/commands/build.cpp
+  src/infra/i18n/lang.cpp
+  src/infra/platform/path_check.cpp
+  src/engine/xml/simple_xml.cpp
+  src/infra/platform/paths.cpp
+  src/engine/commands/build.hpp
+  src/engine/commands/configure.hpp
+  src/infra/platform/paths.hpp
+  src/engine/xml/simple_xml.hpp
 )
 
-target_include_directories(up PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(up PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/commands"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/xml"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/infra/platform"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/infra/i18n"
+)
 
 if(MSVC)
   target_compile_definitions(up PRIVATE _CRT_SECURE_NO_WARNINGS)
