@@ -105,6 +105,14 @@ const wchar_t* T(const wchar_t* zh, const wchar_t* en) {
   return g_ui_lang_zh ? zh : en;
 }
 
+const wchar_t* EmptyFieldLabel() {
+  return T(L"(空)", L"(empty)");
+}
+
+const wchar_t* HitScanSourceLabel() {
+  return T(L"扫描", L"scan");
+}
+
 HWND g_hwnd{};
 HWND g_toolbar{};
 HWND g_status{};
@@ -137,6 +145,8 @@ HWND g_log{};
 HWND g_log_splitter{};
 HWND g_log_copy{};
 HWND g_log_clear{};
+HWND g_env_settings_dialog_hwnd{};
+HWND g_configure_option_dialog_hwnd{};
 
 std::atomic<bool> g_running{};
 std::wstring g_last_up_args;
@@ -702,13 +712,13 @@ int AddCompilerHitsFromVcvars(const std::wstring& vcvars, std::vector<ToolHit>& 
     raw_out->clear();
   if (vcvars.empty()) {
     if (note)
-      *note = L"vcvars 未选择";
+      *note = g_ui_lang_zh ? L"vcvars 未选择" : L"vcvars not selected";
     return 0;
   }
   std::error_code ec;
   if (!std::filesystem::exists(std::filesystem::path(vcvars), ec)) {
     if (note)
-      *note = L"vcvars 路径不存在";
+      *note = g_ui_lang_zh ? L"vcvars 路径不存在" : L"vcvars path does not exist";
     return 0;
   }
   std::wstring output;
@@ -717,14 +727,14 @@ int AddCompilerHitsFromVcvars(const std::wstring& vcvars, std::vector<ToolHit>& 
   std::wstring cmd = L"/d /c \"\"" + vcvars + L"\" >nul && where cl\"";
   if (!RunProcessCapture(cmd_exe, cmd, L"", output, exit_code)) {
     if (note)
-      *note = L"where cl 执行失败（cmd 启动失败）";
+      *note = g_ui_lang_zh ? L"where cl 执行失败（cmd 启动失败）" : L"where cl failed (could not start cmd)";
     return 0;
   }
   if (raw_out)
     *raw_out = output;
   if (exit_code != 0) {
     if (note)
-      *note = L"where cl 未命中";
+      *note = g_ui_lang_zh ? L"where cl 未命中" : L"where cl: no match";
     return 0;
   }
   int hits = 0;
@@ -745,8 +755,12 @@ int AddCompilerHitsFromVcvars(const std::wstring& vcvars, std::vector<ToolHit>& 
     if (off < output.size() && output[off] == L'\n' && output[p] == L'\r')
       ++off;
   }
-  if (note)
-    *note = (hits > 0) ? (L"where cl 命中 " + std::to_wstring(hits)) : L"where cl 未命中";
+  if (note) {
+    if (hits > 0)
+      *note = (g_ui_lang_zh ? L"where cl 命中 " : L"where cl hits ") + std::to_wstring(hits);
+    else
+      *note = g_ui_lang_zh ? L"where cl 未命中" : L"where cl: no match";
+  }
   return hits;
 }
 
@@ -934,9 +948,9 @@ void FillToolHitsList(HWND lv, const std::vector<ToolHit>& hits, const std::wstr
     sub.iSubItem = 1;
     sub.pszText = const_cast<LPWSTR>(hits[i].path.c_str());
     SendMessageW(lv, LVM_SETITEMTEXTW, static_cast<WPARAM>(i), reinterpret_cast<LPARAM>(&sub));
-    const wchar_t* src = hits[i].from_path ? L"PATH" : L"扫描";
+    const wchar_t* src = hits[i].from_path ? L"PATH" : HitScanSourceLabel();
     sub.iSubItem = 2;
-    sub.pszText = const_cast<LPWSTR>(src);
+    sub.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(src));
     SendMessageW(lv, LVM_SETITEMTEXTW, static_cast<WPARAM>(i), reinterpret_cast<LPARAM>(&sub));
     if (first_match < 0 && _wcsicmp(hits[i].name.c_str(), selected_name.c_str()) == 0)
       first_match = static_cast<int>(i);
@@ -963,9 +977,9 @@ void FillToolHitsListByPath(HWND lv, const std::vector<ToolHit>& hits, const std
     sub.iSubItem = 1;
     sub.pszText = const_cast<LPWSTR>(hits[i].path.c_str());
     SendMessageW(lv, LVM_SETITEMTEXTW, static_cast<WPARAM>(i), reinterpret_cast<LPARAM>(&sub));
-    const wchar_t* src = hits[i].from_path ? L"PATH" : L"扫描";
+    const wchar_t* src = hits[i].from_path ? L"PATH" : HitScanSourceLabel();
     sub.iSubItem = 2;
-    sub.pszText = const_cast<LPWSTR>(src);
+    sub.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(src));
     SendMessageW(lv, LVM_SETITEMTEXTW, static_cast<WPARAM>(i), reinterpret_cast<LPARAM>(&sub));
     if (first_match < 0 && _wcsicmp(hits[i].path.c_str(), selected_path.c_str()) == 0)
       first_match = static_cast<int>(i);
@@ -994,86 +1008,169 @@ std::wstring SelectedToolPathFromList(HWND lv, const std::vector<ToolHit>& hits)
 
 std::wstring BuildDetectStatusText(const GuiEnvSettings& s) {
   std::wstringstream ss;
-  ss << L"编译环境设置 - 自动搜索：构建命中 " << s.build_hits.size() << L"，vcvars 命中 " << s.vcvars_hits.size()
-     << L"，编译器命中 " << s.compiler_hits.size()
-     << L"，SDK " << s.android_sdk_hits.size() << L"，NDK " << s.android_ndk_hits.size() << L"，emsdk "
-     << s.emsdk_hits.size();
+  if (g_ui_lang_zh) {
+    ss << L"编译环境设置 - 自动搜索：构建命中 " << s.build_hits.size() << L"，vcvars 命中 " << s.vcvars_hits.size()
+       << L"，编译器命中 " << s.compiler_hits.size()
+       << L"，SDK " << s.android_sdk_hits.size() << L"，NDK " << s.android_ndk_hits.size() << L"，emsdk "
+       << s.emsdk_hits.size();
+    if (s.android_ndk_hits.empty())
+      ss << L"；未命中 Android NDK";
+    if (s.emsdk_hits.empty())
+      ss << L"；未命中 emsdk";
+    if (!s.selected_vcvars.empty())
+      ss << L"；" << (s.vcvars_cl_note.empty() ? (L"where cl 命中 " + std::to_wstring(s.vcvars_cl_hits)) : s.vcvars_cl_note);
+    return ss.str();
+  }
+  ss << L"Build environment — auto-detect: build hits " << s.build_hits.size() << L", vcvars " << s.vcvars_hits.size()
+     << L", compilers " << s.compiler_hits.size() << L", SDK " << s.android_sdk_hits.size() << L", NDK "
+     << s.android_ndk_hits.size() << L", emsdk " << s.emsdk_hits.size();
   if (s.android_ndk_hits.empty())
-    ss << L"；未命中 Android NDK";
+    ss << L"; no Android NDK hits";
   if (s.emsdk_hits.empty())
-    ss << L"；未命中 emsdk";
+    ss << L"; no emsdk hits";
   if (!s.selected_vcvars.empty())
-    ss << L"；" << (s.vcvars_cl_note.empty() ? (L"where cl 命中 " + std::to_wstring(s.vcvars_cl_hits)) : s.vcvars_cl_note);
+    ss << L"; " << (s.vcvars_cl_note.empty() ? (L"where cl hits " + std::to_wstring(s.vcvars_cl_hits)) : s.vcvars_cl_note);
   return ss.str();
 }
 
 std::wstring BuildEnvDetectLogText(const GuiEnvSettings& s) {
   std::wstringstream ss;
-  ss << L"[环境搜索] 自动搜索结果\r\n";
-  ss << L"  - 选中建造系统: " << (s.selected_build_system.empty() ? L"(空)" : s.selected_build_system) << L"\r\n";
-  ss << L"  - 选中 vcvars: " << (s.selected_vcvars.empty() ? L"(空)" : s.selected_vcvars) << L"\r\n";
-  ss << L"  - 选中编译器: " << (s.selected_compiler.empty() ? L"(空)" : s.selected_compiler) << L"\r\n";
-  ss << L"  - Android SDK: " << (s.android_sdk_path.empty() ? L"(空)" : s.android_sdk_path) << L"\r\n";
-  ss << L"  - Android NDK: " << (s.android_ndk_path.empty() ? L"(空)" : s.android_ndk_path) << L"\r\n";
-  ss << L"  - emsdk: " << (s.emsdk_path.empty() ? L"(空)" : s.emsdk_path) << L"\r\n";
+  if (g_ui_lang_zh) {
+    ss << L"[环境搜索] 自动搜索结果\r\n";
+    ss << L"  - 选中建造系统: " << (s.selected_build_system.empty() ? EmptyFieldLabel() : s.selected_build_system) << L"\r\n";
+    ss << L"  - 选中 vcvars: " << (s.selected_vcvars.empty() ? EmptyFieldLabel() : s.selected_vcvars) << L"\r\n";
+    ss << L"  - 选中编译器: " << (s.selected_compiler.empty() ? EmptyFieldLabel() : s.selected_compiler) << L"\r\n";
+    ss << L"  - Android SDK: " << (s.android_sdk_path.empty() ? EmptyFieldLabel() : s.android_sdk_path) << L"\r\n";
+    ss << L"  - Android NDK: " << (s.android_ndk_path.empty() ? EmptyFieldLabel() : s.android_ndk_path) << L"\r\n";
+    ss << L"  - emsdk: " << (s.emsdk_path.empty() ? EmptyFieldLabel() : s.emsdk_path) << L"\r\n";
+
+    auto dump_hits = [&](const wchar_t* title, const std::vector<ToolHit>& hits) {
+      ss << L"  * " << title << L" 命中 " << hits.size() << L" 条\r\n";
+      for (const auto& h : hits) {
+        ss << L"      - [" << h.name << L"] " << h.path << L" (" << (h.from_path ? L"PATH" : HitScanSourceLabel()) << L")\r\n";
+      }
+    };
+    auto dump_paths = [&](const wchar_t* title, const std::vector<std::wstring>& hits) {
+      ss << L"  * " << title << L" 命中 " << hits.size() << L" 条\r\n";
+      for (const auto& h : hits)
+        ss << L"      - " << h << L"\r\n";
+    };
+
+    dump_hits(L"建造系统", s.build_hits);
+    dump_hits(L"vcvars", s.vcvars_hits);
+    dump_hits(L"编译器", s.compiler_hits);
+    dump_paths(L"Android SDK", s.android_sdk_hits);
+    dump_paths(L"Android NDK", s.android_ndk_hits);
+    dump_paths(L"emsdk", s.emsdk_hits);
+    if (!s.vcvars_cl_note.empty())
+      ss << L"  * vcvars where cl: " << s.vcvars_cl_note << L"\r\n";
+    if (!s.vcvars_cl_output.empty())
+      ss << L"  * where cl 输出:\r\n" << s.vcvars_cl_output << L"\r\n";
+    return ss.str();
+  }
+
+  ss << L"[env search] auto-detect results\r\n";
+  ss << L"  - build system: " << (s.selected_build_system.empty() ? EmptyFieldLabel() : s.selected_build_system) << L"\r\n";
+  ss << L"  - vcvars: " << (s.selected_vcvars.empty() ? EmptyFieldLabel() : s.selected_vcvars) << L"\r\n";
+  ss << L"  - compiler: " << (s.selected_compiler.empty() ? EmptyFieldLabel() : s.selected_compiler) << L"\r\n";
+  ss << L"  - Android SDK: " << (s.android_sdk_path.empty() ? EmptyFieldLabel() : s.android_sdk_path) << L"\r\n";
+  ss << L"  - Android NDK: " << (s.android_ndk_path.empty() ? EmptyFieldLabel() : s.android_ndk_path) << L"\r\n";
+  ss << L"  - emsdk: " << (s.emsdk_path.empty() ? EmptyFieldLabel() : s.emsdk_path) << L"\r\n";
 
   auto dump_hits = [&](const wchar_t* title, const std::vector<ToolHit>& hits) {
-    ss << L"  * " << title << L" 命中 " << hits.size() << L" 条\r\n";
+    ss << L"  * " << title << L" hits " << hits.size() << L"\r\n";
     for (const auto& h : hits) {
-      ss << L"      - [" << h.name << L"] " << h.path << L" (" << (h.from_path ? L"PATH" : L"扫描") << L")\r\n";
+      ss << L"      - [" << h.name << L"] " << h.path << L" (" << (h.from_path ? L"PATH" : HitScanSourceLabel()) << L")\r\n";
     }
   };
   auto dump_paths = [&](const wchar_t* title, const std::vector<std::wstring>& hits) {
-    ss << L"  * " << title << L" 命中 " << hits.size() << L" 条\r\n";
+    ss << L"  * " << title << L" hits " << hits.size() << L"\r\n";
     for (const auto& h : hits)
       ss << L"      - " << h << L"\r\n";
   };
 
-  dump_hits(L"建造系统", s.build_hits);
+  dump_hits(L"Build systems", s.build_hits);
   dump_hits(L"vcvars", s.vcvars_hits);
-  dump_hits(L"编译器", s.compiler_hits);
+  dump_hits(L"Compilers", s.compiler_hits);
   dump_paths(L"Android SDK", s.android_sdk_hits);
   dump_paths(L"Android NDK", s.android_ndk_hits);
   dump_paths(L"emsdk", s.emsdk_hits);
   if (!s.vcvars_cl_note.empty())
     ss << L"  * vcvars where cl: " << s.vcvars_cl_note << L"\r\n";
   if (!s.vcvars_cl_output.empty())
-    ss << L"  * where cl 输出:\r\n" << s.vcvars_cl_output << L"\r\n";
+    ss << L"  * where cl output:\r\n" << s.vcvars_cl_output << L"\r\n";
   return ss.str();
 }
 
 std::wstring BuildEnvDetectLogTextForTab(const GuiEnvSettings& s, int tab) {
   std::wstringstream ss;
+  if (g_ui_lang_zh) {
+    if (tab == 0) {
+      ss << L"[环境搜索][本地环境]\r\n";
+      ss << L"  - 选中建造系统: " << (s.selected_build_system.empty() ? EmptyFieldLabel() : s.selected_build_system) << L"\r\n";
+      ss << L"  - 选中 vcvars: " << (s.selected_vcvars.empty() ? EmptyFieldLabel() : s.selected_vcvars) << L"\r\n";
+      ss << L"  - 选中编译器: " << (s.selected_compiler.empty() ? EmptyFieldLabel() : s.selected_compiler) << L"\r\n";
+      ss << L"  * 建造系统命中: " << s.build_hits.size() << L"\r\n";
+      for (const auto& h : s.build_hits)
+        ss << L"      - [" << h.name << L"] " << h.path << L" (" << (h.from_path ? L"PATH" : HitScanSourceLabel()) << L")\r\n";
+      ss << L"  * vcvars 命中: " << s.vcvars_hits.size() << L"\r\n";
+      for (const auto& h : s.vcvars_hits)
+        ss << L"      - [" << h.name << L"] " << h.path << L" (" << (h.from_path ? L"PATH" : HitScanSourceLabel()) << L")\r\n";
+      ss << L"  * 编译器命中: " << s.compiler_hits.size() << L"\r\n";
+      for (const auto& h : s.compiler_hits)
+        ss << L"      - [" << h.name << L"] " << h.path << L" (" << (h.from_path ? L"PATH" : HitScanSourceLabel()) << L")\r\n";
+      if (!s.vcvars_cl_note.empty())
+        ss << L"  * where cl: " << s.vcvars_cl_note << L"\r\n";
+    } else if (tab == 1) {
+      ss << L"[环境搜索][Android 环境]\r\n";
+      ss << L"  - Android SDK: " << (s.android_sdk_path.empty() ? EmptyFieldLabel() : s.android_sdk_path) << L"\r\n";
+      ss << L"  - Android NDK: " << (s.android_ndk_path.empty() ? EmptyFieldLabel() : s.android_ndk_path) << L"\r\n";
+      ss << L"  * SDK 命中: " << s.android_sdk_hits.size() << L"\r\n";
+      for (const auto& p : s.android_sdk_hits)
+        ss << L"      - " << p << L"\r\n";
+      ss << L"  * NDK 命中: " << s.android_ndk_hits.size() << L"\r\n";
+      for (const auto& p : s.android_ndk_hits)
+        ss << L"      - " << p << L"\r\n";
+    } else {
+      ss << L"[环境搜索][emsdk 环境]\r\n";
+      ss << L"  - emsdk: " << (s.emsdk_path.empty() ? EmptyFieldLabel() : s.emsdk_path) << L"\r\n";
+      ss << L"  * emsdk 命中: " << s.emsdk_hits.size() << L"\r\n";
+      for (const auto& p : s.emsdk_hits)
+        ss << L"      - " << p << L"\r\n";
+    }
+    return ss.str();
+  }
+
   if (tab == 0) {
-    ss << L"[环境搜索][本地环境]\r\n";
-    ss << L"  - 选中建造系统: " << (s.selected_build_system.empty() ? L"(空)" : s.selected_build_system) << L"\r\n";
-    ss << L"  - 选中 vcvars: " << (s.selected_vcvars.empty() ? L"(空)" : s.selected_vcvars) << L"\r\n";
-    ss << L"  - 选中编译器: " << (s.selected_compiler.empty() ? L"(空)" : s.selected_compiler) << L"\r\n";
-    ss << L"  * 建造系统命中: " << s.build_hits.size() << L"\r\n";
+    ss << L"[env search][local]\r\n";
+    ss << L"  - build system: " << (s.selected_build_system.empty() ? EmptyFieldLabel() : s.selected_build_system) << L"\r\n";
+    ss << L"  - vcvars: " << (s.selected_vcvars.empty() ? EmptyFieldLabel() : s.selected_vcvars) << L"\r\n";
+    ss << L"  - compiler: " << (s.selected_compiler.empty() ? EmptyFieldLabel() : s.selected_compiler) << L"\r\n";
+    ss << L"  * build system hits: " << s.build_hits.size() << L"\r\n";
     for (const auto& h : s.build_hits)
-      ss << L"      - [" << h.name << L"] " << h.path << L" (" << (h.from_path ? L"PATH" : L"扫描") << L")\r\n";
-    ss << L"  * vcvars 命中: " << s.vcvars_hits.size() << L"\r\n";
+      ss << L"      - [" << h.name << L"] " << h.path << L" (" << (h.from_path ? L"PATH" : HitScanSourceLabel()) << L")\r\n";
+    ss << L"  * vcvars hits: " << s.vcvars_hits.size() << L"\r\n";
     for (const auto& h : s.vcvars_hits)
-      ss << L"      - [" << h.name << L"] " << h.path << L" (" << (h.from_path ? L"PATH" : L"扫描") << L")\r\n";
-    ss << L"  * 编译器命中: " << s.compiler_hits.size() << L"\r\n";
+      ss << L"      - [" << h.name << L"] " << h.path << L" (" << (h.from_path ? L"PATH" : HitScanSourceLabel()) << L")\r\n";
+    ss << L"  * compiler hits: " << s.compiler_hits.size() << L"\r\n";
     for (const auto& h : s.compiler_hits)
-      ss << L"      - [" << h.name << L"] " << h.path << L" (" << (h.from_path ? L"PATH" : L"扫描") << L")\r\n";
+      ss << L"      - [" << h.name << L"] " << h.path << L" (" << (h.from_path ? L"PATH" : HitScanSourceLabel()) << L")\r\n";
     if (!s.vcvars_cl_note.empty())
       ss << L"  * where cl: " << s.vcvars_cl_note << L"\r\n";
   } else if (tab == 1) {
-    ss << L"[环境搜索][Android 环境]\r\n";
-    ss << L"  - Android SDK: " << (s.android_sdk_path.empty() ? L"(空)" : s.android_sdk_path) << L"\r\n";
-    ss << L"  - Android NDK: " << (s.android_ndk_path.empty() ? L"(空)" : s.android_ndk_path) << L"\r\n";
-    ss << L"  * SDK 命中: " << s.android_sdk_hits.size() << L"\r\n";
+    ss << L"[env search][Android]\r\n";
+    ss << L"  - Android SDK: " << (s.android_sdk_path.empty() ? EmptyFieldLabel() : s.android_sdk_path) << L"\r\n";
+    ss << L"  - Android NDK: " << (s.android_ndk_path.empty() ? EmptyFieldLabel() : s.android_ndk_path) << L"\r\n";
+    ss << L"  * SDK hits: " << s.android_sdk_hits.size() << L"\r\n";
     for (const auto& p : s.android_sdk_hits)
       ss << L"      - " << p << L"\r\n";
-    ss << L"  * NDK 命中: " << s.android_ndk_hits.size() << L"\r\n";
+    ss << L"  * NDK hits: " << s.android_ndk_hits.size() << L"\r\n";
     for (const auto& p : s.android_ndk_hits)
       ss << L"      - " << p << L"\r\n";
   } else {
-    ss << L"[环境搜索][emsdk 环境]\r\n";
-    ss << L"  - emsdk: " << (s.emsdk_path.empty() ? L"(空)" : s.emsdk_path) << L"\r\n";
-    ss << L"  * emsdk 命中: " << s.emsdk_hits.size() << L"\r\n";
+    ss << L"[env search][emsdk]\r\n";
+    ss << L"  - emsdk: " << (s.emsdk_path.empty() ? EmptyFieldLabel() : s.emsdk_path) << L"\r\n";
+    ss << L"  * emsdk hits: " << s.emsdk_hits.size() << L"\r\n";
     for (const auto& p : s.emsdk_hits)
       ss << L"      - " << p << L"\r\n";
   }
@@ -1186,6 +1283,54 @@ void PushEnvDialogValues(EnvDialogState* st) {
   SetWindowTextW(st->edt_android_ndk, st->work.android_ndk_path.c_str());
   SetWindowTextW(st->edt_emsdk, st->work.emsdk_path.c_str());
   st->suppress_list_notify = false;
+}
+
+void RefreshEnvSettingsDialogLanguage() {
+  HWND dlg = g_env_settings_dialog_hwnd;
+  if (!dlg || !IsWindow(dlg))
+    return;
+  auto* st = reinterpret_cast<EnvDialogState*>(GetWindowLongPtrW(dlg, GWLP_USERDATA));
+  if (!st)
+    return;
+  if (st->tab) {
+    TCITEMW ti{};
+    ti.mask = TCIF_TEXT;
+    ti.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(T(L"本地环境", L"Local")));
+    TabCtrl_SetItem(st->tab, 0, &ti);
+    ti.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(T(L"Android 环境", L"Android")));
+    TabCtrl_SetItem(st->tab, 1, &ti);
+    ti.pszText = const_cast<LPWSTR>(const_cast<wchar_t*>(T(L"emsdk 环境", L"emsdk")));
+    TabCtrl_SetItem(st->tab, 2, &ti);
+  }
+  if (st->lbl_local_build)
+    SetWindowTextW(st->lbl_local_build, T(L"建造系统", L"Build system"));
+  if (st->lbl_local_vcvars)
+    SetWindowTextW(st->lbl_local_vcvars, T(L"VS vcvars", L"VS vcvars"));
+  if (st->lbl_local_compiler)
+    SetWindowTextW(st->lbl_local_compiler, T(L"编译器", L"Compiler"));
+  if (st->lbl_android_sdk)
+    SetWindowTextW(st->lbl_android_sdk, T(L"Android SDK 路径", L"Android SDK"));
+  if (st->btn_android_sdk)
+    SetWindowTextW(st->btn_android_sdk, T(L"浏览…", L"Browse…"));
+  if (st->lbl_android_ndk)
+    SetWindowTextW(st->lbl_android_ndk, T(L"Android NDK 路径", L"Android NDK"));
+  if (st->btn_android_ndk)
+    SetWindowTextW(st->btn_android_ndk, T(L"浏览…", L"Browse…"));
+  if (st->lbl_emsdk)
+    SetWindowTextW(st->lbl_emsdk, T(L"emsdk 路径", L"emsdk path"));
+  if (st->btn_emsdk)
+    SetWindowTextW(st->btn_emsdk, T(L"浏览…", L"Browse…"));
+  if (st->btn_auto)
+    SetWindowTextW(st->btn_auto, T(L"自动搜索", L"Auto-detect"));
+  if (st->btn_ok)
+    SetWindowTextW(st->btn_ok, T(L"确定", L"OK"));
+  if (st->btn_cancel)
+    SetWindowTextW(st->btn_cancel, T(L"取消", L"Cancel"));
+  SetWindowTextW(dlg, BuildDetectStatusText(st->work).c_str());
+  PushEnvDialogValues(st);
+  const int tab = st->tab ? TabCtrl_GetCurSel(st->tab) : 0;
+  ShowEnvTab(st, tab);
+  LayoutEnvDialog(dlg, st);
 }
 
 LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -1391,6 +1536,10 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         }
       }
       return 0;
+    case WM_DESTROY:
+      if (g_env_settings_dialog_hwnd == hwnd)
+        g_env_settings_dialog_hwnd = nullptr;
+      return DefWindowProcW(hwnd, msg, wParam, lParam);
     case WM_CLOSE:
       ShowWindow(hwnd, SW_HIDE);
       DestroyWindow(hwnd);
@@ -1427,6 +1576,7 @@ bool ShowEnvSettingsDialog(HWND owner) {
     EnableWindow(owner, TRUE);
     return false;
   }
+  g_env_settings_dialog_hwnd = dlg;
   MSG msg{};
   while (IsWindow(dlg) && GetMessageW(&msg, nullptr, 0, 0) > 0) {
     if (!IsDialogMessageW(dlg, &msg)) {
@@ -1434,6 +1584,7 @@ bool ShowEnvSettingsDialog(HWND owner) {
       DispatchMessageW(&msg);
     }
   }
+  g_env_settings_dialog_hwnd = nullptr;
   EnableWindow(owner, TRUE);
   SetActiveWindow(owner);
   RedrawWindow(owner, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
@@ -1792,7 +1943,7 @@ std::wstring IntermediateLeafFromPathishEdit(std::wstring s) {
 bool AppendBuildDirFlagOrAbort(std::wstring& args_no_exe, bool required) {
   if (!g_build_dir) {
     if (required) {
-      AppendLog(L"[错误] Build Dir 控件未初始化。\r\n");
+      AppendLog(g_ui_lang_zh ? L"[错误] Build Dir 控件未初始化。\r\n" : L"[Error] Build Dir control is not initialized.\r\n");
       return false;
     }
     return true;
@@ -1802,7 +1953,8 @@ bool AppendBuildDirFlagOrAbort(std::wstring& args_no_exe, bool required) {
   const std::wstring leaf = IntermediateLeafFromPathishEdit(bd);
   if (leaf.empty()) {
     if (required) {
-      AppendLog(L"[错误] 请填写「Build Dir」或构建目录名（对应 CLI：--build-dir-name），再执行 build。\r\n");
+      AppendLog(g_ui_lang_zh ? L"[错误] 请填写「Build Dir」或构建目录名（对应 CLI：--build-dir-name），再执行 build。\r\n"
+                           : L"[Error] Set Build Dir or build leaf name (--build-dir-name) before build.\r\n");
       return false;
     }
     return true;
@@ -1816,7 +1968,7 @@ bool AppendBuildDirFlagOrAbort(std::wstring& args_no_exe, bool required) {
 bool AppendInstallDirFlagOrAbort(std::wstring& args_no_exe, bool required) {
   if (!g_install_dir) {
     if (required) {
-      AppendLog(L"[错误] 安装目录控件未初始化。\r\n");
+      AppendLog(g_ui_lang_zh ? L"[错误] 安装目录控件未初始化。\r\n" : L"[Error] Install Dir control is not initialized.\r\n");
       return false;
     }
     return true;
@@ -1826,7 +1978,8 @@ bool AppendInstallDirFlagOrAbort(std::wstring& args_no_exe, bool required) {
   const std::wstring leaf = IntermediateLeafFromPathishEdit(id);
   if (leaf.empty()) {
     if (required) {
-      AppendLog(L"[错误] 请填写「安装目录」或 install 子目录名（对应 CLI：--install-dir-name），再执行 run/test。\r\n");
+      AppendLog(g_ui_lang_zh ? L"[错误] 请填写「安装目录」或 install 子目录名（对应 CLI：--install-dir-name），再执行 run/test。\r\n"
+                           : L"[Error] Set Install Dir or install leaf (--install-dir-name) before run/test.\r\n");
       return false;
     }
     return true;
@@ -1931,7 +2084,7 @@ bool QueryConfigureBuildDirNameFromUpExe(const std::wstring& up_exe, const std::
   std::wstring output;
   DWORD code = static_cast<DWORD>(-1);
   if (!RunProcessCapture(up_exe, cmdline, cwd, output, code)) {
-    err_msg = L"无法启动 print-build-dir-name。";
+    err_msg = g_ui_lang_zh ? L"无法启动 print-build-dir-name。" : L"Failed to start print-build-dir-name.";
     return false;
   }
   TrimInPlace(output);
@@ -1943,7 +2096,8 @@ bool QueryConfigureBuildDirNameFromUpExe(const std::wstring& up_exe, const std::
     output.resize(line_end);
   TrimInPlace(output);
   if (code != 0 || output.empty()) {
-    err_msg = L"print-build-dir-name 失败 (退出码 " + std::to_wstring(static_cast<unsigned long>(code)) + L")";
+    err_msg = (g_ui_lang_zh ? L"print-build-dir-name 失败 (退出码 " : L"print-build-dir-name failed (exit code ") +
+              std::to_wstring(static_cast<unsigned long>(code)) + L")";
     if (!output.empty())
       err_msg += L": " + output;
     return false;
@@ -2025,7 +2179,8 @@ void RunUpAsync(std::wstring args_no_exe) {
     std::wstring arch_leaf;
     std::wstring qerr;
     if (!QueryConfigureBuildDirNameFromUpExe(up, cwd, arch_leaf, qerr)) {
-      AppendLog(L"[错误] 无法从 up.exe 计算 --build-dir-name: " + qerr + L"\r\n");
+      AppendLog((g_ui_lang_zh ? L"[错误] 无法从 up.exe 计算 --build-dir-name: " : L"[Error] Cannot resolve --build-dir-name from up.exe: ") +
+                qerr + L"\r\n");
       return;
     }
     args_no_exe += L" --build-dir-name ";
@@ -2063,7 +2218,8 @@ void RunUpAsync(std::wstring args_no_exe) {
     if (ok)
       pack->output = std::move(output);
     else
-      pack->output = L"[错误] CreateProcess 失败。\r\n";
+      pack->output =
+          g_ui_lang_zh ? L"[错误] CreateProcess 失败。\r\n" : L"[Error] CreateProcess failed.\r\n";
     pack->exit_code = code;
     PostMessageW(hwnd, WM_PROCESS_DONE, ok ? 1 : 0, reinterpret_cast<LPARAM>(pack));
   }).detach();
@@ -2252,7 +2408,10 @@ bool ChoiceContainsValue(const OptionRow& opt, const std::wstring& value) {
 bool SoftValidateOptionValue(const OptionRow& opt, const std::wstring& value) {
   bool warned = false;
   if (!opt.choices.empty() && !ChoiceContainsValue(opt, value)) {
-    AppendLog(L"[警告] " + opt.name + L" 的值 \"" + value + L"\" 不在推荐候选中，已按自定义值保存。\r\n");
+    AppendLog(std::wstring(g_ui_lang_zh ? L"[警告] " : L"[Warning] ") + opt.name +
+              (g_ui_lang_zh ? L" 的值 \"" : L" value \"") + value +
+              (g_ui_lang_zh ? L"\" 不在推荐候选中，已按自定义值保存。\r\n"
+                            : L"\" is not in the suggested list; saved as custom.\r\n"));
     SetStatus(T(L"警告：已使用自定义 Option 值", L"Warning: custom option value used"));
     warned = true;
   }
@@ -2260,7 +2419,8 @@ bool SoftValidateOptionValue(const OptionRow& opt, const std::wstring& value) {
   if (opt.name == L"UP_CMAKE_GENERATOR") {
     const OptionRow* build = FindOptionByName(L"UP_TARGET_BUILD_SYSTEM");
     if (build && _wcsicmp(build->value.c_str(), L"cmake") != 0) {
-      AppendLog(L"[警告] 当前 UP_TARGET_BUILD_SYSTEM 不是 cmake，UP_CMAKE_GENERATOR 可能不会生效。\r\n");
+      AppendLog(g_ui_lang_zh ? L"[警告] 当前 UP_TARGET_BUILD_SYSTEM 不是 cmake，UP_CMAKE_GENERATOR 可能不会生效。\r\n"
+                           : L"[Warning] UP_TARGET_BUILD_SYSTEM is not cmake; UP_CMAKE_GENERATOR may be ignored.\r\n");
       SetStatus(T(L"警告：生成器可能被忽略", L"Warning: generator may be ignored"));
       warned = true;
     }
@@ -2711,9 +2871,9 @@ LRESULT CALLBACK ConfigureOptionWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
       g_opt_apply = CreateWindowExW(0, L"BUTTON", T(L"应用到选中项", L"Apply to selection"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 120, 28, hwnd,
                                     reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_OPT_APPLY)),
                                     GetModuleHandleW(nullptr), nullptr);
-      st->btn_ok = CreateWindowExW(0, L"BUTTON", L"确定并配置", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 100, 28, hwnd,
+      st->btn_ok = CreateWindowExW(0, L"BUTTON", T(L"确定并配置", L"Configure"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 100, 28, hwnd,
                                    nullptr, GetModuleHandleW(nullptr), nullptr);
-      st->btn_cancel = CreateWindowExW(0, L"BUTTON", L"取消", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 100, 28, hwnd,
+      st->btn_cancel = CreateWindowExW(0, L"BUTTON", T(L"取消", L"Cancel"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 100, 28, hwnd,
                                        nullptr, GetModuleHandleW(nullptr), nullptr);
 
       SendMessageW(g_lbl_vars, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
@@ -2798,7 +2958,8 @@ LRESULT CALLBACK ConfigureOptionWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
       }
       if (id == IDC_OPT_APPLY) {
         if (g_selected_option_idx < 0 || g_selected_option_idx >= static_cast<int>(g_options.size())) {
-          AppendLog(L"[错误] 请先在 Option 表中选择一个变量。\r\n");
+          AppendLog(g_ui_lang_zh ? L"[错误] 请先在 Option 表中选择一个变量。\r\n"
+                                : L"[Error] Select an option row first.\r\n");
           return 0;
         }
         std::wstring newv;
@@ -2815,7 +2976,8 @@ LRESULT CALLBACK ConfigureOptionWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
           }
         }
         if (newv.empty()) {
-          AppendLog(L"[错误] 请输入值或从候选中选择。\r\n");
+          AppendLog(g_ui_lang_zh ? L"[错误] 请输入值或从候选中选择。\r\n"
+                                : L"[Error] Enter a value or pick from the list.\r\n");
           return 0;
         }
         g_options[static_cast<size_t>(g_selected_option_idx)].value = newv;
@@ -2862,6 +3024,8 @@ LRESULT CALLBACK ConfigureOptionWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
       return 0;
     }
     case WM_DESTROY:
+      if (g_configure_option_dialog_hwnd == hwnd)
+        g_configure_option_dialog_hwnd = nullptr;
       g_vars = nullptr;
       g_lbl_vars = nullptr;
       g_opt_group = nullptr;
@@ -2902,6 +3066,7 @@ bool ShowConfigureOptionDialog(HWND owner) {
     EnableWindow(owner, TRUE);
     return false;
   }
+  g_configure_option_dialog_hwnd = dlg;
   MSG msg{};
   while (IsWindow(dlg) && GetMessageW(&msg, nullptr, 0, 0) > 0) {
     if (!IsDialogMessageW(dlg, &msg)) {
@@ -2909,6 +3074,7 @@ bool ShowConfigureOptionDialog(HWND owner) {
       DispatchMessageW(&msg);
     }
   }
+  g_configure_option_dialog_hwnd = nullptr;
   EnableWindow(owner, TRUE);
   SetActiveWindow(owner);
   return st.accepted;
@@ -2973,6 +3139,10 @@ void SetMainWindowLocalizedControlTexts() {
     return;
   if (g_lbl_path)
     SetWindowTextW(g_lbl_path, T(L"工作目录", L"CWD"));
+  if (g_lbl_vars)
+    SetWindowTextW(g_lbl_vars, T(L"Option", L"Option"));
+  if (g_opt_group)
+    SetWindowTextW(g_opt_group, T(L"按前缀分组显示", L"Group by prefix"));
   if (g_browse)
     SetWindowTextW(g_browse, T(L"浏览…", L"Browse…"));
   if (g_lbl_scan)
@@ -3050,6 +3220,27 @@ std::wstring InitialWelcomeLogText() {
          L"Use the Language menu to switch UI language.\r\n\r\n";
 }
 
+void RefreshConfigureOptionDialogLanguage() {
+  HWND d = g_configure_option_dialog_hwnd;
+  if (!d || !IsWindow(d))
+    return;
+  auto* st = reinterpret_cast<ConfigureOptionDialogState*>(GetWindowLongPtrW(d, GWLP_USERDATA));
+  SetWindowTextW(d, T(L"configure 选项设置", L"configure options"));
+  if (g_lbl_vars)
+    SetWindowTextW(g_lbl_vars, T(L"Option", L"Option"));
+  if (g_opt_group)
+    SetWindowTextW(g_opt_group, T(L"按前缀分组显示", L"Group by prefix"));
+  if (g_opt_apply)
+    SetWindowTextW(g_opt_apply, T(L"应用到选中项", L"Apply to selection"));
+  if (st) {
+    if (st->btn_ok)
+      SetWindowTextW(st->btn_ok, T(L"确定并配置", L"Configure"));
+    if (st->btn_cancel)
+      SetWindowTextW(st->btn_cancel, T(L"取消", L"Cancel"));
+  }
+  RefreshVarsListColumnHeaders();
+}
+
 void ApplyMainWindowLanguage(HWND hwnd) {
   if (!hwnd)
     return;
@@ -3060,6 +3251,8 @@ void ApplyMainWindowLanguage(HWND hwnd) {
   SetMainWindowLocalizedControlTexts();
   RefreshVarsListColumnHeaders();
   RebuildMainToolbar(hwnd);
+  RefreshEnvSettingsDialogLanguage();
+  RefreshConfigureOptionDialogLanguage();
   SetUiRunning(running);
 }
 
@@ -3297,8 +3490,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
           RefreshRunTargetListFromPath();
           std::wstring cwd;
           GetEditText(g_path, cwd);
-          // Keep user-edited Scan Dir list untouched after configure.
-          LoadOptionsFromCache(cwd, false);
+          // 与 up_cache.txt 一致：恢复 UP_* 与 scan_roots（configure 已写入本次实际扫描根）。
+          LoadOptionsFromCache(cwd, true);
         }
         delete pack;
       }
@@ -3379,7 +3572,19 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
           ResetScanDirsForCwd(folder);
           SendMessageW(g_run_target, CB_RESETCONTENT, 0, 0);
           SendMessageW(g_test_target, CB_RESETCONTENT, 0, 0);
-          LoadOptionsFromCache(folder, false);
+          // 若该 CWD 下已有 up_cache.txt，则一并恢复 scan_roots 到「扫描目录」列表。
+          LoadOptionsFromCache(folder, true);
+          RefreshRunTargetListFromPath();
+        }
+        return 0;
+      }
+      if (id == IDC_PATH && HIWORD(wParam) == EN_KILLFOCUS) {
+        std::wstring cwd;
+        GetEditText(g_path, cwd);
+        TrimInPlace(cwd);
+        if (!cwd.empty()) {
+          LoadOptionsFromCache(cwd, true);
+          RefreshRunTargetListFromPath();
         }
         return 0;
       }
@@ -3461,12 +3666,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
           GetEditText(g_install_dir, inst);
         TrimInPlace(inst);
         if (inst.empty()) {
-          AppendLog(L"[错误] pack 需要「安装目录」或 install 子目录名（对应 CLI：--install-dir-name）。\r\n");
+          AppendLog(g_ui_lang_zh ? L"[错误] pack 需要「安装目录」或 install 子目录名（对应 CLI：--install-dir-name）。\r\n"
+                               : L"[Error] pack needs Install Dir or install leaf (--install-dir-name).\r\n");
           return 0;
         }
         const std::wstring leaf = IntermediateLeafFromPathishEdit(inst);
         if (leaf.empty()) {
-          AppendLog(L"[错误] 无法从安装目录得到有效的 --install-dir-name。\r\n");
+          AppendLog(g_ui_lang_zh ? L"[错误] 无法从安装目录得到有效的 --install-dir-name。\r\n"
+                               : L"[Error] Could not derive a valid --install-dir-name from Install Dir.\r\n");
           return 0;
         }
         line += L" --install-dir-name ";
@@ -3477,12 +3684,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       if (id == IDC_RUN) {
         const int idx = static_cast<int>(SendMessageW(g_run_target, CB_GETCURSEL, 0, 0));
         if (idx == CB_ERR) {
-          AppendLog(L"[错误] 运行目标列表为空，请先 configure。\r\n");
+          AppendLog(g_ui_lang_zh ? L"[错误] 运行目标列表为空，请先 configure。\r\n"
+                               : L"[Error] Run target list is empty; configure first.\r\n");
           return 0;
         }
         const int n = static_cast<int>(SendMessageW(g_run_target, CB_GETLBTEXTLEN, static_cast<WPARAM>(idx), 0));
         if (n <= 0) {
-          AppendLog(L"[错误] 无法读取运行目标。\r\n");
+          AppendLog(g_ui_lang_zh ? L"[错误] 无法读取运行目标。\r\n" : L"[Error] Could not read run target.\r\n");
           return 0;
         }
         std::wstring tgt(static_cast<size_t>(n), L'\0');
@@ -3503,7 +3711,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
     case WM_CLOSE:
       if (g_running) {
-        if (MessageBoxW(hwnd, L"up 仍在运行，确定要关闭窗口吗？", L"up-gui", MB_YESNO | MB_ICONQUESTION) != IDYES)
+        if (MessageBoxW(hwnd, T(L"up 仍在运行，确定要关闭窗口吗？", L"up is still running. Close the window?"),
+                        L"up-gui", MB_YESNO | MB_ICONQUESTION) != IDYES)
           return 0;
       }
       DestroyWindow(hwnd);

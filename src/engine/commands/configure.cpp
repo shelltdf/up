@@ -123,6 +123,26 @@ bool equals_ci(std::string a, std::string b) {
   return a == b;
 }
 
+// 写入缓存的 scan_roots 只表示「额外 --scan 根」；cwd 已由 cwd= 字段表示，不再重复写入。
+std::vector<std::filesystem::path> scan_roots_for_cache_file(const std::filesystem::path& cwd,
+                                                            const std::vector<std::filesystem::path>& roots) {
+  std::vector<std::filesystem::path> out;
+  std::error_code ec_cwd;
+  const auto cwd_abs = std::filesystem::weakly_canonical(std::filesystem::absolute(cwd), ec_cwd);
+  const std::string cwd_key = std::filesystem::absolute(cwd).lexically_normal().generic_string();
+  for (const auto& r : roots) {
+    std::error_code ec_r;
+    const auto r_abs = std::filesystem::weakly_canonical(std::filesystem::absolute(r), ec_r);
+    const bool same_canon = !ec_cwd && !ec_r && r_abs == cwd_abs;
+    const bool same_key =
+        std::filesystem::absolute(r).lexically_normal().generic_string() == cwd_key;
+    if (same_canon || same_key)
+      continue;
+    out.push_back(r);
+  }
+  return out;
+}
+
 void write_up_cache(const std::filesystem::path& cache_path,
                     const std::filesystem::path& cwd,
                     const std::string& arch,
@@ -818,8 +838,9 @@ int cmd_configure(const std::filesystem::path& cwd,
 
   const auto generated_file = equals_ci(build_system, "ninja") ? (graph_model.out_dir / "build.ninja")
                                                                 : (graph_model.build_root / "CMakeLists.txt");
-  write_up_cache(cache_path, cwd, arch, primary_pkg.name, generated_file, roots, opts);
-  write_packages_md(cache_path.parent_path() / "packages.md", loaded_packages, roots);
+  const auto roots_cached = scan_roots_for_cache_file(cwd, roots);
+  write_up_cache(cache_path, cwd, arch, primary_pkg.name, generated_file, roots_cached, opts);
+  write_packages_md(cache_path.parent_path() / "packages.md", loaded_packages, roots_cached);
   if (equals_ci(build_system, "ninja"))
     return 0;
 
