@@ -71,6 +71,7 @@ constexpr int IDM_OPT_RESET_DEFAULT = 2103;
 
 constexpr int IDM_EXIT = 1000;
 constexpr int IDM_ABOUT = 1001;
+constexpr int IDM_UP_HELP = 1002;
 
 constexpr int IDC_ENV_TAB = 3001;
 constexpr int IDC_ENV_AUTO = 3002;
@@ -1300,6 +1301,8 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         const auto* hdr = reinterpret_cast<const NMHDR*>(lParam);
         if (hdr && hdr->idFrom == IDC_ENV_TAB && hdr->code == TCN_SELCHANGE) {
           ShowEnvTab(st, TabCtrl_GetCurSel(st->tab));
+          LayoutEnvDialog(hwnd, st);
+          RedrawWindow(hwnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
           return 0;
         }
         if (hdr && hdr->code == LVN_ITEMCHANGED &&
@@ -1321,6 +1324,7 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
       }
       return 0;
     case WM_CLOSE:
+      ShowWindow(hwnd, SW_HIDE);
       DestroyWindow(hwnd);
       return 0;
     default:
@@ -1349,7 +1353,7 @@ bool ShowEnvSettingsDialog(HWND owner) {
   RECT rc{};
   GetWindowRect(owner, &rc);
   HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kEnvClass, L"编译环境设置",
-                             WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE | WS_THICKFRAME,
+                             WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE | WS_THICKFRAME | WS_CLIPCHILDREN,
                              rc.left + 32, rc.top + 28, 860, 560, owner, nullptr, GetModuleHandleW(nullptr), &st);
   if (!dlg) {
     EnableWindow(owner, TRUE);
@@ -1364,6 +1368,7 @@ bool ShowEnvSettingsDialog(HWND owner) {
   }
   EnableWindow(owner, TRUE);
   SetActiveWindow(owner);
+  RedrawWindow(owner, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
   if (st.accepted) {
     g_env_settings = std::move(st.work);
     SaveGuiEnvSettings();
@@ -1738,6 +1743,7 @@ void SetUiRunning(bool running) {
     const UINT ena = MF_BYCOMMAND | MF_ENABLED;
     EnableMenuItem(menu, IDM_EXIT, ena);
     EnableMenuItem(menu, IDM_ABOUT, running ? gray : ena);
+    EnableMenuItem(menu, IDM_UP_HELP, running ? gray : ena);
     EnableMenuItem(menu, IDC_CONFIGURE, running ? gray : ena);
     EnableMenuItem(menu, IDC_BUILD, running ? gray : ena);
     EnableMenuItem(menu, IDC_TEST, running ? gray : ena);
@@ -2207,10 +2213,146 @@ void CreateMainMenu(HWND hwnd) {
   AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(tools), L"操作(&O)");
 
   HMENU help = CreateMenu();
+  AppendMenuW(help, MF_STRING, IDM_UP_HELP, L"up 帮助信息(&U)...");
   AppendMenuW(help, MF_STRING, IDM_ABOUT, L"关于(&A)…");
   AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(help), L"帮助(&H)");
 
   SetMenu(hwnd, bar);
+}
+
+struct UpHelpDialogState {
+  std::wstring text;
+  HWND edit{};
+  HWND btn_copy{};
+  HWND btn_close{};
+};
+
+void LayoutUpHelpDialog(HWND hwnd, UpHelpDialogState* st) {
+  RECT rc{};
+  GetClientRect(hwnd, &rc);
+  const int pad = 10;
+  const int btn_h = 28;
+  const int btn_w = 90;
+  MoveWindow(st->edit, pad, pad, rc.right - pad * 2, rc.bottom - pad * 3 - btn_h, TRUE);
+  const int y = rc.bottom - pad - btn_h;
+  MoveWindow(st->btn_copy, pad, y, btn_w, btn_h, TRUE);
+  MoveWindow(st->btn_close, rc.right - pad - btn_w, y, btn_w, btn_h, TRUE);
+}
+
+LRESULT CALLBACK UpHelpWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+  auto* st = reinterpret_cast<UpHelpDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+  switch (msg) {
+    case WM_CREATE: {
+      auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
+      st = reinterpret_cast<UpHelpDialogState*>(cs->lpCreateParams);
+      SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(st));
+      const HFONT ui = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+      st->edit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", st->text.c_str(),
+                                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL |
+                                     ES_READONLY | ES_WANTRETURN,
+                                 0, 0, 100, 100, hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
+      st->btn_copy = CreateWindowExW(0, L"BUTTON", L"复制", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
+                                     nullptr, GetModuleHandleW(nullptr), nullptr);
+      st->btn_close = CreateWindowExW(0, L"BUTTON", L"关闭", WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
+                                      nullptr, GetModuleHandleW(nullptr), nullptr);
+      SendMessageW(st->edit, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(st->btn_copy, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(st->btn_close, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      LayoutUpHelpDialog(hwnd, st);
+      return 0;
+    }
+    case WM_SIZE:
+      if (st)
+        LayoutUpHelpDialog(hwnd, st);
+      return 0;
+    case WM_GETMINMAXINFO: {
+      auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
+      mmi->ptMinTrackSize.x = 560;
+      mmi->ptMinTrackSize.y = 380;
+      return 0;
+    }
+    case WM_COMMAND:
+      if (!st)
+        return 0;
+      if ((HWND)lParam == st->btn_copy) {
+        const int len = GetWindowTextLengthW(st->edit);
+        std::wstring text;
+        if (len > 0) {
+          text.resize(static_cast<size_t>(len) + 1);
+          GetWindowTextW(st->edit, text.data(), len + 1);
+          text.resize(static_cast<size_t>(len));
+        }
+        CopyTextToClipboard(hwnd, text);
+        return 0;
+      }
+      if ((HWND)lParam == st->btn_close) {
+        DestroyWindow(hwnd);
+        return 0;
+      }
+      return 0;
+    case WM_CLOSE:
+      DestroyWindow(hwnd);
+      return 0;
+    default:
+      return DefWindowProcW(hwnd, msg, wParam, lParam);
+  }
+}
+
+void ShowUpHelpDialog(HWND owner, const std::wstring& text) {
+  static bool cls_registered = false;
+  static constexpr wchar_t kHelpClass[] = L"UpGuiHelpDialogClass";
+  if (!cls_registered) {
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = UpHelpWndProc;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = kHelpClass;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    RegisterClassW(&wc);
+    cls_registered = true;
+  }
+  UpHelpDialogState st{};
+  st.text = text;
+  EnableWindow(owner, FALSE);
+  RECT rc{};
+  GetWindowRect(owner, &rc);
+  HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kHelpClass, L"up 帮助信息",
+                             WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE | WS_THICKFRAME, rc.left + 40, rc.top + 40,
+                             760, 520, owner, nullptr, GetModuleHandleW(nullptr), &st);
+  if (!dlg) {
+    EnableWindow(owner, TRUE);
+    return;
+  }
+  MSG msg{};
+  while (IsWindow(dlg) && GetMessageW(&msg, nullptr, 0, 0) > 0) {
+    if (!IsDialogMessageW(dlg, &msg)) {
+      TranslateMessage(&msg);
+      DispatchMessageW(&msg);
+    }
+  }
+  EnableWindow(owner, TRUE);
+  SetActiveWindow(owner);
+}
+
+void ShowUpHelpInfo(HWND hwnd) {
+  const std::wstring up = UpExePath();
+  if (GetFileAttributesW(up.c_str()) == INVALID_FILE_ATTRIBUTES) {
+    MessageBoxW(hwnd, L"未找到 up.exe（需与 up-gui.exe 同目录）。", L"up 帮助信息", MB_OK | MB_ICONWARNING);
+    return;
+  }
+  SetStatus(L"Running up --help...");
+  const std::wstring cmd = L"\"" + up + L"\" --help";
+  std::wstring output;
+  DWORD exit_code = 0;
+  if (!RunProcessCapture(up, cmd, L"", output, exit_code)) {
+    SetStatus(L"Failed to run up --help");
+    MessageBoxW(hwnd, L"执行 up --help 失败。", L"up 帮助信息", MB_OK | MB_ICONERROR);
+    return;
+  }
+  std::wstringstream ss;
+  ss << L"$ " << cmd << L"\r\n\r\n" << output << L"\r\n[退出码 " << static_cast<unsigned long>(exit_code) << L"]\r\n";
+  ShowUpHelpDialog(hwnd, ss.str());
+  SetStatus(L"up --help loaded");
 }
 
 void CreateToolbarButtons(HWND tb) {
@@ -2523,6 +2665,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
       if (id == IDM_EXIT) {
         PostMessageW(hwnd, WM_CLOSE, 0, 0);
+        return 0;
+      }
+      if (id == IDM_UP_HELP) {
+        ShowUpHelpInfo(hwnd);
         return 0;
       }
       if (id == IDM_ABOUT) {

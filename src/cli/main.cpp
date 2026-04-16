@@ -25,10 +25,14 @@ int main(int argc, char** argv) {
 
   if (args.empty()) {
     print_usage();
-    return 1;
+    return 0;
   }
 
   const std::string cmd = args[0];
+  if (cmd == "--help" || cmd == "-h" || cmd == "help") {
+    print_usage();
+    return 0;
+  }
   if (cmd == "configure") {
     std::vector<std::string> scans;
     std::vector<std::string> opts;

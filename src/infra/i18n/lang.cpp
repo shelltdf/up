@@ -34,7 +34,8 @@ void print_usage(std::ostream& os) {
           "  up run <可执行目标名>\n"
           "  up test [测试目标名]\n"
           "  up pack\n"
-          "  up project\n";
+          "  up project\n"
+          "  up --help | -h | help\n";
   } else {
     os << "up — generic package / build orchestrator (prototype)\n\n"
           "Usage:\n"
@@ -43,7 +44,8 @@ void print_usage(std::ostream& os) {
           "  up run <target_executable_name>\n"
           "  up test [test_target_name]\n"
           "  up pack\n"
-          "  up project\n";
+          "  up project\n"
+          "  up --help | -h | help\n";
   }
 }
 
