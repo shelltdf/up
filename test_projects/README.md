@@ -4,11 +4,71 @@
 
 **与 `build.py` / `install.py` 的关系**：仓库根的 `build.py`、`install.py` **只**构建并安装宿主工具 **`up.exe`** 与 **`up-gui.exe`**，**不包含、不编译、不安装** `test_projects/` 下的任何测试包。测试包由你在选好目录后运行 **`up configure` / `up build`** 等命令驱动；产物在当时的 **cwd** 下 **`.intermediate/`** 中生成，与本仓库根 `_build` 无关。
 
-| 子目录 | 说明 |
-|--------|------|
-| [hello_demo/](hello_demo/) | 多子目录、`target.xml` 与 `foo` 库及单元测试示例 |
+## 子项目一览
 
-在仓库根目录执行（已构建 `up.exe`）：
+| 子目录 | 一句话 |
+|--------|--------|
+| [hello_lib/](hello_lib/) | 独立静态库包：演示库、`hello_lib_tool` 命令行与 `hello_lib_test` 自测。 |
+| [hello_demo/](hello_demo/) | 演示多子目录、本包内 `foo` 静态库、跨包依赖 `hello_lib`，以及针对 `foo` 的测试可执行体。 |
+
+### 包依赖关系
+
+下图表示各包在 **`package.xml` 中声明的包级依赖**：箭头从**依赖方**指向**被依赖的包**（与 `configure` 校验「target 引用外包包须在 `package.xml` 中声明」的规则一致）。
+
+```mermaid
+flowchart LR
+  hello_lib["hello_lib"]
+  hello_demo["hello_demo"]
+  hello_demo --> hello_lib
+```
+
+- **`hello_lib`**：未声明对其他包的依赖。
+- **`hello_demo`**：声明依赖 **`hello_lib`**（其 `target.xml` 中 `hello_lib:hello_lib` 等引用需与此一致）。
+- **`hello_demo`** 中的 **`<dependency name="none" optional="true"/>`** 为可选占位项，**不对应** `test_projects/` 下的子目录，故图中不画出节点。
+
+---
+
+## hello_lib
+
+**定位**：不依赖其他测试包的**基础库示例**，展示「一个包里同时有静态库、演示用可执行程序、单元测试可执行程序」的典型布局。
+
+**包元数据**（`package.xml`）：包名 `hello_lib`，版本 `0.1.0`。
+
+**目标与目录**：
+
+| 目录 | `target` 名 | 类型 | 说明 |
+|------|-------------|------|------|
+| `hello_lib/` | `hello_lib` | `static_library` | 实现 `hello_lib` 命名空间 API，头文件与实现同目录；`includes` 指向当前目录以便 `#include "hello_lib.hpp"`。 |
+| `hello_lib_tool/` | `hello_lib_tool` | `executable` | 命令行小工具，通过相对路径包含库头文件，调用 `Counter`、`Greeter`、`normalize_name`、`version`、`add`、`make_range` 等并打印结果。 |
+| `hello_lib_test/` | `hello_lib_test` | `executable` | 对库 API 做 `assert` 自检（版本字符串、字符串规范化、加法、`Counter`、`Greeter`、`make_range` 等），供 `up test` / CTest 运行。 |
+
+**库 API 概要**（`hello_lib.hpp` / `hello_lib.cpp`）：`version()`；`normalize_name`（转小写）；`add`；`Counter`；`Greeter`（拼接问候语）；`make_range(n)`（生成 `0..n-1` 向量）。
+
+**构建注意**：`configure` 生成 CMake 时，**同一包内**每个可执行 target 会 **PRIVATE 链接本包中全部库 target**（因此 `hello_lib_tool`、`hello_lib_test` 的 `target.xml` 不必再写对 `hello_lib` 的 `<dependency>`，仍能正确链接静态库；跨包依赖则须在 `package.xml` / `target.xml` 中显式声明）。
+
+---
+
+## hello_demo
+
+**定位**：演示**包内多 target 子目录**、**本包静态库 `foo`**，以及通过 `<dependency name="hello_lib"/>` **依赖另一测试包 `hello_lib`** 的跨包链接与头文件使用（主程序里 `hello_lib:hello_lib` 形式引用库 target）。
+
+**包元数据**（`package.xml`）：包名 `hello_demo`，声明依赖 `hello_lib`（以及占位用的 `none` 可选依赖）；用于验证多包扫描与包间依赖解析。
+
+**目标与目录**：
+
+| 目录 | `target` 名 | 类型 | 说明 |
+|------|-------------|------|------|
+| `foo/` | `foo` | `static_library` | 提供 `foo_print()`、`Foo` 类（带 `tag`、`greet` 等），供主程序与测试使用。 |
+| `hello_demo/` | `hello_demo` | `executable` | 入口 `main.cpp`：调用 `foo` 与 `hello_lib`（`version`、`add`、`Greeter`），验证本包库 + 跨包库同时链接。 |
+| `hello_demo_test/` | `hello_demo_test` | `executable` | 直接包含 `../foo/foo.hpp`，对 `Foo` 与 `foo_print` 做简单断言式「单元测试」；同包链接规则下会链接本包 `foo`，**不**使用 `hello_lib`，用于单独验证 `foo` 库行为。 |
+
+**与测试的关系**：`hello_demo_test` 与 `hello_demo` 在 `up test` / CTest 中通常都会作为测试条目出现（具体以生成规则为准）；`hello_demo_test` 专注测试本包 `foo`，`hello_demo` 侧重端到端演示含跨包依赖的主程序。
+
+---
+
+## 在仓库根目录执行（已构建 `up.exe`）
+
+对 **`test_projects` 下全部包** 一次性配置并构建、测试、运行主程序示例：
 
 ```powershell
 .\_build\Release\up.exe configure --scan test_projects
@@ -17,6 +77,12 @@
 .\_build\Release\up.exe run hello_demo
 ```
 
-`hello_demo` 包内 **`hello_demo_test/`** 子目录含测试可执行体的 **`target.xml`**；`up test` / CTest 会运行 **`hello_demo_test`** 与主程序 **`hello_demo`** 两条用例。
+`hello_demo` 包内 **`hello_demo_test/`** 子目录含测试可执行体的 **`target.xml`**；`up test` / CTest 会运行 **`hello_demo_test`** 与主程序 **`hello_demo`** 等相关用例（若工程同时注册了 `hello_lib` 包，也会包含 **`hello_lib_test`** 等）。
+
+单独运行 **`hello_lib`** 包内的工具示例（在已 configure 且 build 成功的前提下）：
+
+```powershell
+.\_build\Release\up.exe run hello_lib_tool
+```
 
 或在某一子包目录内将 `up` 加入 `PATH` 后，直接 `up configure`（默认扫描当前目录，仅包含该包）。
