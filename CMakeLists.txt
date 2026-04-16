@@ -12,12 +12,22 @@ add_executable(up
   src/cli/main.cpp
   src/engine/commands/configure.cpp
   src/engine/commands/build.cpp
+  src/engine/commands/run.cpp
+  src/engine/commands/test.cpp
+  src/engine/commands/pack.cpp
+  src/engine/commands/project.cpp
+  src/engine/commands/commands_common.cpp
   src/infra/i18n/lang.cpp
   src/infra/platform/path_check.cpp
   src/engine/xml/simple_xml.cpp
   src/infra/platform/paths.cpp
   src/engine/commands/build.hpp
   src/engine/commands/configure.hpp
+  src/engine/commands/run.hpp
+  src/engine/commands/test.hpp
+  src/engine/commands/pack.hpp
+  src/engine/commands/project.hpp
+  src/engine/commands/commands_common.hpp
   src/infra/platform/paths.hpp
   src/engine/xml/simple_xml.hpp
 )

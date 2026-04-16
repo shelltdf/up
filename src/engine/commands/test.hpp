@@ -5,6 +5,6 @@
 
 namespace up {
 
-int cmd_build(const std::filesystem::path& cwd);
+int cmd_test(const std::filesystem::path& cwd, const std::string& test_name = "");
 
 }  // namespace up

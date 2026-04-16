@@ -1,6 +1,10 @@
 #include "build.hpp"
 #include "configure.hpp"
 #include "lang.hpp"
+#include "pack.hpp"
+#include "project.hpp"
+#include "run.hpp"
+#include "test.hpp"
 
 #include <filesystem>
 #include <iostream>

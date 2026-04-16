@@ -1,10 +1,9 @@
 #pragma once
 
 #include <filesystem>
-#include <string>
 
 namespace up {
 
-int cmd_build(const std::filesystem::path& cwd);
+int cmd_pack(const std::filesystem::path& cwd);
 
 }  // namespace up
