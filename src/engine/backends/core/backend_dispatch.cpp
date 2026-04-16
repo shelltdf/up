@@ -14,6 +14,53 @@
 
 namespace up {
 
+namespace {
+
+bool cpack_available() {
+#if defined(_WIN32)
+  const int code = std::system("cpack --version >nul 2>&1");
+#else
+  const int code = std::system("cpack --version >/dev/null 2>&1");
+#endif
+  return code == 0;
+}
+
+bool try_run_cpack(const PackBackendContext& ctx, int& out_code) {
+  if (!std::filesystem::exists(ctx.build_out_dir / "CPackConfig.cmake"))
+    return false;
+  if (!cpack_available())
+    return false;
+  std::error_code ec;
+  std::filesystem::create_directories(ctx.dst_dir, ec);
+  const std::string command = build_cpack_command(ctx);
+  std::cout << command << "\n";
+  const int code = std::system(command.c_str());
+  if (code == 0) {
+    std::cout << "pack: cpack output -> " << ctx.dst_dir << "\n";
+    out_code = 0;
+    return true;
+  }
+  out_code = static_cast<unsigned>(code) > 255u ? 1 : code;
+  return false;
+}
+
+int run_archive_pack(const PackBackendContext& ctx) {
+  const auto archive = archive_output_path(ctx);
+  std::error_code ec;
+  if (std::filesystem::exists(archive))
+    std::filesystem::remove(archive, ec);
+  const std::string command = build_archive_command(ctx);
+  const int code = std::system(command.c_str());
+  if (code != 0) {
+    std::cerr << "pack: archive command failed with code " << code << "\n";
+    return static_cast<unsigned>(code) > 255u ? 1 : code;
+  }
+  std::cout << "pack: " << ctx.src_dir << " -> " << archive << "\n";
+  return 0;
+}
+
+}  // namespace
+
 int run_build_backend(const BuildBackendContext& ctx, int failure_return_code) {
   const std::string command =
       equals_ci(ctx.build_system, "ninja") ? build_ninja_install_command(ctx) : build_cmake_build_command(ctx);
@@ -66,18 +113,39 @@ int run_test_backend_ninja(const TestBackendContext& ctx, int not_found_return_c
 }
 
 int run_pack_backend(const PackBackendContext& ctx) {
-  const auto archive = archive_output_path(ctx);
-  std::error_code ec;
-  if (std::filesystem::exists(archive))
-    std::filesystem::remove(archive, ec);
-  const std::string command = build_archive_command(ctx);
-  const int code = std::system(command.c_str());
-  if (code != 0) {
-    std::cerr << "pack: archive command failed with code " << code << "\n";
-    return static_cast<unsigned>(code) > 255u ? 1 : code;
+  const std::string mode = lower_ascii(ctx.pack_backend.empty() ? "auto" : ctx.pack_backend);
+  if (mode == "archive")
+    return run_archive_pack(ctx);
+
+  if (mode == "cpack") {
+    int cpack_code = 1;
+    if (try_run_cpack(ctx, cpack_code))
+      return 0;
+    std::cerr << "pack: cpack failed or unavailable";
+    if (!ctx.allow_fallback) {
+      std::cerr << " (fallback disabled)\n";
+      return cpack_code;
+    }
+    std::cerr << ", falling back to archive backend\n";
+    return run_archive_pack(ctx);
   }
-  std::cout << "pack: " << ctx.src_dir << " -> " << archive << "\n";
-  return 0;
+
+  if (mode == "auto") {
+    if (equals_ci(ctx.build_system, "cmake")) {
+      int cpack_code = 1;
+      if (try_run_cpack(ctx, cpack_code))
+        return 0;
+      if (!ctx.allow_fallback) {
+        std::cerr << "pack: cpack failed or unavailable and fallback disabled\n";
+        return cpack_code;
+      }
+      std::cerr << "pack: cpack not available/failed, falling back to archive backend\n";
+    }
+    return run_archive_pack(ctx);
+  }
+
+  std::cerr << "pack: unsupported UP_PACK_BACKEND=" << ctx.pack_backend << " (expected auto/archive/cpack)\n";
+  return 3;
 }
 
 int run_generate_backend(const ConfigureGraphModel& model) {

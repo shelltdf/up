@@ -29,6 +29,11 @@ struct PackBackendContext {
   std::filesystem::path src_dir;
   std::filesystem::path dst_dir;
   std::string arch;
+  std::string build_system;
+  std::filesystem::path build_out_dir;
+  std::string config_name;
+  std::string pack_backend;
+  bool allow_fallback = true;
 };
 
 struct ConfigureBackendContext {
