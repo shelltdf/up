@@ -9,7 +9,7 @@
 | 子目录 | 一句话 |
 |--------|--------|
 | [hello_lib/](hello_lib/) | 独立静态库包：演示库、`hello_lib_tool` 命令行与 `hello_lib_test` 自测。 |
-| [hello_demo/](hello_demo/) | 演示多子目录、本包内 `hello_foo` 静态库、跨包依赖 `hello_lib`，以及针对 `hello_foo` 的测试可执行体。 |
+| [hello_demo/](hello_demo/) | 演示多子目录、本包 `hello_foo`、跨包 `hello_lib` 与 **`rock_stack`**（`rockBase` / `rockNet` / `rockBus`），以及 `hello_foo_test`。 |
 | [rock_stack/](rock_stack/) | 演示 **`include/<库名>/`**、**`src/<库名>/`**（**`target.xml` 与 `.cpp` 同目录**）、**`app/`** 两程序、**`test/`** 每库一单测；三库 `rockBase` / `rockNet` / `rockBus`。 |
 
 ### 包依赖关系
@@ -22,12 +22,13 @@ flowchart LR
   hello_demo["hello_demo"]
   rock_stack["rock_stack"]
   hello_demo --> hello_lib
+  hello_demo --> rock_stack
 ```
 
 - **`hello_lib`**：未声明对其他包的依赖。
-- **`hello_demo`**：声明依赖 **`hello_lib`**（其 `target.xml` 中 `hello_lib:hello_lib` 等引用需与此一致）。
+- **`hello_demo`**：声明依赖 **`hello_lib`** 与 **`rock_stack`**（`target.xml` 中如 `hello_lib:hello_lib`、`rock_stack:rockBase` 等须与之一致）。
 - **`hello_demo`** 中的 **`<dependency name="none" optional="true"/>`** 为可选占位项，**不对应** `test_projects/` 下的子目录，故图中不画出节点。
-- **`rock_stack`**：未声明对其他测试包的依赖（独立布局示例包）。
+- **`rock_stack`**：未声明对其他测试包的依赖；可被 **`hello_demo`** 作为库来源引用。
 
 ---
 
@@ -53,16 +54,16 @@ flowchart LR
 
 ## hello_demo
 
-**定位**：演示**包内多 target 子目录**、**本包静态库 `hello_foo`**，以及通过 `<dependency name="hello_lib"/>` **依赖另一测试包 `hello_lib`** 的跨包链接与头文件使用（主程序里 `hello_lib:hello_lib` 形式引用库 target）。
+**定位**：演示**包内多 target 子目录**、**本包静态库 `hello_foo`**，以及跨包 **`hello_lib`**、**`rock_stack`**（三静态库 `rockBase` / `rockNet` / `rockBus`）的链接与头文件使用。
 
-**包元数据**（`package.xml`）：包名 `hello_demo`，声明依赖 `hello_lib`（以及占位用的 `none` 可选依赖）；用于验证多包扫描与包间依赖解析。
+**包元数据**（`package.xml`）：包名 `hello_demo`，声明依赖 **`hello_lib`**、**`rock_stack`**（以及占位用的 `none` 可选依赖）；用于验证多包扫描与包间依赖解析。
 
 **目标与目录**：
 
 | 目录 | `target` 名 | 类型 | 说明 |
 |------|-------------|------|------|
 | `hello_foo/` | `hello_foo` | `static_library` | 提供 `foo_print()`、`Foo` 类（带 `tag`、`greet` 等），供主程序与测试使用。 |
-| `hello_demo/` | `hello_demo` | `executable` | 入口 `main.cpp`：调用 `hello_foo` 与 `hello_lib`（`version`、`add`、`Greeter`），验证本包库 + 跨包库同时链接。 |
+| `hello_demo/` | `hello_demo` | `executable` | 入口 `main.cpp`：分段调用本包 `hello_foo`、跨包 `hello_lib`、跨包 `rock_stack` 三库（见 `rock_stack/include/rockBase` 等）。 |
 | `hello_foo_test/` | `hello_foo_test` | `executable` | 直接包含 `../hello_foo/foo.hpp`，对 `Foo` 与 `foo_print` 做简单断言式「单元测试」；同包链接规则下会链接本包 `hello_foo`，**不**使用 `hello_lib`，用于单独验证该库行为。 |
 
 **与测试的关系**：`hello_foo_test` 与 `hello_demo` 在 `up test` / CTest 中通常都会作为测试条目出现（具体以生成规则为准）；`hello_foo_test` 专注测试本包 `hello_foo`，`hello_demo` 侧重端到端演示含跨包依赖的主程序。
