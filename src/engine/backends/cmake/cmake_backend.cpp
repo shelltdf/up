@@ -1,5 +1,4 @@
 ﻿#include "cmake/cmake_backend.hpp"
-#include "cmake/cmake_third_party_heuristics.hpp"
 
 #include "paths.hpp"
 
@@ -166,8 +165,6 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
   }
 
   const std::optional<std::filesystem::path> pkg_src_root = infer_common_source_root(model);
-  if (pkg_src_root)
-    cmake_third_party::emit_detected_upstream_snippets(cm, *pkg_src_root);
 
   for (const auto& t : model.targets) {
     if (!t.imported_prebuilt)

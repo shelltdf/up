@@ -108,6 +108,8 @@ Optional cache variables for the subtree use the **`UPSTREAM_`** prefix, e.g. `u
 
 **Limitation:** `<cmake/>` is supported only with **`UP_TARGET_BUILD_SYSTEM=cmake`**. Ninja mode reports an error.
 
+Rule boundary: `up` / `up-gui` must stay generic and do not embed per-project special cases. Dependency wiring, install artifacts, and include directories must be expressed explicitly via `package.xml` / `target.xml`.
+
 ### 3.1c `CMAKE_PREFIX_PATH` merging
 
 The generated super-build and external projects receive **`CMAKE_PREFIX_PATH`** built as:

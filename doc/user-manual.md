@@ -129,6 +129,8 @@ cmake --build _build --config Release
 
 限制：**仅 CMake 聚合后端**支持 `<cmake/>`；`UP_TARGET_BUILD_SYSTEM=ninja` 时会报错。
 
+规则约束：`up` / `up-gui` 不对任何具体第三方代码库做内置特判；依赖关系、安装产物、头文件目录等信息都必须通过 `package.xml` / `target.xml` 显式声明。
+
 ### 3.1c `CMAKE_PREFIX_PATH` 合并
 
 聚合工程与 **`<cmake/>`** 子工程会带上 **`CMAKE_PREFIX_PATH`**，由以下部分**去重后**拼接（分号分隔，与 CMake 列表一致）：

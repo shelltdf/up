@@ -153,6 +153,9 @@ HWND g_configure_option_dialog_hwnd{};
 
 std::atomic<bool> g_running{};
 std::atomic<unsigned long> g_active_run_seq{0};
+std::wstring g_last_ui_log_text;
+std::chrono::steady_clock::time_point g_last_ui_log_tp{};
+constexpr auto kUiLogDedupWindow = std::chrono::milliseconds(1200);
 std::wstring g_last_up_args;
 std::wstring g_status_text = L"Ready";
 unsigned long g_run_seq = 0;
@@ -325,6 +328,84 @@ void SetStatus(const wchar_t* text) {
     SendMessageW(g_status, SB_SETTEXTW, 0, reinterpret_cast<LPARAM>(g_status_text.c_str()));
 }
 
+// ---- Status helpers: generic/common ----
+void SetStatusReady() {
+  SetStatus(T(L"就绪", L"Ready"));
+}
+
+void SetStatusCopyFailed() {
+  SetStatus(T(L"复制失败", L"Copy failed"));
+}
+
+// ---- Status helpers: run/help flow ----
+void SetStatusRunHelpRunning() {
+  SetStatus(T(L"正在运行 up --help…", L"Running up --help…"));
+}
+
+void SetStatusRunHelpFailed() {
+  SetStatus(T(L"运行 up --help 失败", L"Failed to run up --help"));
+}
+
+void SetStatusRunHelpLoaded() {
+  SetStatus(T(L"已加载 up --help", L"up --help loaded"));
+}
+
+// ---- Status helpers: target discovery ----
+void SetStatusRunTestTargetsRefreshed() {
+  SetStatus(T(L"已刷新运行/测试目标", L"Run/Test targets refreshed"));
+}
+
+void SetStatusNoRunTestTargetsFound() {
+  SetStatus(T(L"未找到运行/测试目标", L"No run/test targets found"));
+}
+
+// ---- Status helpers: configure option dialog ----
+void SetStatusOptionCustomValueWarning() {
+  SetStatus(T(L"警告：已使用自定义 Option 值", L"Warning: custom option value used"));
+}
+
+void SetStatusOptionGeneratorMayBeIgnored() {
+  SetStatus(T(L"警告：生成器可能被忽略", L"Warning: generator may be ignored"));
+}
+
+void SetStatusOptionNameCopied() {
+  SetStatus(T(L"已复制变量名", L"Copied option name"));
+}
+
+void SetStatusOptionKeyValueCopied() {
+  SetStatus(T(L"已复制 KEY=VALUE", L"Copied option key=value"));
+}
+
+void SetStatusOptionResetToDefault() {
+  SetStatus(T(L"已恢复为默认 Option", L"Option reset to default"));
+}
+
+void SetStatusOptionGroupingUpdated() {
+  SetStatus(T(L"已更新 Option 分组显示", L"Option grouping updated"));
+}
+
+void SetStatusOptionValueUpdated() {
+  SetStatus(T(L"已更新 Option 值", L"Option value updated"));
+}
+
+// ---- Status helpers: environment settings ----
+void SetStatusEnvSettingsUpdated() {
+  SetStatus(T(L"已更新编译环境设置", L"Environment settings updated"));
+}
+
+void SetStatusEnvSettingsUnchanged() {
+  SetStatus(T(L"编译环境设置未更改", L"Environment settings unchanged"));
+}
+
+// ---- Status helpers: log panel ----
+void SetStatusLogCopied() {
+  SetStatus(T(L"已复制日志", L"Log copied"));
+}
+
+void SetStatusLogCleared() {
+  SetStatus(T(L"已清空日志", L"Log cleared"));
+}
+
 bool CopyTextToClipboard(HWND owner, const std::wstring& text) {
   if (!OpenClipboard(owner))
     return false;
@@ -365,7 +446,120 @@ void AppendLogRaw(const std::wstring& text) {
 void AppendLog(const std::wstring& text) {
   if (!IsWindow(g_hwnd))
     return;
+  // De-duplicate rapid identical UI hints/errors to avoid log flooding on repeated clicks.
+  const auto now = std::chrono::steady_clock::now();
+  if (!text.empty() && text == g_last_ui_log_text && (now - g_last_ui_log_tp) <= kUiLogDedupWindow)
+    return;
+  g_last_ui_log_text = text;
+  g_last_ui_log_tp = now;
   PostMessageW(g_hwnd, WM_APPEND_LOG, 0, reinterpret_cast<LPARAM>(new std::wstring(text)));
+}
+
+std::wstring MakeTaggedLogLine(const wchar_t* zh_tag, const wchar_t* en_tag, const wchar_t* zh_msg, const wchar_t* en_msg) {
+  std::wstring line = T(zh_tag, en_tag);
+  line += T(zh_msg, en_msg);
+  line += L"\r\n";
+  return line;
+}
+
+void AppendErrorLog(const wchar_t* zh_msg, const wchar_t* en_msg) {
+  AppendLog(MakeTaggedLogLine(L"[错误] ", L"[Error] ", zh_msg, en_msg));
+}
+
+void AppendWarningLog(const wchar_t* zh_msg, const wchar_t* en_msg) {
+  AppendLog(MakeTaggedLogLine(L"[警告] ", L"[Warning] ", zh_msg, en_msg));
+}
+
+void AppendInfoLog(const wchar_t* zh_msg, const wchar_t* en_msg) {
+  AppendLog(MakeTaggedLogLine(L"[提示] ", L"[Info] ", zh_msg, en_msg));
+}
+
+// Overload for dynamic warning content.
+void AppendWarningLog(const std::wstring& zh_msg, const std::wstring& en_msg) {
+  std::wstring line = T(L"[警告] ", L"[Warning] ");
+  line += g_ui_lang_zh ? zh_msg : en_msg;
+  line += L"\r\n";
+  AppendLog(line);
+}
+
+// ---- Fixed log message helpers: run/build prerequisites ----
+void LogErrorBuildDirControlNotInitialized() {
+  AppendErrorLog(L"Build Dir 控件未初始化。", L"Build Dir control is not initialized.");
+}
+
+void LogErrorBuildDirRequiredBeforeBuild() {
+  AppendErrorLog(L"请填写「Build Dir」或构建目录名（对应 CLI：--build-dir-name），再执行 build。",
+                 L"Set Build Dir or build leaf name (--build-dir-name) before build.");
+}
+
+void LogErrorInstallDirControlNotInitialized() {
+  AppendErrorLog(L"安装目录控件未初始化。", L"Install Dir control is not initialized.");
+}
+
+void LogErrorInstallDirRequiredBeforeRunTest() {
+  AppendErrorLog(L"请填写「安装目录」或 install 子目录名（对应 CLI：--install-dir-name），再执行 run/test。",
+                 L"Set Install Dir or install leaf (--install-dir-name) before run/test.");
+}
+
+void LogErrorWorkingDirRequired() {
+  AppendErrorLog(L"请先填写或选择「当前工作目录 (CWD)」。", L"Set or pick the working directory (CWD) first.");
+}
+
+void LogErrorUpExeNotFound() {
+  AppendErrorLog(L"找不到 up.exe，请与 up-gui.exe 放在同一目录。", L"up.exe not found (place next to up-gui.exe).");
+}
+
+// ---- Fixed log message helpers: library-package hints ----
+void LogInfoNoRunTestTargetsForLibraryPackage() {
+  AppendInfoLog(L"当前包没有可运行/可测试目标（纯库包场景正常）。",
+                L"No run/test targets in current package (normal for library-only packages).");
+}
+
+void LogErrorPackInstallDirRequired() {
+  AppendErrorLog(L"pack 需要「安装目录」或 install 子目录名（对应 CLI：--install-dir-name）。",
+                 L"pack needs Install Dir or install leaf (--install-dir-name).");
+}
+
+void LogErrorPackInstallDirLeafInvalid() {
+  AppendErrorLog(L"无法从安装目录得到有效的 --install-dir-name。",
+                 L"Could not derive a valid --install-dir-name from Install Dir.");
+}
+
+void LogInfoNoRunTargetForLibraryPackage() {
+  AppendInfoLog(L"当前包没有可运行目标（纯库包场景正常）。",
+                L"No run target in current package (normal for library-only packages).");
+}
+
+void LogErrorRunTargetReadFailed() {
+  AppendErrorLog(L"无法读取运行目标。", L"Could not read run target.");
+}
+
+// ---- Fixed log message helpers: option dialog ----
+void LogErrorOptionRowNotSelected() {
+  AppendErrorLog(L"请先在 Option 表中选择一个变量。", L"Select an option row first.");
+}
+
+void LogErrorOptionValueRequired() {
+  AppendErrorLog(L"请输入值或从候选中选择。", L"Enter a value or pick from the list.");
+}
+
+void LogWarningOptionValueOutOfChoices(const std::wstring& option_name, const std::wstring& value) {
+  AppendWarningLog(option_name + L" 的值 \"" + value + L"\" 不在推荐候选中，已按自定义值保存。",
+                   option_name + L" value \"" + value + L"\" is not in the suggested list; saved as custom.");
+}
+
+void LogWarningGeneratorIgnoredForNonCMakeBuildSystem() {
+  AppendWarningLog(L"当前 UP_TARGET_BUILD_SYSTEM 不是 cmake，UP_CMAKE_GENERATOR 可能不会生效。",
+                   L"UP_TARGET_BUILD_SYSTEM is not cmake; UP_CMAKE_GENERATOR may be ignored.");
+}
+
+void PostRunLogChunk(HWND hwnd, unsigned long run_no, const std::wstring& text) {
+  if (!hwnd || text.empty())
+    return;
+  auto* p = new RunLogPack;
+  p->run_no = run_no;
+  p->text = text;
+  PostMessageW(hwnd, WM_APPEND_RUN_LOG, 0, reinterpret_cast<LPARAM>(p));
 }
 
 std::wstring NowTimeStamp() {
@@ -546,6 +740,8 @@ bool PathInHits(const std::wstring& p, const std::vector<std::wstring>& hits) {
 std::wstring QuoteWinArg(const std::wstring& s);
 bool RunProcessCapture(const std::wstring& app, const std::wstring& cmdline, const std::wstring& cwd, std::wstring& out_w,
                        DWORD& exit_code, const std::function<void(const std::wstring&)>& on_chunk = nullptr);
+void SetUiRunning(bool running);
+bool FinishConfigureArgsForRun(std::wstring& args_no_exe, std::wstring& err_out);
 
 std::wstring PickPreferredPath(const std::wstring& current, const std::vector<std::wstring>& hits) {
   if (!current.empty() && PathInHits(current, hits))
@@ -1883,9 +2079,9 @@ void RefreshRunTargetListFromPath() {
   }
 
   if (!targets.empty() || !tests.empty())
-    SetStatus(T(L"已刷新运行/测试目标", L"Run/Test targets refreshed"));
+    SetStatusRunTestTargetsRefreshed();
   else
-    SetStatus(T(L"未找到运行/测试目标", L"No run/test targets found"));
+    SetStatusNoRunTestTargetsFound();
 }
 
 std::filesystem::path ResolveUpCachePath(const std::wstring& cwd) {
@@ -2092,7 +2288,7 @@ std::wstring IntermediateLeafFromPathishEdit(std::wstring s) {
 bool AppendBuildDirFlagOrAbort(std::wstring& args_no_exe, bool required) {
   if (!g_build_dir) {
     if (required) {
-      AppendLog(g_ui_lang_zh ? L"[错误] Build Dir 控件未初始化。\r\n" : L"[Error] Build Dir control is not initialized.\r\n");
+      LogErrorBuildDirControlNotInitialized();
       return false;
     }
     return true;
@@ -2102,8 +2298,7 @@ bool AppendBuildDirFlagOrAbort(std::wstring& args_no_exe, bool required) {
   const std::wstring leaf = IntermediateLeafFromPathishEdit(bd);
   if (leaf.empty()) {
     if (required) {
-      AppendLog(g_ui_lang_zh ? L"[错误] 请填写「Build Dir」或构建目录名（对应 CLI：--build-dir-name），再执行 build。\r\n"
-                           : L"[Error] Set Build Dir or build leaf name (--build-dir-name) before build.\r\n");
+      LogErrorBuildDirRequiredBeforeBuild();
       return false;
     }
     return true;
@@ -2117,7 +2312,7 @@ bool AppendBuildDirFlagOrAbort(std::wstring& args_no_exe, bool required) {
 bool AppendInstallDirFlagOrAbort(std::wstring& args_no_exe, bool required) {
   if (!g_install_dir) {
     if (required) {
-      AppendLog(g_ui_lang_zh ? L"[错误] 安装目录控件未初始化。\r\n" : L"[Error] Install Dir control is not initialized.\r\n");
+      LogErrorInstallDirControlNotInitialized();
       return false;
     }
     return true;
@@ -2127,8 +2322,7 @@ bool AppendInstallDirFlagOrAbort(std::wstring& args_no_exe, bool required) {
   const std::wstring leaf = IntermediateLeafFromPathishEdit(id);
   if (leaf.empty()) {
     if (required) {
-      AppendLog(g_ui_lang_zh ? L"[错误] 请填写「安装目录」或 install 子目录名（对应 CLI：--install-dir-name），再执行 run/test。\r\n"
-                           : L"[Error] Set Install Dir or install leaf (--install-dir-name) before run/test.\r\n");
+      LogErrorInstallDirRequiredBeforeRunTest();
       return false;
     }
     return true;
@@ -2147,6 +2341,30 @@ void GetEditText(HWND ed, std::wstring& out) {
   out.resize(static_cast<size_t>(n) + 1);
   GetWindowTextW(ed, out.data(), n + 1);
   out.resize(static_cast<size_t>(n));
+}
+
+void DispatchCompleteLines(std::string& pending, const std::function<void(const std::wstring&)>& on_chunk) {
+  if (!on_chunk)
+    return;
+  for (;;) {
+    const size_t eol = pending.find('\n');
+    if (eol == std::string::npos)
+      break;
+    std::string line = pending.substr(0, eol + 1);
+    pending.erase(0, eol + 1);
+    const std::wstring chunk = Utf8ToWide(line);
+    if (!chunk.empty())
+      on_chunk(chunk);
+  }
+}
+
+void DispatchTailChunk(std::string& pending, const std::function<void(const std::wstring&)>& on_chunk) {
+  if (!on_chunk || pending.empty())
+    return;
+  const std::wstring tail = Utf8ToWide(pending);
+  if (!tail.empty())
+    on_chunk(tail);
+  pending.clear();
 }
 
 bool RunProcessCapture(const std::wstring& app, const std::wstring& cmdline, const std::wstring& cwd, std::wstring& out_w,
@@ -2201,23 +2419,10 @@ bool RunProcessCapture(const std::wstring& app, const std::wstring& cmdline, con
     acc.append(buf, static_cast<size_t>(n));
     if (on_chunk) {
       pending.append(buf, static_cast<size_t>(n));
-      for (;;) {
-        const size_t eol = pending.find('\n');
-        if (eol == std::string::npos)
-          break;
-        std::string line = pending.substr(0, eol + 1);
-        pending.erase(0, eol + 1);
-        const std::wstring chunk = Utf8ToWide(line);
-        if (!chunk.empty())
-          on_chunk(chunk);
-      }
+      DispatchCompleteLines(pending, on_chunk);
     }
   }
-  if (on_chunk && !pending.empty()) {
-    const std::wstring tail = Utf8ToWide(pending);
-    if (!tail.empty())
-      on_chunk(tail);
-  }
+  DispatchTailChunk(pending, on_chunk);
   CloseHandle(out_rd);
   WaitForSingleObject(pi.hProcess, INFINITE);
   GetExitCodeProcess(pi.hProcess, &exit_code);
@@ -2271,6 +2476,122 @@ bool QueryConfigureBuildDirNameFromUpExe(const std::wstring& up_exe, const std::
     return false;
   }
   out_arch_leaf = std::move(output);
+  return true;
+}
+
+void HandleProcessDone(const DonePack& pack) {
+  if (!pack.output.empty())
+    AppendLogRaw(pack.output);
+  wchar_t tail[160]{};
+  if (g_ui_lang_zh)
+    swprintf_s(tail, L"\r\n[退出码 %lu]\r\n", static_cast<unsigned long>(pack.exit_code));
+  else
+    swprintf_s(tail, L"\r\n[exit code %lu]\r\n", static_cast<unsigned long>(pack.exit_code));
+  AppendLogRaw(tail);
+  wchar_t st[96]{};
+  if (g_ui_lang_zh)
+    swprintf_s(st, L"完成（退出码 %lu）", static_cast<unsigned long>(pack.exit_code));
+  else
+    swprintf_s(st, L"Done (exit code %lu)", static_cast<unsigned long>(pack.exit_code));
+  SetStatus(st);
+  if (pack.exit_code == 0 && g_last_up_args.rfind(L"configure", 0) == 0) {
+    RefreshRunTargetListFromPath();
+    std::wstring cwd;
+    GetEditText(g_path, cwd);
+    // 与 up_cache.txt 一致：恢复 UP_* 与 scan_roots（configure 已写入本次实际扫描根）。
+    LoadOptionsFromCache(cwd, true);
+  }
+}
+
+void HandleAppendLogMessage(LPARAM lParam) {
+  auto* s = reinterpret_cast<std::wstring*>(lParam);
+  if (!s)
+    return;
+  AppendLogRaw(*s);
+  delete s;
+}
+
+void HandleAppendRunLogMessage(LPARAM lParam) {
+  auto* p = reinterpret_cast<RunLogPack*>(lParam);
+  if (!p)
+    return;
+  if (p->run_no == g_active_run_seq.load())
+    AppendLogRaw(p->text);
+  delete p;
+}
+
+void HandleProcessDoneMessage(LPARAM lParam) {
+  auto* pack = reinterpret_cast<DonePack*>(lParam);
+  if (pack) {
+    HandleProcessDone(*pack);
+    delete pack;
+  }
+  SetUiRunning(false);
+}
+
+void StartRunWorker(const std::wstring& run_app, const std::wstring& cmd, const std::wstring& cwd, HWND hwnd,
+                    unsigned long run_no) {
+  std::thread([run_app, cmd, cwd, hwnd, run_no]() {
+    std::wstring output;
+    DWORD code = 0;
+    const bool ok =
+        RunProcessCapture(run_app, cmd, cwd, output, code,
+                          [hwnd, run_no](const std::wstring& chunk) { PostRunLogChunk(hwnd, run_no, chunk); });
+    auto* pack = new DonePack;
+    if (ok)
+      pack->output.clear();
+    else
+      pack->output = MakeTaggedLogLine(L"[错误] ", L"[Error] ", L"CreateProcess 失败。", L"CreateProcess failed.");
+    pack->exit_code = code;
+    PostMessageW(hwnd, WM_PROCESS_DONE, ok ? 1 : 0, reinterpret_cast<LPARAM>(pack));
+  }).detach();
+}
+
+up::gui::core::UpLaunchPlan ResolveLaunchPlan(const std::wstring& up_exe, const std::wstring& args_no_exe,
+                                              const std::wstring& extra) {
+  bool use_vcvars = false;
+  const std::wstring vcvars = g_env_settings.selected_vcvars;
+  if (!vcvars.empty()) {
+    std::error_code ec;
+    if (std::filesystem::exists(std::filesystem::path(vcvars), ec))
+      use_vcvars = true;
+  }
+  return up::gui::core::build_launch_plan(up_exe, args_no_exe, extra, use_vcvars ? vcvars : L"",
+                                          use_vcvars ? CmdExePath() : L"");
+}
+
+unsigned long BeginRunUiState(const up::gui::core::UpLaunchPlan& plan, const std::wstring& vcvars,
+                              const std::wstring& args_no_exe) {
+  g_last_up_args = args_no_exe;
+  const unsigned long run_no = ++g_run_seq;
+  AppendLog(L"\r\n==== Run #" + std::to_wstring(run_no) + L" @ " + NowTimeStamp() + L" ====\r\n");
+  if (plan.use_vcvars)
+    AppendLog(L"\r\n> [vcvars] " + vcvars + L"\r\n");
+  AppendLog(L"\r\n> " + plan.display_command + L"\r\n");
+  SetUiRunning(true);
+  g_active_run_seq = run_no;
+  return run_no;
+}
+
+bool ResolveRunContext(std::wstring& out_cwd, std::wstring& out_extra) {
+  GetEditText(g_path, out_cwd);
+  if (out_cwd.empty()) {
+    LogErrorWorkingDirRequired();
+    return false;
+  }
+  GetEditText(g_extra, out_extra);
+  TrimInPlace(out_extra);
+  return true;
+}
+
+bool ResolveConfigureRunArgs(std::wstring& args_no_exe) {
+  if (args_no_exe.rfind(L"configure", 0) != 0)
+    return true;
+  std::wstring err;
+  if (!FinishConfigureArgsForRun(args_no_exe, err)) {
+    AppendLog(err);
+    return false;
+  }
   return true;
 }
 
@@ -2330,8 +2651,9 @@ bool FinishConfigureArgsForRun(std::wstring& args_no_exe, std::wstring& err_out)
   std::wstring arch_leaf;
   std::wstring qerr;
   if (!QueryConfigureBuildDirNameFromUpExe(up, cwd, arch_leaf, qerr)) {
-    err_out = (g_ui_lang_zh ? L"[错误] 无法从 up.exe 计算 --build-dir-name: " : L"[Error] Cannot resolve --build-dir-name from up.exe: ") +
-              qerr + L"\r\n";
+    err_out = T(L"[错误] 无法从 up.exe 计算 --build-dir-name: ", L"[Error] Cannot resolve --build-dir-name from up.exe: ");
+    err_out += qerr;
+    err_out += L"\r\n";
     return false;
   }
   args_no_exe += L" --build-dir-name ";
@@ -2342,74 +2664,26 @@ bool FinishConfigureArgsForRun(std::wstring& args_no_exe, std::wstring& err_out)
 void RunUpAsync(std::wstring args_no_exe) {
   const std::wstring up = UpExePath();
   if (GetFileAttributesW(up.c_str()) == INVALID_FILE_ATTRIBUTES) {
-    AppendLog(g_ui_lang_zh ? L"[错误] 找不到 up.exe，请与 up-gui.exe 放在同一目录。\r\n"
-                           : L"[Error] up.exe not found (place next to up-gui.exe).\r\n");
+    LogErrorUpExeNotFound();
     return;
   }
 
   std::wstring cwd;
-  GetEditText(g_path, cwd);
-  if (cwd.empty()) {
-    AppendLog(g_ui_lang_zh ? L"[错误] 请先填写或选择「当前工作目录 (CWD)」。\r\n"
-                           : L"[Error] Set or pick the working directory (CWD) first.\r\n");
-    return;
-  }
-
   std::wstring extra;
-  GetEditText(g_extra, extra);
-  TrimInPlace(extra);
+  if (!ResolveRunContext(cwd, extra))
+    return;
+  if (!ResolveConfigureRunArgs(args_no_exe))
+    return;
 
-  if (args_no_exe.rfind(L"configure", 0) == 0) {
-    std::wstring err;
-    if (!FinishConfigureArgsForRun(args_no_exe, err)) {
-      AppendLog(err);
-      return;
-    }
-  }
-
-  std::wstring run_app = up;
-  bool use_vcvars = false;
+  const auto plan = ResolveLaunchPlan(up, args_no_exe, extra);
+  const std::wstring run_app = plan.process_path;
+  const std::wstring cmd = plan.command_line;
   const std::wstring vcvars = g_env_settings.selected_vcvars;
-  if (!vcvars.empty()) {
-    std::error_code ec;
-    if (std::filesystem::exists(std::filesystem::path(vcvars), ec))
-      use_vcvars = true;
-  }
-  const auto plan = up::gui::core::build_launch_plan(
-      up, args_no_exe, extra, use_vcvars ? vcvars : L"", use_vcvars ? CmdExePath() : L"");
-  run_app = plan.process_path;
-  std::wstring cmd = plan.command_line;
 
   HWND hwnd = g_hwnd;
-  g_last_up_args = args_no_exe;
-  const unsigned long run_no = ++g_run_seq;
-  AppendLog(L"\r\n==== Run #" + std::to_wstring(run_no) + L" @ " + NowTimeStamp() + L" ====\r\n");
-  if (plan.use_vcvars)
-    AppendLog(L"\r\n> [vcvars] " + vcvars + L"\r\n");
-  AppendLog(L"\r\n> " + plan.display_command + L"\r\n");
+  const unsigned long run_no = BeginRunUiState(plan, vcvars, args_no_exe);
 
-  SetUiRunning(true);
-  g_active_run_seq = run_no;
-
-  std::thread([run_app, cmd, cwd, hwnd, run_no]() {
-    std::wstring output;
-    DWORD code = 0;
-    const bool ok =
-        RunProcessCapture(run_app, cmd, cwd, output, code, [hwnd, run_no](const std::wstring& chunk) {
-          auto* p = new RunLogPack;
-          p->run_no = run_no;
-          p->text = chunk;
-          PostMessageW(hwnd, WM_APPEND_RUN_LOG, 0, reinterpret_cast<LPARAM>(p));
-        });
-    auto* pack = new DonePack;
-    if (ok)
-      pack->output.clear();
-    else
-      pack->output =
-          g_ui_lang_zh ? L"[错误] CreateProcess 失败。\r\n" : L"[Error] CreateProcess failed.\r\n";
-    pack->exit_code = code;
-    PostMessageW(hwnd, WM_PROCESS_DONE, ok ? 1 : 0, reinterpret_cast<LPARAM>(pack));
-  }).detach();
+  StartRunWorker(run_app, cmd, cwd, hwnd, run_no);
 }
 
 int StatusBarHeight(HWND sb) {
@@ -2595,20 +2869,16 @@ bool ChoiceContainsValue(const OptionRow& opt, const std::wstring& value) {
 bool SoftValidateOptionValue(const OptionRow& opt, const std::wstring& value) {
   bool warned = false;
   if (!opt.choices.empty() && !ChoiceContainsValue(opt, value)) {
-    AppendLog(std::wstring(g_ui_lang_zh ? L"[警告] " : L"[Warning] ") + opt.name +
-              (g_ui_lang_zh ? L" 的值 \"" : L" value \"") + value +
-              (g_ui_lang_zh ? L"\" 不在推荐候选中，已按自定义值保存。\r\n"
-                            : L"\" is not in the suggested list; saved as custom.\r\n"));
-    SetStatus(T(L"警告：已使用自定义 Option 值", L"Warning: custom option value used"));
+    LogWarningOptionValueOutOfChoices(opt.name, value);
+    SetStatusOptionCustomValueWarning();
     warned = true;
   }
 
   if (opt.name == L"UP_CMAKE_GENERATOR") {
     const OptionRow* build = FindOptionByName(L"UP_TARGET_BUILD_SYSTEM");
     if (build && _wcsicmp(build->value.c_str(), L"cmake") != 0) {
-      AppendLog(g_ui_lang_zh ? L"[警告] 当前 UP_TARGET_BUILD_SYSTEM 不是 cmake，UP_CMAKE_GENERATOR 可能不会生效。\r\n"
-                           : L"[Warning] UP_TARGET_BUILD_SYSTEM is not cmake; UP_CMAKE_GENERATOR may be ignored.\r\n");
-      SetStatus(T(L"警告：生成器可能被忽略", L"Warning: generator may be ignored"));
+      LogWarningGeneratorIgnoredForNonCMakeBuildSystem();
+      SetStatusOptionGeneratorMayBeIgnored();
       warned = true;
     }
   }
@@ -2621,17 +2891,17 @@ void HandleOptionContextAction(HWND hwnd, int action_id) {
   auto& opt = g_options[static_cast<size_t>(g_selected_option_idx)];
   if (action_id == IDM_OPT_COPY_KEY) {
     if (CopyTextToClipboard(hwnd, opt.name))
-      SetStatus(T(L"已复制变量名", L"Copied option name"));
+      SetStatusOptionNameCopied();
     else
-      SetStatus(T(L"复制失败", L"Copy failed"));
+      SetStatusCopyFailed();
     return;
   }
   if (action_id == IDM_OPT_COPY_KEY_VALUE) {
     const std::wstring kv = opt.name + L"=" + opt.value;
     if (CopyTextToClipboard(hwnd, kv))
-      SetStatus(T(L"已复制 KEY=VALUE", L"Copied option key=value"));
+      SetStatusOptionKeyValueCopied();
     else
-      SetStatus(T(L"复制失败", L"Copy failed"));
+      SetStatusCopyFailed();
     return;
   }
   if (action_id == IDM_OPT_RESET_DEFAULT) {
@@ -2639,7 +2909,7 @@ void HandleOptionContextAction(HWND hwnd, int action_id) {
       if (d.name == opt.name) {
         opt.value = d.value;
         RebuildOptionsListView();
-        SetStatus(T(L"已恢复为默认 Option", L"Option reset to default"));
+        SetStatusOptionResetToDefault();
         break;
       }
     }
@@ -2938,7 +3208,7 @@ void ShowUpHelpInfo(HWND hwnd) {
   std::wstring output;
   DWORD exit_code = 0;
   if (!RunProcessCapture(up, cmd, L"", output, exit_code)) {
-    SetStatus(T(L"运行 up --help 失败", L"Failed to run up --help"));
+    SetStatusRunHelpFailed();
     MessageBoxW(hwnd, T(L"执行 up --help 失败。", L"Failed to run up --help."), T(L"up 帮助信息", L"up Help"),
                 MB_OK | MB_ICONERROR);
     return;
@@ -2950,7 +3220,7 @@ void ShowUpHelpInfo(HWND hwnd) {
   else
     ss << L"[exit code " << static_cast<unsigned long>(exit_code) << L"]\r\n";
   ShowUpHelpDialog(hwnd, ss.str());
-  SetStatus(T(L"已加载 up --help", L"up --help loaded"));
+  SetStatusRunHelpLoaded();
 }
 
 bool IsConfigureOptionName(const std::wstring& name) {
@@ -3129,7 +3399,7 @@ LRESULT CALLBACK ConfigureOptionWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
       if (id == IDC_OPT_GROUP) {
         RebuildOptionsListView();
         LayoutConfigureOptionDialog(hwnd, st);
-        SetStatus(T(L"已更新 Option 分组显示", L"Option grouping updated"));
+        SetStatusOptionGroupingUpdated();
         return 0;
       }
       if (id == IDC_OPT_PICK && HIWORD(wParam) == CBN_SELCHANGE) {
@@ -3146,8 +3416,7 @@ LRESULT CALLBACK ConfigureOptionWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
       }
       if (id == IDC_OPT_APPLY) {
         if (g_selected_option_idx < 0 || g_selected_option_idx >= static_cast<int>(g_options.size())) {
-          AppendLog(g_ui_lang_zh ? L"[错误] 请先在 Option 表中选择一个变量。\r\n"
-                                : L"[Error] Select an option row first.\r\n");
+          LogErrorOptionRowNotSelected();
           return 0;
         }
         std::wstring newv;
@@ -3164,8 +3433,7 @@ LRESULT CALLBACK ConfigureOptionWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
           }
         }
         if (newv.empty()) {
-          AppendLog(g_ui_lang_zh ? L"[错误] 请输入值或从候选中选择。\r\n"
-                                : L"[Error] Enter a value or pick from the list.\r\n");
+          LogErrorOptionValueRequired();
           return 0;
         }
         g_options[static_cast<size_t>(g_selected_option_idx)].value = newv;
@@ -3173,7 +3441,7 @@ LRESULT CALLBACK ConfigureOptionWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPAR
             SoftValidateOptionValue(g_options[static_cast<size_t>(g_selected_option_idx)], newv);
         RebuildOptionsListView();
         if (!warned)
-          SetStatus(T(L"已更新 Option 值", L"Option value updated"));
+          SetStatusOptionValueUpdated();
         return 0;
       }
       if (id == IDM_OPT_COPY_KEY || id == IDM_OPT_COPY_KEY_VALUE || id == IDM_OPT_RESET_DEFAULT) {
@@ -3547,7 +3815,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       g_status = CreateWindowExW(0, STATUSCLASSNAMEW, nullptr, WS_CHILD | WS_VISIBLE | SBARS_SIZEGRIP, 0, 0, 0, 0,
                                  hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_STATUS)),
                                  GetModuleHandleW(nullptr), nullptr);
-      SetStatus(T(L"就绪", L"Ready"));
+      SetStatusReady();
 
       {
         const HFONT ui = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
@@ -3654,51 +3922,17 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     }
 
     case WM_APPEND_LOG: {
-      auto* s = reinterpret_cast<std::wstring*>(lParam);
-      if (s) {
-        AppendLogRaw(*s);
-        delete s;
-      }
+      HandleAppendLogMessage(lParam);
       return 0;
     }
 
     case WM_APPEND_RUN_LOG: {
-      auto* p = reinterpret_cast<RunLogPack*>(lParam);
-      if (p) {
-        if (p->run_no == g_active_run_seq.load())
-          AppendLogRaw(p->text);
-        delete p;
-      }
+      HandleAppendRunLogMessage(lParam);
       return 0;
     }
 
     case WM_PROCESS_DONE: {
-      auto* pack = reinterpret_cast<DonePack*>(lParam);
-      if (pack) {
-        if (!pack->output.empty())
-          AppendLogRaw(pack->output);
-        wchar_t tail[160]{};
-        if (g_ui_lang_zh)
-          swprintf_s(tail, L"\r\n[退出码 %lu]\r\n", static_cast<unsigned long>(pack->exit_code));
-        else
-          swprintf_s(tail, L"\r\n[exit code %lu]\r\n", static_cast<unsigned long>(pack->exit_code));
-        AppendLogRaw(tail);
-        wchar_t st[96]{};
-        if (g_ui_lang_zh)
-          swprintf_s(st, L"完成（退出码 %lu）", static_cast<unsigned long>(pack->exit_code));
-        else
-          swprintf_s(st, L"Done (exit code %lu)", static_cast<unsigned long>(pack->exit_code));
-        SetStatus(st);
-        if (pack->exit_code == 0 && g_last_up_args.rfind(L"configure", 0) == 0) {
-          RefreshRunTargetListFromPath();
-          std::wstring cwd;
-          GetEditText(g_path, cwd);
-          // 与 up_cache.txt 一致：恢复 UP_* 与 scan_roots（configure 已写入本次实际扫描根）。
-          LoadOptionsFromCache(cwd, true);
-        }
-        delete pack;
-      }
-      SetUiRunning(false);
+      HandleProcessDoneMessage(lParam);
       return 0;
     }
 
@@ -3739,9 +3973,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       }
       if (id == IDC_ENV_SETTINGS) {
         if (ShowEnvSettingsDialog(hwnd))
-          SetStatus(T(L"已更新编译环境设置", L"Environment settings updated"));
+          SetStatusEnvSettingsUpdated();
         else
-          SetStatus(T(L"编译环境设置未更改", L"Environment settings unchanged"));
+          SetStatusEnvSettingsUnchanged();
         return 0;
       }
       if (id == IDC_LOG_COPY) {
@@ -3753,14 +3987,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
           text.resize(static_cast<size_t>(len));
         }
         if (CopyTextToClipboard(hwnd, text))
-          SetStatus(T(L"已复制日志", L"Log copied"));
+          SetStatusLogCopied();
         else
-          SetStatus(T(L"复制失败", L"Copy failed"));
+          SetStatusCopyFailed();
         return 0;
       }
       if (id == IDC_LOG_CLEAR) {
         SetWindowTextW(g_log, L"");
-        SetStatus(T(L"已清空日志", L"Log cleared"));
+        SetStatusLogCleared();
         return 0;
       }
 
@@ -3857,8 +4091,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         const int test_idx = static_cast<int>(SendMessageW(g_test_target, CB_GETCURSEL, 0, 0));
         const int run_idx = static_cast<int>(SendMessageW(g_run_target, CB_GETCURSEL, 0, 0));
         if (test_idx == CB_ERR && run_idx == CB_ERR) {
-          AppendLog(g_ui_lang_zh ? L"[提示] 当前包没有可运行/可测试目标（纯库包场景正常）。\r\n"
-                               : L"[Info] No run/test targets in current package (normal for library-only packages).\r\n");
+          LogInfoNoRunTestTargetsForLibraryPackage();
           return 0;
         }
         std::wstring testarg = L"test";
@@ -3886,14 +4119,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
           GetEditText(g_install_dir, inst);
         TrimInPlace(inst);
         if (inst.empty()) {
-          AppendLog(g_ui_lang_zh ? L"[错误] pack 需要「安装目录」或 install 子目录名（对应 CLI：--install-dir-name）。\r\n"
-                               : L"[Error] pack needs Install Dir or install leaf (--install-dir-name).\r\n");
+          LogErrorPackInstallDirRequired();
           return 0;
         }
         const std::wstring leaf = IntermediateLeafFromPathishEdit(inst);
         if (leaf.empty()) {
-          AppendLog(g_ui_lang_zh ? L"[错误] 无法从安装目录得到有效的 --install-dir-name。\r\n"
-                               : L"[Error] Could not derive a valid --install-dir-name from Install Dir.\r\n");
+          LogErrorPackInstallDirLeafInvalid();
           return 0;
         }
         line += L" --install-dir-name ";
@@ -3904,13 +4135,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       if (id == IDC_RUN) {
         const int idx = static_cast<int>(SendMessageW(g_run_target, CB_GETCURSEL, 0, 0));
         if (idx == CB_ERR) {
-          AppendLog(g_ui_lang_zh ? L"[提示] 当前包没有可运行目标（纯库包场景正常）。\r\n"
-                               : L"[Info] No run target in current package (normal for library-only packages).\r\n");
+          LogInfoNoRunTargetForLibraryPackage();
           return 0;
         }
         const int n = static_cast<int>(SendMessageW(g_run_target, CB_GETLBTEXTLEN, static_cast<WPARAM>(idx), 0));
         if (n <= 0) {
-          AppendLog(g_ui_lang_zh ? L"[错误] 无法读取运行目标。\r\n" : L"[Error] Could not read run target.\r\n");
+          LogErrorRunTargetReadFailed();
           return 0;
         }
         std::wstring tgt(static_cast<size_t>(n), L'\0');

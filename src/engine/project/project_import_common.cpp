@@ -71,6 +71,13 @@ std::string sanitize_id(std::string s) {
   return s;
 }
 
+std::string normalize_dep_package_name(std::string s) {
+  s = sanitize_id(std::move(s));
+  for (char& c : s)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return s;
+}
+
 std::string posix_str(const std::filesystem::path& p) {
   return to_posix_path_string(p);
 }

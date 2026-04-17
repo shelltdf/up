@@ -68,6 +68,16 @@ struct LoadedTarget {
   TargetDesc desc;
 };
 
+struct DepImportedHint {
+  std::string library_abs;
+  std::string include_abs;
+};
+
+DepImportedHint dep_imported_hint_from_targets(const std::string& dep_pkg_name,
+                                               const std::map<std::string, std::filesystem::path>& package_name_to_dir,
+                                               const std::vector<LoadedTarget>& all_targets,
+                                               const std::string& arch);
+
 bool split_dep_ref(const std::string& ref, const std::string& self_pkg, std::string& out_pkg, std::string& out_tgt) {
   const auto p = ref.find(':');
   if (p == std::string::npos) {
@@ -164,6 +174,192 @@ std::string normalize_install_rel_path(std::string s) {
   while (!s.empty() && s.front() == '/')
     s.erase(s.begin());
   return s;
+}
+
+std::string cmake_var_prefix_from_dep_name(const std::string& dep_name) {
+  std::string out;
+  out.reserve(dep_name.size());
+  for (char c : dep_name) {
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
+      out.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+    else
+      out.push_back('_');
+  }
+  return out;
+}
+
+bool is_lib_rel_path(std::string abs_like) {
+  for (char& c : abs_like)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return abs_like.size() >= 4 && abs_like.substr(abs_like.size() - 4) == ".lib";
+}
+
+std::string infer_implib_from_dll(const std::filesystem::path& dep_prefix, const std::string& dll_abs_like) {
+  std::filesystem::path dll_path(dll_abs_like);
+  const std::filesystem::path stem = dll_path.stem();
+  const std::filesystem::path guess1 = std::filesystem::absolute(dep_prefix / "lib" / (stem.string() + ".lib")).lexically_normal();
+  const std::filesystem::path guess2 = std::filesystem::absolute(dll_path.parent_path() / (stem.string() + ".lib")).lexically_normal();
+  if (!stem.empty())
+    return to_posix_path_string(guess1);
+  return to_posix_path_string(guess2);
+}
+
+std::string sanitize_ep_base_name(std::string s, const char* fallback) {
+  for (char& c : s) {
+    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'))
+      c = '_';
+  }
+  if (s.empty())
+    s = fallback;
+  return s;
+}
+
+void append_upstream_opts_from_map(ConfigureExternalCmake& ec, const std::map<std::string, std::string>& opts) {
+  for (const auto& kv : opts) {
+    if (kv.first.rfind("UPSTREAM_", 0) != 0)
+      continue;
+    std::string k = kv.first.substr(9);
+    if (!k.empty())
+      ec.upstream_cmake_args.emplace_back(std::move(k), kv.second);
+  }
+}
+
+void append_dep_imported_hints(ConfigureExternalCmake& ec,
+                               const std::set<std::string>& declared_dep_pkgs,
+                               const std::map<std::string, std::filesystem::path>& package_name_to_dir,
+                               const std::vector<LoadedTarget>& all_targets,
+                               const std::string& arch) {
+  for (const auto& dep_pkg : declared_dep_pkgs) {
+    const auto hint = dep_imported_hint_from_targets(dep_pkg, package_name_to_dir, all_targets, arch);
+    const std::string prefix = cmake_var_prefix_from_dep_name(dep_pkg);
+    if (prefix.empty())
+      continue;
+    if (!hint.library_abs.empty()) {
+      ec.upstream_cmake_args.emplace_back(prefix + "_LIBRARY", hint.library_abs);
+      ec.upstream_cmake_args.emplace_back(prefix + "_LIBRARY_RELEASE", hint.library_abs);
+      ec.upstream_cmake_args.emplace_back(prefix + "_LIBRARY_DEBUG", hint.library_abs);
+      ec.upstream_cmake_args.emplace_back(prefix + "_LIBRARIES", hint.library_abs);
+    }
+    if (!hint.include_abs.empty()) {
+      ec.upstream_cmake_args.emplace_back(prefix + "_INCLUDE_DIR", hint.include_abs);
+      ec.upstream_cmake_args.emplace_back(prefix + "_INCLUDE_DIRS", hint.include_abs);
+    }
+  }
+}
+
+bool resolve_external_cmake_source_dir(const std::filesystem::path& package_dir,
+                                       const std::string& source_dir,
+                                       const char* invalid_message_prefix,
+                                       const std::string& invalid_message_detail,
+                                       std::filesystem::path& out_src_abs) {
+  std::filesystem::path src_abs = (package_dir / std::filesystem::path(source_dir)).lexically_normal();
+  std::error_code ec_path;
+  src_abs = std::filesystem::weakly_canonical(std::filesystem::absolute(src_abs), ec_path);
+  if (ec_path || !std::filesystem::is_directory(src_abs)) {
+    std::cerr << invalid_message_prefix << invalid_message_detail << "\n";
+    return false;
+  }
+  if (!std::filesystem::exists(src_abs / "CMakeLists.txt", ec_path)) {
+    std::cerr << "configure: <cmake> directory has no CMakeLists.txt: " << to_posix_path_string(src_abs) << "\n";
+    return false;
+  }
+  out_src_abs = std::move(src_abs);
+  return true;
+}
+
+bool configure_installed_import_target_model(const LoadedTarget& lt,
+                                             bool has_primary_external_cmake,
+                                             bool imported_installed_shared,
+                                             ConfigureTargetModel& tm) {
+  if (!has_primary_external_cmake) {
+    std::cerr << "configure: target \"" << lt.desc.name << "\" (" << lt.desc.type
+              << ") requires package.xml <cmake> so the upstream project installs into the same prefix first.\n";
+    return false;
+  }
+  if (!lt.desc.installed_wrap.has_value()) {
+    std::cerr << "configure: target \"" << lt.desc.name << "\" (" << lt.desc.type << ") requires <install artifact=\"...\"/> in "
+              << to_posix_path_string(lt.target_dir / "target.xml") << "\n";
+    return false;
+  }
+  const std::string rel_art = normalize_install_rel_path(lt.desc.installed_wrap->artifact);
+  if (rel_art.empty()) {
+    std::cerr << "configure: target \"" << lt.desc.name << "\": <install artifact=\"...\"/> must not be empty\n";
+    return false;
+  }
+  tm.imported_prebuilt = true;
+  tm.imported_from_install_prefix = true;
+  tm.install_rel_artifact = rel_art;
+  tm.imported_location = std::string("${CMAKE_INSTALL_PREFIX}/") + rel_art;
+  const std::string iface = normalize_install_rel_path(lt.desc.installed_wrap->interface_include);
+  if (!iface.empty())
+    tm.install_rel_interface_include = iface;
+  if (imported_installed_shared) {
+#if defined(_WIN32)
+    const std::string rel_imp = normalize_install_rel_path(lt.desc.installed_wrap->implib);
+    if (rel_imp.empty()) {
+      std::cerr << "configure: imported_installed_shared_library \"" << lt.desc.name
+                << "\" on Windows requires <install implib=\"...\"/> (import .lib under install prefix).\n";
+      return false;
+    }
+    tm.install_rel_implib = rel_imp;
+    tm.imported_implib = std::string("${CMAKE_INSTALL_PREFIX}/") + rel_imp;
+    tm.imported_dll = tm.imported_location;
+#endif
+  }
+  return true;
+}
+
+DepImportedHint dep_imported_hint_from_targets(const std::string& dep_pkg_name,
+                                               const std::map<std::string, std::filesystem::path>& package_name_to_dir,
+                                               const std::vector<LoadedTarget>& all_targets,
+                                               const std::string& arch) {
+  DepImportedHint hint;
+  const auto pit = package_name_to_dir.find(dep_pkg_name);
+  if (pit == package_name_to_dir.end())
+    return hint;
+  const std::filesystem::path dep_prefix = std::filesystem::absolute(default_install_root(pit->second) / arch);
+  auto resolve_rel_abs = [&](const std::string& rel_raw) -> std::string {
+    const std::string rel = normalize_install_rel_path(rel_raw);
+    if (rel.empty())
+      return {};
+    const std::filesystem::path abs = std::filesystem::absolute(dep_prefix / std::filesystem::path(rel)).lexically_normal();
+    return to_posix_path_string(abs);
+  };
+  for (const auto& lt : all_targets) {
+    if (lt.package_name != dep_pkg_name)
+      continue;
+    if (lt.desc.type != "imported_installed_static_library" && lt.desc.type != "imported_installed_shared_library")
+      continue;
+    if (!lt.desc.installed_wrap.has_value() || lt.desc.installed_wrap->artifact.empty())
+      continue;
+    if (hint.include_abs.empty() && !lt.desc.installed_wrap->interface_include.empty())
+      hint.include_abs = resolve_rel_abs(lt.desc.installed_wrap->interface_include);
+    if (!lt.desc.installed_wrap->implib.empty()) {
+      const std::string implib_abs = resolve_rel_abs(lt.desc.installed_wrap->implib);
+      if (!implib_abs.empty()) {
+        hint.library_abs = implib_abs;
+        return hint;
+      }
+    }
+    const std::string art_abs = resolve_rel_abs(lt.desc.installed_wrap->artifact);
+    if (!art_abs.empty()) {
+      if (is_lib_rel_path(art_abs)) {
+        hint.library_abs = art_abs;
+        return hint;
+      }
+      std::string low = art_abs;
+      for (char& c : low)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      if (low.size() >= 4 && low.substr(low.size() - 4) == ".dll") {
+        const std::string guessed = infer_implib_from_dll(dep_prefix, art_abs);
+        if (!guessed.empty()) {
+          hint.library_abs = guessed;
+          return hint;
+        }
+      }
+    }
+  }
+  return hint;
 }
 
 void append_cmake_prefix_unique(std::vector<std::filesystem::path>& dedup,
@@ -934,25 +1130,13 @@ int cmd_configure(const std::filesystem::path& cwd,
 
   if (primary_pkg.external_cmake.has_value()) {
     const std::string& sd = primary_pkg.external_cmake->source_dir;
-    std::filesystem::path src_abs = (pkg_dir / std::filesystem::path(sd)).lexically_normal();
-    std::error_code ec_path;
-    src_abs = std::filesystem::weakly_canonical(std::filesystem::absolute(src_abs), ec_path);
-    if (ec_path || !std::filesystem::is_directory(src_abs)) {
-      std::cerr << "configure: <cmake> source_dir does not resolve to a directory: " << sd << "\n";
-      return 5;
-    }
-    if (!std::filesystem::exists(src_abs / "CMakeLists.txt", ec_path)) {
-      std::cerr << "configure: <cmake> directory has no CMakeLists.txt: " << to_posix_path_string(src_abs) << "\n";
+    std::filesystem::path src_abs;
+    if (!resolve_external_cmake_source_dir(pkg_dir, sd, "configure: <cmake> source_dir does not resolve to a directory: ",
+                                           sd, src_abs)) {
       return 5;
     }
     ConfigureExternalCmake ec;
-    std::string ep_base = primary_pkg.name;
-    for (char& c : ep_base) {
-      if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'))
-        c = '_';
-    }
-    if (ep_base.empty())
-      ep_base = "pkg";
+    const std::string ep_base = sanitize_ep_base_name(primary_pkg.name, "pkg");
     ec.ep_target_name = "up_ext_" + ep_base;
     ec.source_dir = src_abs;
     ec.binary_dir = std::filesystem::absolute(build_root / "external" / ep_base);
@@ -960,104 +1144,8 @@ int cmd_configure(const std::filesystem::path& cwd,
     // Some upstream projects use unquoted ${CMAKE_DEBUG_POSTFIX} in SET_TARGET_PROPERTIES.
     // Keep a safe non-empty default to avoid "incorrect number of arguments" when unset.
     ec.upstream_cmake_args.push_back({"CMAKE_DEBUG_POSTFIX", "d"});
-    struct DepImportedHint {
-      std::string library_abs;
-      std::string include_abs;
-    };
-    auto dep_imported_hint = [&](const std::string& dep_pkg_name) -> DepImportedHint {
-      DepImportedHint hint;
-      const auto pit = package_name_to_dir.find(dep_pkg_name);
-      if (pit == package_name_to_dir.end())
-        return hint;
-      const std::filesystem::path dep_prefix = std::filesystem::absolute(default_install_root(pit->second) / arch);
-      auto resolve_rel_abs = [&](const std::string& rel_raw) -> std::string {
-        const std::string rel = normalize_install_rel_path(rel_raw);
-        if (rel.empty())
-          return {};
-        const std::filesystem::path abs = std::filesystem::absolute(dep_prefix / std::filesystem::path(rel)).lexically_normal();
-        return to_posix_path_string(abs);
-      };
-      auto resolve_abs_path = [&](const std::filesystem::path& p) -> std::string {
-        const std::filesystem::path abs = std::filesystem::absolute(p).lexically_normal();
-        return to_posix_path_string(abs);
-      };
-      for (const auto& lt : all_targets) {
-        if (lt.package_name != dep_pkg_name)
-          continue;
-        if (lt.desc.type != "imported_installed_static_library" && lt.desc.type != "imported_installed_shared_library")
-          continue;
-        if (!lt.desc.installed_wrap.has_value() || lt.desc.installed_wrap->artifact.empty())
-          continue;
-        if (hint.include_abs.empty() && !lt.desc.installed_wrap->interface_include.empty())
-          hint.include_abs = resolve_rel_abs(lt.desc.installed_wrap->interface_include);
-        // Prefer import/static .lib for Windows linkers; do not feed .dll into ZLIB_LIBRARY.
-        if (!lt.desc.installed_wrap->implib.empty()) {
-          const std::string implib_abs = resolve_rel_abs(lt.desc.installed_wrap->implib);
-          if (!implib_abs.empty()) {
-            hint.library_abs = implib_abs;
-            return hint;
-          }
-        }
-        const std::string art_abs = resolve_rel_abs(lt.desc.installed_wrap->artifact);
-        if (!art_abs.empty()) {
-          std::string low = art_abs;
-          for (char& c : low)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-          if (low.size() >= 4 && low.substr(low.size() - 4) == ".lib") {
-            hint.library_abs = art_abs;
-            return hint;
-          }
-          if (low.size() >= 4 && low.substr(low.size() - 4) == ".dll") {
-            // Fallback for wrappers that only carry DLL artifact without implib:
-            // infer <stem>.lib under install/lib first, then next to DLL.
-            std::filesystem::path dll_path(art_abs);
-            const std::filesystem::path stem = dll_path.stem();
-            std::string guessed = resolve_abs_path(dep_prefix / "lib" / (stem.string() + ".lib"));
-            if (guessed.empty())
-              guessed = resolve_abs_path(dll_path.parent_path() / (stem.string() + ".lib"));
-            if (!guessed.empty()) {
-              hint.library_abs = guessed;
-              return hint;
-            }
-          }
-        }
-      }
-      return hint;
-    };
-    auto cmake_var_prefix = [&](const std::string& dep_name) -> std::string {
-      std::string out;
-      out.reserve(dep_name.size());
-      for (char c : dep_name) {
-        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
-          out.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
-        else
-          out.push_back('_');
-      }
-      return out;
-    };
-    for (const auto& dep_pkg : declared_dep_pkgs) {
-      const auto hint = dep_imported_hint(dep_pkg);
-      const std::string prefix = cmake_var_prefix(dep_pkg);
-      if (prefix.empty())
-        continue;
-      if (!hint.library_abs.empty()) {
-        ec.upstream_cmake_args.push_back({prefix + "_LIBRARY", hint.library_abs});
-        ec.upstream_cmake_args.push_back({prefix + "_LIBRARY_RELEASE", hint.library_abs});
-        ec.upstream_cmake_args.push_back({prefix + "_LIBRARY_DEBUG", hint.library_abs});
-        ec.upstream_cmake_args.push_back({prefix + "_LIBRARIES", hint.library_abs});
-      }
-      if (!hint.include_abs.empty()) {
-        ec.upstream_cmake_args.push_back({prefix + "_INCLUDE_DIR", hint.include_abs});
-        ec.upstream_cmake_args.push_back({prefix + "_INCLUDE_DIRS", hint.include_abs});
-      }
-    }
-    for (const auto& kv : opts) {
-      if (kv.first.rfind("UPSTREAM_", 0) != 0)
-        continue;
-      std::string k = kv.first.substr(9);
-      if (!k.empty())
-        ec.upstream_cmake_args.push_back({std::move(k), kv.second});
-    }
+    append_dep_imported_hints(ec, declared_dep_pkgs, package_name_to_dir, all_targets, arch);
+    append_upstream_opts_from_map(ec, opts);
     graph_model.external_cmake.push_back(std::move(ec));
   }
   for (const auto& dep_pkg : declared_dep_pkgs) {
@@ -1069,22 +1157,14 @@ int cmd_configure(const std::filesystem::path& cwd,
       continue;
     if (!dit->second.external_cmake.has_value())
       continue;
-    std::filesystem::path dep_src_abs = (pit->second / std::filesystem::path(dit->second.external_cmake->source_dir)).lexically_normal();
-    std::error_code ec_path;
-    dep_src_abs = std::filesystem::weakly_canonical(std::filesystem::absolute(dep_src_abs), ec_path);
-    if (ec_path || !std::filesystem::is_directory(dep_src_abs) ||
-        !std::filesystem::exists(dep_src_abs / "CMakeLists.txt", ec_path)) {
-      std::cerr << "configure: dependency package <cmake> source_dir invalid: " << dep_pkg << "\n";
+    std::filesystem::path dep_src_abs;
+    if (!resolve_external_cmake_source_dir(pit->second, dit->second.external_cmake->source_dir,
+                                           "configure: dependency package <cmake> source_dir invalid: ", dep_pkg,
+                                           dep_src_abs)) {
       return 5;
     }
     ConfigureExternalCmake ec;
-    std::string ep_base = dep_pkg;
-    for (char& c : ep_base) {
-      if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'))
-        c = '_';
-    }
-    if (ep_base.empty())
-      ep_base = "dep";
+    const std::string ep_base = sanitize_ep_base_name(dep_pkg, "dep");
     ec.ep_target_name = "up_ext_dep_" + ep_base;
     ec.source_dir = dep_src_abs;
     ec.binary_dir = std::filesystem::absolute(build_root / "external" / ("dep_" + ep_base));
@@ -1102,16 +1182,10 @@ int cmd_configure(const std::filesystem::path& cwd,
         dep_wants_shared = true;
     }
     if (dep_wants_static)
-      ec.upstream_cmake_args.push_back({"BUILD_STAITC_LIBRARY", "ON"});
+      ec.upstream_cmake_args.push_back({"BUILD_STATIC_LIBRARY", "ON"});
     if (dep_wants_shared)
       ec.upstream_cmake_args.push_back({"BUILD_DYNAMIC_LIBRARY", "ON"});
-    for (const auto& kv : opts) {
-      if (kv.first.rfind("UPSTREAM_", 0) != 0)
-        continue;
-      std::string k = kv.first.substr(9);
-      if (!k.empty())
-        ec.upstream_cmake_args.push_back({std::move(k), kv.second});
-    }
+    append_upstream_opts_from_map(ec, opts);
     graph_model.external_cmake.push_back(std::move(ec));
   }
 
@@ -1149,41 +1223,8 @@ int cmd_configure(const std::filesystem::path& cwd,
     const bool imported_installed_shared = (lt.desc.type == "imported_installed_shared_library");
 
     if (imported_installed_static || imported_installed_shared) {
-      if (!primary_pkg.external_cmake.has_value()) {
-        std::cerr << "configure: target \"" << lt.desc.name << "\" (" << lt.desc.type
-                  << ") requires package.xml <cmake> so the upstream project installs into the same prefix first.\n";
+      if (!configure_installed_import_target_model(lt, primary_pkg.external_cmake.has_value(), imported_installed_shared, tm))
         return 5;
-      }
-      if (!lt.desc.installed_wrap.has_value()) {
-        std::cerr << "configure: target \"" << lt.desc.name << "\" (" << lt.desc.type << ") requires <install artifact=\"...\"/> in "
-                  << to_posix_path_string(lt.target_dir / "target.xml") << "\n";
-        return 5;
-      }
-      const std::string rel_art = normalize_install_rel_path(lt.desc.installed_wrap->artifact);
-      if (rel_art.empty()) {
-        std::cerr << "configure: target \"" << lt.desc.name << "\": <install artifact=\"...\"/> must not be empty\n";
-        return 5;
-      }
-      tm.imported_prebuilt = true;
-      tm.imported_from_install_prefix = true;
-      tm.install_rel_artifact = rel_art;
-      tm.imported_location = std::string("${CMAKE_INSTALL_PREFIX}/") + rel_art;
-      const std::string iface = normalize_install_rel_path(lt.desc.installed_wrap->interface_include);
-      if (!iface.empty())
-        tm.install_rel_interface_include = iface;
-      if (imported_installed_shared) {
-#if defined(_WIN32)
-        const std::string rel_imp = normalize_install_rel_path(lt.desc.installed_wrap->implib);
-        if (rel_imp.empty()) {
-          std::cerr << "configure: imported_installed_shared_library \"" << lt.desc.name
-                    << "\" on Windows requires <install implib=\"...\"/> (import .lib under install prefix).\n";
-          return 5;
-        }
-        tm.install_rel_implib = rel_imp;
-        tm.imported_implib = std::string("${CMAKE_INSTALL_PREFIX}/") + rel_imp;
-        tm.imported_dll = tm.imported_location;
-#endif
-      }
     } else if (imported_static || imported_shared) {
       if (!lt.desc.prebuilt.has_value()) {
         std::cerr << "configure: target \"" << lt.desc.name << "\" (" << lt.desc.type << ") requires <prebuilt .../> in "
@@ -1280,7 +1321,7 @@ int cmd_configure(const std::filesystem::path& cwd,
       if (eit != exe_extra_links.end() && !eit->second.empty()) {
         tm.links = eit->second;
       } else {
-        // Avoid linking every library to every executable (breaks e.g. zlib + zlibstatic together on MSVC).
+        // Avoid linking every library to every executable (can break when multiple library variants coexist).
         // When UP_TARGET_DYNAMIC_LIBRARY implies static link preference, only link static_library targets; vice versa.
         tm.links.clear();
         for (const auto& pl : pkg_targets) {

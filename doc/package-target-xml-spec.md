@@ -187,6 +187,7 @@
   - 尝试解析 `find_package(...)`，自动写入包级 `<dependency .../>`：
     - `find_package(Xxx REQUIRED ...)` -> `<dependency name="xxx" optional="false"/>`
     - 其它 `find_package(Xxx ...)` -> `<dependency name="xxx" optional="true"/>`
+- 规则边界：`up` / `up-gui` 不内置针对具体第三方项目（库名、仓库名、目录布局）的特判逻辑；行为必须由 `package.xml` / `target.xml` 显式配置驱动。
 - 目标名优先使用 CMake target 名（必要时做 sanitize / 去重）。
 - 包名默认优先取 `CMakeLists.txt` 中 `project(...)` 名；若无法解析则回退目录名（`--package-name` 仍最高优先）。
 - `install(TARGETS ...)` 解析不到库规则时，仅生成 `package.xml` 并输出提示；可改用 `--legacy-cmake-parse` 或手工补充 `target.xml`。

@@ -14,6 +14,7 @@ std::string read_file_text(const std::filesystem::path& path, std::string& error
 bool is_src_ext(const std::string& ext);
 bool skip_dir_name(const std::string& name);
 std::string sanitize_id(std::string s);
+std::string normalize_dep_package_name(std::string s);
 std::string posix_str(const std::filesystem::path& p);
 std::optional<std::filesystem::path> try_relative(const std::filesystem::path& base, const std::filesystem::path& target);
 bool looks_like_source_token(const std::string& t);

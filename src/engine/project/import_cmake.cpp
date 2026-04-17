@@ -120,12 +120,6 @@ std::string upper_ascii(std::string s) {
   return s;
 }
 
-std::string lower_ascii(std::string s) {
-  for (char& c : s)
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  return s;
-}
-
 std::string normalize_rel_install_path(std::string s) {
   for (char& c : s) {
     if (c == '\\')
@@ -517,7 +511,7 @@ void collect_find_package_names(const std::string& text, std::map<std::string, b
       std::string pkg = toks[0];
       strip_quotes(pkg);
       if (!pkg.empty() && pkg.find('$') == std::string::npos) {
-        pkg = lower_ascii(project_import::sanitize_id(pkg));
+        pkg = project_import::normalize_dep_package_name(std::move(pkg));
         if (!pkg.empty() && pkg != "required" && pkg != "quiet") {
           bool required = false;
           for (size_t i = 1; i < toks.size(); ++i) {
@@ -538,6 +532,44 @@ void collect_find_package_names(const std::string& text, std::map<std::string, b
     }
     p = lparen + 1;
   }
+}
+
+void import_cmake_find_packages_recursive(const std::filesystem::path& cmake_file,
+                                          std::set<std::string>& seen_cmake_files,
+                                          std::map<std::string, bool>& deps,
+                                          std::string& error,
+                                          int depth);
+
+void probe_find_package_dep_map(const std::filesystem::path& cmake_file,
+                                std::set<std::string>& seen_cmake_files,
+                                std::map<std::string, bool>& deps,
+                                std::string& error,
+                                int depth) {
+  import_cmake_find_packages_recursive(cmake_file, seen_cmake_files, deps, error, depth);
+}
+
+void normalize_find_package_dep_map(std::map<std::string, bool>& deps) {
+  // Normalize names through shared rules, and merge required flags.
+  std::map<std::string, bool> normalized;
+  for (const auto& kv : deps) {
+    const std::string key = project_import::normalize_dep_package_name(kv.first);
+    if (key.empty())
+      continue;
+    auto it = normalized.find(key);
+    if (it == normalized.end())
+      normalized[key] = kv.second;
+    else if (kv.second)
+      it->second = true;
+  }
+  deps.swap(normalized);
+}
+
+void emit_find_package_dep_list(const std::map<std::string, bool>& deps,
+                                std::vector<std::pair<std::string, bool>>& out_deps) {
+  out_deps.clear();
+  out_deps.reserve(deps.size());
+  for (const auto& kv : deps)
+    out_deps.push_back(kv);
 }
 
 void import_cmake_find_packages_recursive(const std::filesystem::path& cmake_file, std::set<std::string>& seen_cmake_files,
@@ -743,12 +775,11 @@ void import_cmake_find_package_deps(const std::filesystem::path& cmake_file,
                                     std::vector<std::pair<std::string, bool>>& out_deps, std::string& error) {
   std::set<std::string> seen_cmake_files;
   std::map<std::string, bool> deps;
-  import_cmake_find_packages_recursive(cmake_file, seen_cmake_files, deps, error, 0);
+  probe_find_package_dep_map(cmake_file, seen_cmake_files, deps, error, 0);
   if (!error.empty())
     return;
-  out_deps.clear();
-  for (const auto& kv : deps)
-    out_deps.push_back(kv);
+  normalize_find_package_dep_map(deps);
+  emit_find_package_dep_list(deps, out_deps);
 }
 
 }  // namespace up
