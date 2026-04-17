@@ -210,7 +210,8 @@ python package.py
 - `up test [test-target-name]`
 - `up pack`
 - `up project [--dry-run] [--force] [--output-dir <path>] [--package-name <n>] [--legacy-cmake-parse]`
-  - 默认：若探测到 **CMake** 工程，写入 **`<cmake source_dir="..."/>`**，并尽量从 `install(TARGETS ...)` 自动生成 `imported_installed_*` 包装 `target.xml`（目标名优先使用 CMake target 名，解析不到时仅生成 package.xml 并给出提示）。
+  - 默认：若探测到 **CMake** 工程，写入 **`<cmake source_dir="..."/>`**，并尽量从 `install(TARGETS ...)` 自动生成 `imported_installed_*` 包装 `target.xml`（默认落在 `.targets/<name>/target.xml`，目标名优先使用 CMake target 名，解析不到时仅生成 package.xml 并给出提示）。
+  - `package.xml` 的 `name` 默认优先取 `CMakeLists.txt` 的 `project(...)` 名（若未解析到则回退目录名；`--package-name` 仍可覆盖）。
   - **`--legacy-cmake-parse`**：恢复旧的「从 `CMakeLists.txt` 猜 `add_library`/`add_executable`」行为。
 
 ### 4.4 在单包目录工作
@@ -262,6 +263,20 @@ up run rock_app_one
 1. 用 `from/to` 声明 `dir/file/glob`
 2. `up configure && up build`
 3. 检查 `.intermediate/install/<arch>/include/` 是否符合预期
+
+#### 模板 D：导入第三方 CMake SDK（zlib / FBX 风格）
+
+1. 在第三方 CMake 工程根目录执行 `up project`
+2. 执行 `up configure && up build`
+3. 检查是否生成 `.targets/<name>/target.xml`
+4. 在消费方包里通过 `<dependency name="pkg:target"/>` 引用
+
+默认行为要点：
+
+- `up project` 会写 `package.xml`（含 `<cmake source_dir="..."/>`）
+- 并尝试根据 `install(TARGETS ...)` 生成 `imported_installed_*` 包装目标
+- 包名默认优先取 `CMakeLists.txt` 的 `project(...)`（可用 `--package-name` 覆盖）
+- 纯库包（无 executable）也支持 configure/build
 
 ---
 
@@ -321,6 +336,11 @@ up run rock_app_one
 ### Q6：为什么单包 configure 过不了，整仓扫描却可以
 
 因为单包目录通常看不到跨包依赖目标。对于跨包依赖场景，请在更高层目录执行并用 `--scan` 覆盖所有相关包。
+
+### Q7：纯库包（没有 executable）能不能 configure/build？
+
+可以。当前实现已支持“仅库目标”的包（包括 `imported_installed_*` 包装目标）。  
+`configure` 只要求主包至少有一个 `target.xml`，不再强制必须有可执行目标。
 
 ---
 

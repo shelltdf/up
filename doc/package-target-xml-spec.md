@@ -63,6 +63,22 @@
     - **`executable`**：可执行程序。
     - **`static_library`**：静态库。
     - **`shared_library`**：动态库。
+    - **`asset_bundle`**：仅资源安装，不参与编译链接。
+    - **`imported_static_library`**：磁盘预置静态库（需配 `<prebuilt .../>`）。
+    - **`imported_shared_library`**：磁盘预置动态库（需配 `<prebuilt .../>`）。
+    - **`imported_installed_static_library`**：由同包 `<cmake/>` 子工程先安装到前缀后，再以 `<install artifact=\"...\"/>` 包装的静态库。
+    - **`imported_installed_shared_library`**：由同包 `<cmake/>` 子工程先安装到前缀后，再以 `<install artifact=\"...\" implib=\"...\"/>` 包装的动态库。
+
+类型与关键子标签约束（当前实现）：
+
+| type | `<sources>` | `<prebuilt/>` | `<install .../>` | 备注 |
+|------|-------------|---------------|------------------|------|
+| `executable` / `static_library` / `shared_library` | 需要（至少解析到一个源文件） | 否 | 否 | 常规编译目标 |
+| `asset_bundle` | 可空 | 否 | 否 | 需至少有 `sources` / `assets` / `includes` 之一 |
+| `imported_static_library` | 不需要 | 需要 | 否 | 路径相对 `target.xml`（或绝对路径） |
+| `imported_shared_library` | 不需要 | 需要 | 否 | Windows 需可解析 dll + import lib |
+| `imported_installed_static_library` | 不需要 | 否 | 需要 | `artifact` 相对 `CMAKE_INSTALL_PREFIX` |
+| `imported_installed_shared_library` | 不需要 | 否 | 需要 | Windows 需 `implib` |
 
 ### 3.2 源文件 `<file> ... </file>`
 
@@ -121,7 +137,7 @@
 - **`name`** 支持两种形式：
   1. **`目标名`**：与本包内某一**库** target 同名，表示依赖本包该库。
   2. **`包名:目标名`**：依赖**其他包**中的某一库 target（该包须在 `package.xml` 中声明，且该 target 须在扫描集中存在）。
-- **约束**：依赖指向的目标类型须为 **`static_library` 或 `shared_library`**；解析不到或类型不对则 **configure 失败**。
+- **约束**：依赖指向的目标类型须为库目标（`static_library` / `shared_library` / `imported_static_library` / `imported_shared_library` / `imported_installed_static_library` / `imported_installed_shared_library`）；解析不到或类型不对则 **configure 失败**。
 
 **生成行为（CMake 模式，当前实现）**：
 
@@ -140,7 +156,7 @@
 ## 5. configure 对「主包」与目标的额外要求
 
 - **主包**：优先取 **cwd 等于其 `package.xml` 父目录`** 的那一个包；若无匹配，则取扫描到的**第一个**包作为主包（多包同扫时顺序依赖文件系统，建议单包目录下执行或明确文档化扫描顺序风险）。
-- 主包下须至少有 **一个可执行** target，否则 configure 失败。
+- 主包下至少需要 **一个 target.xml**（可执行/库/导入库均可）；纯库包（例如只含 `imported_installed_*`）允许 configure/build。
 - 同一 **`包名:目标名`** 在扫描结果中不得重复。
 
 ---
@@ -167,6 +183,7 @@
 
 - 当探测到 CMake 工程时，`up project` 默认会：
   - 生成 `package.xml`（包含 `<cmake source_dir="..."/>`）
-  - 尝试解析 `install(TARGETS ...)`，自动生成 `imported_installed_*` 的 `target.xml`
+  - 尝试解析 `install(TARGETS ...)`，自动生成 `imported_installed_*` 的 `target.xml`（默认写到 `.targets/<name>/target.xml`）
 - 目标名优先使用 CMake target 名（必要时做 sanitize / 去重）。
+- 包名默认优先取 `CMakeLists.txt` 中 `project(...)` 名；若无法解析则回退目录名（`--package-name` 仍最高优先）。
 - `install(TARGETS ...)` 解析不到库规则时，仅生成 `package.xml` 并输出提示；可改用 `--legacy-cmake-parse` 或手工补充 `target.xml`。

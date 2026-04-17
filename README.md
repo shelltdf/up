@@ -43,7 +43,7 @@ python package.py
 | `up run <目标名>` | 运行 `.intermediate/install/<arch>/bin/` 下的可执行文件（Windows 下可省略 `.exe`） |
 | `up test [测试目标名]` | 在构建目录中执行 **CTest**（可选指定单个测试目标） |
 | `up pack` | 将 `.intermediate/install/<arch>/` 打包为归档文件输出到 `.intermediate/pack/<arch>/`（Windows: zip；其他平台: tar.gz） |
-| `up project` | 占位：将现有工程迁移为 `package.xml` 与各子目录 `target.xml` 的向导 |
+| `up project` | 探测现有工程并生成 `package.xml` / `target.xml`。CMake 默认写 `<cmake source_dir=\"...\"/>`，并尽量从 `install(TARGETS ...)` 自动生成 `.targets/` 下的 `imported_installed_*` 包装目标 |
 
 无子命令或未知子命令时会打印简短用法。
 
@@ -63,6 +63,36 @@ python package.py
 ```
 
 若将 `up.exe` 加入 `PATH`，也可在 **`test_projects` 下某一子包目录**（例如 `test_projects\hello_demo`）内直接执行 `up configure`、`up build` 等（此时默认只扫描当前目录对应的那一个包）。
+
+## 第三方 SDK 导入（zlib / FBX 风格最小流程）
+
+适用于“上游是 CMake 工程、你希望在 `up` 里把它当预编译库目标消费”的场景。
+
+在 SDK 根目录执行：
+
+```powershell
+up project
+up configure
+up build
+```
+
+默认行为（CMake 探测）：
+
+- `up project` 会生成 `package.xml`（含 `<cmake source_dir="..."/>`）
+- 并尽量按 `install(TARGETS ...)` 自动生成 `.targets/<name>/target.xml`
+- 自动目标类型为 `imported_installed_static_library` / `imported_installed_shared_library`
+- 包名默认优先取 `CMakeLists.txt` 里的 `project(...)`（可被 `--package-name` 覆盖）
+
+生成后可在其它包里通过目标依赖引用（示例）：
+
+```xml
+<dependency name="zlib:zlibstatic"/>
+```
+
+说明：
+
+- 纯库包（没有 executable）也支持 `configure/build`
+- 若 `install(TARGETS ...)` 解析不到可包装库，只会生成 `package.xml`，此时可手工补 `.targets/*/target.xml`，或改用 `--legacy-cmake-parse`
 
 ## 工作目录约定（相对于执行 `up` 时的 cwd）
 

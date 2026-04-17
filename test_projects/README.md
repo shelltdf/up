@@ -17,6 +17,7 @@
 | [plugin_runtime/](plugin_runtime/) | 演示插件共享库动态加载：默认导出 `init/update/shutdown/info` 并由测试程序运行。 |
 | [native_cmake_vendor/](native_cmake_vendor/) | 演示 `package.xml` 中 **`<cmake source_dir="..."/>`**：上游子目录由 `ExternalProject` 构建安装后再编本包可执行文件。 |
 | [prebuilt_static_stub/](prebuilt_static_stub/) | 演示 **`imported_static_library`** + **`<prebuilt import_lib="..."/>`**：链入预编译的 `stub_import.lib`（Windows MSVC x64 已提交 `lib/import/`；可再用 `lib/CMakeLists.txt` 重生）。 |
+| third-party CMake SDK（外部目录） | 对第三方目录（如 zlib/FBX）直接执行 `up project`，默认会生成 `<cmake/>` 与 `.targets/<name>/target.xml`（`imported_installed_*` 包装目标）；详见 [`README.md`](../README.md) 与 [`doc/user-manual.md`](../doc/user-manual.md)。 |
 
 ### 包依赖关系
 
@@ -45,6 +46,8 @@ flowchart LR
 - `hello_data_files`：无包级依赖（资源文件安装与运行时加载示例）。
 - `meta_codegen`：无包级依赖（代码生成工具示例）。
 - `plugin_runtime`：无包级依赖（插件动态加载示例）。
+
+补充：当前实现支持“纯库包”配置/构建（无需 executable）。因此第三方 SDK 包装场景可只含 `.targets/*/target.xml`。
 
 ---
 

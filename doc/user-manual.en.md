@@ -187,7 +187,8 @@ Common commands:
 - `up test [test-target-name]`
 - `up pack`
 - `up project [--dry-run] [--force] [--output-dir <path>] [--package-name <name>] [--legacy-cmake-parse]`
-  - **Default** when a **CMake** tree is detected: writes **`<cmake source_dir="..."/>`** and tries to auto-generate `imported_installed_*` wrapper `target.xml` files from `install(TARGETS ...)` rules (target names prefer CMake target names). If parsing fails, only `package.xml` is written with warnings.
+  - **Default** when a **CMake** tree is detected: writes **`<cmake source_dir="..."/>`** and tries to auto-generate `imported_installed_*` wrapper `target.xml` files from `install(TARGETS ...)` rules (written under `.targets/<name>/target.xml`, target names prefer CMake target names). If parsing fails, only `package.xml` is written with warnings.
+  - `package.xml` `name` prefers the CMake `project(...)` name by default (falls back to directory name when unresolved; `--package-name` still overrides).
   - **`--legacy-cmake-parse`**: restore heuristic `add_library` / `add_executable` import into `target.xml`.
 
 ### 4.4 Work in a single package directory
@@ -218,6 +219,41 @@ Suggested flow:
 6. Optionally run `Test` / `Run`
 
 The GUI passes selected settings to `up.exe` via `--opt`.
+
+### 4.6 Common workflow templates
+
+#### Template A: Add a library target
+
+1. Create a subdirectory (for example `myLib/`)
+2. Add `target.xml` and source files
+3. Reference it from an executable target with `<dependency name="myLib"/>`
+4. Run `up configure && up build && up test`
+
+#### Template B: Add cross-package dependency
+
+1. Declare package dependency in `package.xml`
+2. Reference with `otherPkg:otherTarget` in `target.xml`
+3. Ensure both packages are included in configure scan roots
+
+#### Template C: Verify includes install layout
+
+1. Use `from/to` entries in `<includes>` (`dir/file/glob`)
+2. Run `up configure && up build`
+3. Check `.intermediate/install/<arch>/include/`
+
+#### Template D: Import third-party CMake SDK (zlib / FBX style)
+
+1. In the third-party CMake project root, run `up project`
+2. Run `up configure && up build`
+3. Check generated `.targets/<name>/target.xml`
+4. Consume from another package via `<dependency name="pkg:target"/>`
+
+Default behavior highlights:
+
+- `up project` writes `package.xml` with `<cmake source_dir="..."/>`
+- Tries to generate `imported_installed_*` wrappers from `install(TARGETS ...)`
+- Package name prefers CMake `project(...)` by default (`--package-name` overrides)
+- Library-only packages (no executable) are supported for configure/build
 
 ---
 
@@ -261,6 +297,11 @@ Old:
   <dir>../../include/xxx</dir>
 </includes>
 ```
+
+### Q6: Can a library-only package (no executable) run configure/build?
+
+Yes. Library-only packages are supported, including pure `imported_installed_*` wrappers.  
+`configure` requires at least one `target.xml` under the primary package, but no longer requires an executable target.
 
 New:
 

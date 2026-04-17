@@ -3341,6 +3341,7 @@ std::wstring InitialWelcomeLogText() {
            L"「运行参数」可加 --scan 指定额外扫描根（与 CWD 相同的路径不会重复传入）；up 默认已扫描当前工作目录。\r\n"
            L"工具栏与「操作」菜单均可触发 configure / build / test / pack / run。\r\n"
            L"运行目标与单元测试列表会在 configure 成功后自动刷新。\r\n"
+           L"纯库包（无 executable）也可 configure/build；CMake 导入目标常位于 .targets/<name>/target.xml。\r\n"
            L"点击工具栏「configure」可在弹窗中编辑 Option（含按前缀分组）。\r\n"
            L"使用菜单「语言」可切换界面语言。\r\n\r\n";
   }
@@ -3348,6 +3349,7 @@ std::wstring InitialWelcomeLogText() {
          L"Use \"Extra args\" to pass --scan for extra scan roots (duplicates of CWD are skipped); up already scans CWD.\r\n"
          L"The toolbar and Actions menu trigger configure / build / test / pack / run.\r\n"
          L"Run targets and test lists refresh after a successful configure.\r\n"
+         L"Library-only packages (no executable) are supported for configure/build; imported wrappers are commonly under .targets/<name>/target.xml.\r\n"
          L"Click toolbar \"configure\" to edit Options (including prefix grouping).\r\n"
          L"Use the Language menu to switch UI language.\r\n\r\n";
 }
@@ -3658,10 +3660,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       }
       if (id == IDM_ABOUT) {
         MessageBoxW(hwnd,
-                    T(L"up-gui：调用同目录 up.exe 的本地外壳。\n布局：菜单栏、工具栏、当前工作目录(CWD)、Build Dir、安装目录、运行目标与运行参数（同行）、单元测试列表、日志、状态栏；Option 在 configure 弹窗中编辑。",
+                    T(L"up-gui：调用同目录 up.exe 的本地外壳。\n布局：菜单栏、工具栏、当前工作目录(CWD)、Build Dir、安装目录、运行目标与运行参数（同行）、单元测试列表、日志、状态栏；Option 在 configure 弹窗中编辑。\n提示：支持纯库包 configure/build；CMake 导入包装目标常在 .targets/<name>/target.xml。",
                         L"up-gui is a local shell that runs up.exe from the same folder.\n"
                         L"Layout: menu bar, toolbar, working directory (CWD), build/install dirs, run targets and extra "
-                        L"args, tests, log, status bar; Options are edited in the configure dialog."),
+                        L"args, tests, log, status bar; Options are edited in the configure dialog.\n"
+                        L"Note: library-only packages are supported for configure/build; CMake imported wrappers are often under .targets/<name>/target.xml."),
                     T(L"关于 up-gui", L"About up-gui"), MB_ICONINFORMATION | MB_OK);
         return 0;
       }
