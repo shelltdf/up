@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <set>
 #include <sstream>
@@ -94,6 +95,7 @@ constexpr int IDC_ENV_LOCAL_VCVARS_LIST = 3012;
 
 constexpr UINT WM_APPEND_LOG = WM_APP + 50;
 constexpr UINT WM_PROCESS_DONE = WM_APP + 51;
+constexpr UINT WM_APPEND_RUN_LOG = WM_APP + 52;
 
 bool g_ui_lang_zh = true;
 
@@ -150,6 +152,7 @@ HWND g_env_settings_dialog_hwnd{};
 HWND g_configure_option_dialog_hwnd{};
 
 std::atomic<bool> g_running{};
+std::atomic<unsigned long> g_active_run_seq{0};
 std::wstring g_last_up_args;
 std::wstring g_status_text = L"Ready";
 unsigned long g_run_seq = 0;
@@ -168,6 +171,10 @@ RECT g_log_splitter_rect{};
 struct DonePack {
   std::wstring output;
   DWORD exit_code{};
+};
+struct RunLogPack {
+  unsigned long run_no{};
+  std::wstring text;
 };
 
 struct OptionRow {
@@ -242,18 +249,42 @@ std::string WideToUtf8(std::wstring_view ws) {
 std::wstring Utf8ToWide(std::string_view utf8) {
   if (utf8.empty())
     return {};
-  auto convert = [&](unsigned cp) -> std::wstring {
-    const int n = MultiByteToWideChar(cp, 0, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
+  auto looks_mojibake_zh = [](const std::wstring& s) -> bool {
+    static const wchar_t* kBadMarks[] = {
+        L"閫傜敤浜", L"鐗堟湰", L"姝ｅ湪", L"鍒涘缓", L"缂栬瘧", L"鎿嶄綔",
+    };
+    for (const auto* m : kBadMarks) {
+      if (s.find(m) != std::wstring::npos)
+        return true;
+    }
+    return false;
+  };
+  auto convert = [&](unsigned cp, DWORD flags = 0) -> std::wstring {
+    const int n = MultiByteToWideChar(cp, flags, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
     if (n <= 0)
       return {};
     std::wstring w(static_cast<size_t>(n), L'\0');
-    MultiByteToWideChar(cp, 0, utf8.data(), static_cast<int>(utf8.size()), w.data(), n);
+    if (MultiByteToWideChar(cp, flags, utf8.data(), static_cast<int>(utf8.size()), w.data(), n) <= 0)
+      return {};
     return w;
   };
-  std::wstring w = convert(CP_UTF8);
+  // Prefer strict UTF-8 first; if invalid, fall back to local code pages.
+  std::wstring w = convert(CP_UTF8, MB_ERR_INVALID_CHARS);
   if (!w.empty())
     return w;
-  return convert(CP_ACP);
+  const std::wstring utf8_lenient = convert(CP_UTF8, 0);
+  // Prefer ANSI code page before OEM for redirected MSBuild/CMake logs on Windows.
+  w = convert(CP_ACP);
+  if (!w.empty() && !utf8_lenient.empty() && looks_mojibake_zh(w))
+    return utf8_lenient;
+  if (!w.empty())
+    return w;
+  w = convert(CP_OEMCP);
+  if (!w.empty() && !utf8_lenient.empty() && looks_mojibake_zh(w))
+    return utf8_lenient;
+  if (!w.empty())
+    return w;
+  return utf8_lenient;
 }
 
 void TrimInPlace(std::wstring& s) {
@@ -513,8 +544,8 @@ bool PathInHits(const std::wstring& p, const std::vector<std::wstring>& hits) {
 }
 
 std::wstring QuoteWinArg(const std::wstring& s);
-bool RunProcessCapture(const std::wstring& app, const std::wstring& cmdline, const std::wstring& cwd,
-                       std::wstring& out_w, DWORD& exit_code);
+bool RunProcessCapture(const std::wstring& app, const std::wstring& cmdline, const std::wstring& cwd, std::wstring& out_w,
+                       DWORD& exit_code, const std::function<void(const std::wstring&)>& on_chunk = nullptr);
 
 std::wstring PickPreferredPath(const std::wstring& current, const std::vector<std::wstring>& hits) {
   if (!current.empty() && PathInHits(current, hits))
@@ -2118,8 +2149,8 @@ void GetEditText(HWND ed, std::wstring& out) {
   out.resize(static_cast<size_t>(n));
 }
 
-bool RunProcessCapture(const std::wstring& app, const std::wstring& cmdline, const std::wstring& cwd,
-                       std::wstring& out_w, DWORD& exit_code) {
+bool RunProcessCapture(const std::wstring& app, const std::wstring& cmdline, const std::wstring& cwd, std::wstring& out_w,
+                       DWORD& exit_code, const std::function<void(const std::wstring&)>& on_chunk) {
   exit_code = static_cast<DWORD>(-1);
   SECURITY_ATTRIBUTES sa{};
   sa.nLength = sizeof(sa);
@@ -2161,12 +2192,31 @@ bool RunProcessCapture(const std::wstring& app, const std::wstring& cmdline, con
   }
 
   std::string acc;
+  std::string pending;
   char buf[4096]{};
   for (;;) {
     DWORD n = 0;
     if (!ReadFile(out_rd, buf, sizeof(buf) - 1, &n, nullptr) || n == 0)
       break;
     acc.append(buf, static_cast<size_t>(n));
+    if (on_chunk) {
+      pending.append(buf, static_cast<size_t>(n));
+      for (;;) {
+        const size_t eol = pending.find('\n');
+        if (eol == std::string::npos)
+          break;
+        std::string line = pending.substr(0, eol + 1);
+        pending.erase(0, eol + 1);
+        const std::wstring chunk = Utf8ToWide(line);
+        if (!chunk.empty())
+          on_chunk(chunk);
+      }
+    }
+  }
+  if (on_chunk && !pending.empty()) {
+    const std::wstring tail = Utf8ToWide(pending);
+    if (!tail.empty())
+      on_chunk(tail);
   }
   CloseHandle(out_rd);
   WaitForSingleObject(pi.hProcess, INFINITE);
@@ -2339,14 +2389,21 @@ void RunUpAsync(std::wstring args_no_exe) {
   AppendLog(L"\r\n> " + plan.display_command + L"\r\n");
 
   SetUiRunning(true);
+  g_active_run_seq = run_no;
 
-  std::thread([run_app, cmd, cwd, hwnd]() {
+  std::thread([run_app, cmd, cwd, hwnd, run_no]() {
     std::wstring output;
     DWORD code = 0;
-    const bool ok = RunProcessCapture(run_app, cmd, cwd, output, code);
+    const bool ok =
+        RunProcessCapture(run_app, cmd, cwd, output, code, [hwnd, run_no](const std::wstring& chunk) {
+          auto* p = new RunLogPack;
+          p->run_no = run_no;
+          p->text = chunk;
+          PostMessageW(hwnd, WM_APPEND_RUN_LOG, 0, reinterpret_cast<LPARAM>(p));
+        });
     auto* pack = new DonePack;
     if (ok)
-      pack->output = std::move(output);
+      pack->output.clear();
     else
       pack->output =
           g_ui_lang_zh ? L"[错误] CreateProcess 失败。\r\n" : L"[Error] CreateProcess failed.\r\n";
@@ -3475,6 +3532,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
           WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_TABSTOP | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | ES_WANTRETURN,
           0, 0, 100, 100, hwnd, reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LOG)), GetModuleHandleW(nullptr),
           nullptr);
+      // Avoid default 32KB EDIT control cap; keep long build logs intact.
+      SendMessageW(g_log, EM_LIMITTEXT, 0, 0);
       g_log_splitter =
           CreateWindowExW(0, L"STATIC", L"", WS_CHILD | WS_VISIBLE | SS_NOTIFY | SS_ETCHEDHORZ, 0, 0, 100, 6, hwnd,
                           reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LOG_SPLITTER)), GetModuleHandleW(nullptr), nullptr);
@@ -3599,6 +3658,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       if (s) {
         AppendLogRaw(*s);
         delete s;
+      }
+      return 0;
+    }
+
+    case WM_APPEND_RUN_LOG: {
+      auto* p = reinterpret_cast<RunLogPack*>(lParam);
+      if (p) {
+        if (p->run_no == g_active_run_seq.load())
+          AppendLogRaw(p->text);
+        delete p;
       }
       return 0;
     }

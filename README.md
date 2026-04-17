@@ -82,6 +82,7 @@ up build
 - 并尽量按 `install(TARGETS ...)` 自动生成 `.targets/<name>/target.xml`
 - 自动目标类型为 `imported_installed_static_library` / `imported_installed_shared_library`
 - 包名默认优先取 `CMakeLists.txt` 里的 `project(...)`（可被 `--package-name` 覆盖）
+- `configure` 会把依赖包安装前缀并入 `CMAKE_PREFIX_PATH`，并在可推导时补充常见 `find_package` 缓存变量（如 `<PKG>_LIBRARY` / `<PKG>_LIBRARY_DEBUG` / `<PKG>_INCLUDE_DIR`）
 
 生成后可在其它包里通过目标依赖引用（示例）：
 
@@ -92,6 +93,7 @@ up build
 说明：
 
 - 纯库包（没有 executable）也支持 `configure/build`
+- Windows 下依赖库变量优先使用 `implib` / `.lib`，避免将 `.dll` 误传给链接器
 - 若 `install(TARGETS ...)` 解析不到可包装库，只会生成 `package.xml`，此时可手工补 `.targets/*/target.xml`，或改用 `--legacy-cmake-parse`
 
 ## 工作目录约定（相对于执行 `up` 时的 cwd）

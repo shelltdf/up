@@ -66,10 +66,21 @@ std::string cmake_escape_string_value(const std::string& v) {
       o += "\\\\";
     else if (c == '"')
       o += "\\\"";
+    else if (c == ';')
+      o += "\\;";
     else
       o.push_back(c);
   }
   return o;
+}
+
+std::string cmake_list_to_externalproject_pipe_list(const std::string& list_semicolon_separated) {
+  std::string out = list_semicolon_separated;
+  for (char& c : out) {
+    if (c == ';')
+      c = '|';
+  }
+  return out;
 }
 
 }  // namespace
@@ -135,9 +146,11 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
       cm << "ExternalProject_Add(" << ep.ep_target_name << "\n";
       cm << "  SOURCE_DIR \"" << sdir << "\"\n";
       cm << "  BINARY_DIR \"" << bdir << "\"\n";
+      cm << "  LIST_SEPARATOR \"|\"\n";
       cm << "  CMAKE_ARGS\n";
       cm << "    \"-DCMAKE_INSTALL_PREFIX=" << cmake_escape_string_value(idir) << "\"\n";
-      cm << "    \"-DCMAKE_PREFIX_PATH=" << cmake_escape_string_value(model.cmake_prefix_path) << "\"\n";
+      cm << "    \"-DCMAKE_PREFIX_PATH="
+         << cmake_escape_string_value(cmake_list_to_externalproject_pipe_list(model.cmake_prefix_path)) << "\"\n";
       if (!model.cmake_parent_multi_config)
         cm << "    \"-DCMAKE_BUILD_TYPE=" << cfg_label << "\"\n";
       for (const auto& kv : ep.upstream_cmake_args) {

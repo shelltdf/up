@@ -77,7 +77,8 @@ UpLaunchPlan build_launch_plan(const std::wstring& up_exe,
   if (!vcvars_path.empty() && !cmd_exe_path.empty()) {
     p.use_vcvars = true;
     p.process_path = cmd_exe_path;
-    p.command_line = L"/d /c \"\"" + vcvars_path + L"\" >nul && " + base + L"\"";
+    // Normalize child console output to UTF-8 so GUI log decoding stays stable.
+    p.command_line = L"/d /c \"chcp 65001>nul && \"" + vcvars_path + L"\" >nul && " + base + L"\"";
     p.display_command = p.command_line;
   }
   return p;

@@ -190,3 +190,4 @@
 - 目标名优先使用 CMake target 名（必要时做 sanitize / 去重）。
 - 包名默认优先取 `CMakeLists.txt` 中 `project(...)` 名；若无法解析则回退目录名（`--package-name` 仍最高优先）。
 - `install(TARGETS ...)` 解析不到库规则时，仅生成 `package.xml` 并输出提示；可改用 `--legacy-cmake-parse` 或手工补充 `target.xml`。
+- 对声明的依赖包，若可从其 `imported_installed_*` 目标推导出安装库/头路径，`configure` 会向主包上游 CMake 额外注入常见缓存变量（如 `<PKG>_LIBRARY` / `<PKG>_LIBRARY_DEBUG` / `<PKG>_INCLUDE_DIR` 等）以辅助 `find_package`；Windows 下优先使用 `implib` 或 `.lib`，避免把 `.dll` 注入链接库变量。

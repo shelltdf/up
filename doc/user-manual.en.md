@@ -117,6 +117,8 @@ The generated super-build and external projects receive **`CMAKE_PREFIX_PATH`** 
 
 Duplicates are removed after canonicalization.
 
+In addition, when the primary package declares dependencies that expose `imported_installed_*` targets, `configure` tries to map those installed artifacts/includes to common `find_package` cache variables and pass them to upstream CMake (for example `<PKG>_LIBRARY`, `<PKG>_LIBRARY_DEBUG`, `<PKG>_INCLUDE_DIR`). On Windows, `implib` or `.lib` is preferred so `.dll` is not passed into linker-library variables.
+
 ### 3.2 Dependency levels
 
 - Package-level dependency: `<dependency name="..."/>` in `package.xml`
