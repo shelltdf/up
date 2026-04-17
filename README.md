@@ -84,6 +84,38 @@ up build
 - 包名默认优先取 `CMakeLists.txt` 里的 `project(...)`（可被 `--package-name` 覆盖）
 - `configure` 会把依赖包安装前缀并入 `CMAKE_PREFIX_PATH`，并在可推导时补充常见 `find_package` 缓存变量（如 `<PKG>_LIBRARY` / `<PKG>_LIBRARY_DEBUG` / `<PKG>_INCLUDE_DIR`）
 
+规则约束（重要）：
+
+- `up` / `up-gui` 是泛化规则引擎，不内置针对具体第三方代码库（库名、仓库名、目录布局）的特判逻辑。
+- 依赖关系、安装产物、头文件目录等差异化行为，必须通过 `package.xml` / `target.xml` 显式声明。
+- 当自动探测信息不足时，请手工补齐 `.targets/*/target.xml`、`<dependency .../>`、`<install artifact=\"...\" implib=\"...\"/>`、`<interface_include .../>` 等规则字段。
+
+最小示例（可手工补齐）：
+
+```xml
+<!-- package.xml -->
+<package name="zlib" version="0.1.0">
+  <cmake source_dir="."/>
+  <dependency name="openssl" optional="true"/>
+</package>
+```
+
+```xml
+<!-- .targets/zlibstatic/target.xml -->
+<target name="zlibstatic" type="imported_installed_static_library">
+  <install artifact="lib/zlibstatic.lib"/>
+  <interface_include dir="include"/>
+</target>
+```
+
+```xml
+<!-- .targets/zlib_shared/target.xml (Windows) -->
+<target name="zlib_shared" type="imported_installed_shared_library">
+  <install artifact="bin/zlib1.dll" implib="lib/zlib.lib"/>
+  <interface_include dir="include"/>
+</target>
+```
+
 生成后可在其它包里通过目标依赖引用（示例）：
 
 ```xml

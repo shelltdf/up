@@ -32,6 +32,8 @@ flowchart LR
   meta_codegen["meta_codegen"]
   plugin_runtime["plugin_runtime"]
   native_cmake_vendor["native_cmake_vendor"]
+  prebuilt_static_stub["prebuilt_static_stub"]
+  thirdPartyCmakeSdk["third_party_cmake_sdk (external)"]
   hello_demo --> hello_simple_lib
   hello_demo --> rock_stack
   hello_demo --> hello_parent_child
@@ -46,8 +48,30 @@ flowchart LR
 - `hello_data_files`：无包级依赖（资源文件安装与运行时加载示例）。
 - `meta_codegen`：无包级依赖（代码生成工具示例）。
 - `plugin_runtime`：无包级依赖（插件动态加载示例）。
+- `native_cmake_vendor`：无包级依赖（原生 CMake 子工程接入示例）。
+- `prebuilt_static_stub`：无包级依赖（预编译静态库导入示例）。
+- `third_party_cmake_sdk`（external）：外部目录示例节点，不属于仓库内 `test_projects/` 子目录；实际依赖关系取决于被导入 SDK 的 `package.xml/target.xml`。
 
 补充：当前实现支持“纯库包”配置/构建（无需 executable）。因此第三方 SDK 包装场景可只含 `.targets/*/target.xml`。
+
+## 规则化约束（重要）
+
+`up` / `up-gui` 的行为是**泛化规则引擎**，不内置任何针对具体第三方项目（库名、仓库名、目录布局）的特判。  
+当你在真实项目中接入第三方代码库时，若自动探测信息不足，请通过 `package.xml` / `target.xml` 显式补齐，而不是依赖工具内置“项目知识”。
+
+最小迁移清单（无特判前提）：
+
+1. `package.xml`
+   - 声明包级依赖：`<dependency name="..."/>`
+   - 若使用上游 CMake 子工程：`<cmake source_dir="..."/>`
+2. `target.xml`
+   - 预编译库：使用 `imported_static_library` / `imported_shared_library` + `<prebuilt .../>`
+   - 上游安装产物包装：使用 `imported_installed_static_library` / `imported_installed_shared_library` + `<install artifact="..."/>`
+   - Windows 的 `imported_installed_shared_library` 需要额外声明 `implib="..."`
+   - 头文件目录通过 `<interface_include dir="..."/>`（安装相对路径）或 `includes` 显式声明
+3. 依赖引用
+   - 包内：`<dependency name="myLib"/>`
+   - 跨包：`<dependency name="otherPkg:otherLib"/>`
 
 ---
 
