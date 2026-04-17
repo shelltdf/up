@@ -216,9 +216,11 @@ std::string build_configure_args_line() {
   return args;
 }
 
+#if UP_ENABLE_PROJECT
 void on_project(GtkWidget*, gpointer) {
   run_up_line_async("project");
 }
+#endif
 
 void on_configure(GtkWidget*, gpointer) {
   const std::string cfg = build_configure_args_line();
@@ -316,7 +318,9 @@ static void activate(GtkApplication* app, gpointer) {
     g_signal_connect(it, "activate", G_CALLBACK(cb), nullptr);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu_actions), it);
   };
+#if UP_ENABLE_PROJECT
   add_menu("_Project", on_project);
+#endif
   add_menu("_Configure", on_configure);
   add_menu("_Build", on_build);
   add_menu("_Run", on_run);
@@ -331,7 +335,9 @@ static void activate(GtkApplication* app, gpointer) {
     g_signal_connect(b, "clicked", G_CALLBACK(cb), nullptr);
     gtk_toolbar_insert(GTK_TOOLBAR(bar), b, -1);
   };
+#if UP_ENABLE_PROJECT
   add_tb("Project", on_project);
+#endif
   add_tb("Configure", on_configure);
   add_tb("Build", on_build);
   add_tb("Run", on_run);

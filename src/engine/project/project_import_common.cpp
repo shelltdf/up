@@ -215,6 +215,44 @@ std::string resolve_target_xml_bucket(const std::filesystem::path& write_root,
   return preferred_posix;
 }
 
+void add_target_dependency(TargetDesc& td, const std::string& dep_name) {
+  if (dep_name.empty())
+    return;
+  if (std::find(td.dependencies.begin(), td.dependencies.end(), dep_name) != td.dependencies.end())
+    return;
+  td.dependencies.push_back(dep_name);
+}
+
+bool add_target_include_dir(TargetDesc& td, const std::filesystem::path& write_root, const std::string& subdir,
+                            const std::filesystem::path& abs_include_dir, std::vector<std::string>& warnings) {
+  if (path_has_non_ascii(abs_include_dir)) {
+    warnings.push_back("skip non-ASCII include path: " + posix_str(abs_include_dir));
+    return false;
+  }
+  std::error_code ec;
+  std::filesystem::path wr = std::filesystem::weakly_canonical(write_root, ec);
+  if (ec)
+    wr = std::filesystem::absolute(write_root);
+  std::filesystem::path inc = std::filesystem::weakly_canonical(abs_include_dir, ec);
+  if (ec)
+    inc = std::filesystem::absolute(abs_include_dir);
+  const std::filesystem::path target_dir = (wr / subdir).lexically_normal();
+  std::filesystem::path rel = inc.lexically_relative(target_dir);
+  std::string from;
+  if (rel.empty())
+    from = posix_str(inc);
+  else
+    from = posix_str(rel.lexically_normal());
+  if (from.empty())
+    return false;
+  for (const auto& existing : td.includes) {
+    if (existing.kind == "dir" && existing.from == from)
+      return false;
+  }
+  td.includes.push_back(TargetDesc::IncludeEntry{"dir", from, "", "", ""});
+  return true;
+}
+
 void push_target(ImportedPackage& out, const std::filesystem::path& write_root, const std::string& subdir,
                  const std::string& name, const std::string& type, const std::vector<std::filesystem::path>& abs_sources,
                  std::vector<std::string>& warnings) {

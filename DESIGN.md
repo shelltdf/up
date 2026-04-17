@@ -54,6 +54,8 @@
 | `pack` | 将编译结果打包为目标形态（安装程序、apk 等，依后端而定）。 |
 | `project` | 将当前 **cwd** 中已有代码工程**升级/迁移**为 `package.xml` 与各目标子目录下的 `target.xml` 描述。 |
 
+**CMake 脚手架与 `--cmake-no-file-api`：** 默认在需要时会跑一次 **`cmake` 配置**以读取 **CMake File API（codemodel）**，精度高但要求当时环境下 `find_package` / 子工程路径等足以让该次 configure 成功。`--cmake-no-file-api` 会**跳过**该子进程，仅依赖安装规则文本扫描与 **CMakeLists 启发式源码扫描**（含对 `target_link_libraries` / `target_include_directories` 的尽力解析），适合依赖尚未就绪或无法提供前缀路径的仓库；结果可能不完整，需人工核对。
+
 ### 2.1 configure 要点
 
 - 可配置**扫描路径**；**未配置时默认递归搜索当前 cwd**。

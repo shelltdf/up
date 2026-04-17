@@ -33,4 +33,13 @@ void push_target(ImportedPackage& out, const std::filesystem::path& write_root, 
                  const std::string& name, const std::string& type, const std::vector<std::filesystem::path>& abs_sources,
                  std::vector<std::string>& warnings);
 
+// Append `dep_name` to td.dependencies if not already present and non-empty. No fmt/normalization.
+void add_target_dependency(TargetDesc& td, const std::string& dep_name);
+
+// Add `<dir from=relpath(target_dir, abs_include_dir)/>` to td.includes if expressible (lexically) and not duplicate.
+// Falls back to absolute-path posix string if no relative path can be expressed (cross-root). Returns true if appended,
+// false if skipped (duplicate / non-ASCII / could not derive a usable relative path).
+bool add_target_include_dir(TargetDesc& td, const std::filesystem::path& write_root, const std::string& subdir,
+                            const std::filesystem::path& abs_include_dir, std::vector<std::string>& warnings);
+
 }  // namespace up::project_import

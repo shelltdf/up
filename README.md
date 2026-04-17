@@ -43,7 +43,7 @@ python package.py
 | `up run <目标名>` | 运行 `.intermediate/install/<arch>/bin/` 下的可执行文件（Windows 下可省略 `.exe`） |
 | `up test [测试目标名]` | 在构建目录中执行 **CTest**（可选指定单个测试目标） |
 | `up pack` | 将 `.intermediate/install/<arch>/` 打包为归档文件输出到 `.intermediate/pack/<arch>/`（Windows: zip；其他平台: tar.gz） |
-| `up project` | 探测现有工程并生成 `package.xml` / `target.xml`。CMake 默认写 `<cmake source_dir=\"...\"/>`，并尽量从 `install(TARGETS ...)` 自动生成 `.targets/` 下的 `imported_installed_*` 包装目标 |
+| `up project` | 探测现有工程并生成 `package.xml` / `target.xml`。CMake 默认写 `<cmake source_dir=\"...\"/>`，并尽量从 `install(TARGETS ...)` 自动生成 `.targets/` 下的 `imported_installed_*` 包装目标；在需要时还会尝试 **CMake File API**（需本机 `cmake` 能成功配置该工程）。若依赖未齐或不想跑配置，可加 **`--cmake-no-file-api`**，仅做安装规则扫描 + **CMakeLists 启发式扫描**（含对 `target_link_libraries` / `target_include_directories` 的尽力解析），精度低于 codemodel |
 
 无子命令或未知子命令时会打印简短用法。
 

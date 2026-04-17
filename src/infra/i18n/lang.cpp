@@ -62,15 +62,18 @@ void print_usage(std::ostream& os) {
     const char* zh_usage = "up — 通用包/构建编排（原型）\n\n"
                            "用法:\n"
                            "  up [--verbose|-v] <子命令> ...   （或设 UP_VERBOSE=1；阶段信息输出到 stderr）\n"
+                           "  up spec   （stdout 输出内嵌英文 package.xml / target.xml 规范，无仓库 .md 时供 AI 使用）\n"
                            "  up configure [--build-dir-name <名>] [--scan <目录>]... [--opt KEY=VALUE]...\n"
                            "    （<名> 为 .intermediate/build 下的子目录名；省略时默认为 default）\n"
                            "  up build --build-dir-name <名>\n"
                            "  up run --install-dir-name <名> <可执行目标名>  （<名> 为 .intermediate/install 下的子目录名）\n"
                            "  up test --install-dir-name <名> [测试目标名]\n"
                            "  up pack --install-dir-name <名>...  （可重复，多架构）\n"
+#if UP_ENABLE_PROJECT
                            "  up project [--dry-run] [--force] [--cmake-query [--cmake-query-build-dir <path>] [--cmake-query-keep-build]]\n"
                            "             [--cmake-no-file-api] [--legacy-cmake-parse] [--project-dir|-C <path>] [--output-dir <path>] [--package-name <name>]\n"
                            "    (CMake 默认顺序: 安装规则扫描 -> File API(cmake) -> 源码启发式; --cmake-no-file-api 跳过 File API)\n"
+#endif
                            "  up --help | -h | help\n";
 #ifdef _WIN32
     if (try_write_utf8_to_console(os, zh_usage))
@@ -81,15 +84,18 @@ void print_usage(std::ostream& os) {
     os << "up — generic package / build orchestrator (prototype)\n\n"
           "Usage:\n"
           "  up [--verbose|-v] <subcommand> ...   (or UP_VERBOSE=1; phase lines go to stderr)\n"
+          "  up spec   (print embedded English package.xml / target.xml rules to stdout for AI/tools; no .md needed)\n"
           "  up configure [--build-dir-name <leaf>] [--scan <dir>]... [--opt KEY=VALUE]...\n"
           "    (<leaf> is a subdirectory name under .intermediate/build; default: default)\n"
           "  up build --build-dir-name <leaf>\n"
           "  up run --install-dir-name <leaf> <target_executable_name>  (<leaf> under .intermediate/install)\n"
           "  up test --install-dir-name <leaf> [test_target_name]\n"
           "  up pack --install-dir-name <leaf>...  (repeatable; multi-arch)\n"
+#if UP_ENABLE_PROJECT
           "  up project [--dry-run] [--force] [--cmake-query [--cmake-query-build-dir <path>] [--cmake-query-keep-build]]\n"
           "             [--cmake-no-file-api] [--legacy-cmake-parse] [--project-dir|-C <path>] [--output-dir <path>] [--package-name <name>]\n"
           "    (CMake default: install scan -> File API (runs cmake) -> source heuristics; --cmake-no-file-api skips File API)\n"
+#endif
           "  up --help | -h | help\n";
   }
 }

@@ -8,6 +8,8 @@
 #include "paths.hpp"
 #include "simple_xml.hpp"
 
+#include <algorithm>
+#include <map>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -168,6 +170,55 @@ std::optional<std::string> parse_cmake_project_name(const std::filesystem::path&
 
 }  // namespace
 
+namespace {
+
+void merge_cmake_source_overlay_into(ImportedPackage& base, ImportedPackage&& overlay) {
+  const auto is_installed_type = [](const std::string& ty) {
+    return ty == "imported_installed_static_library" || ty == "imported_installed_shared_library";
+  };
+  const auto is_native_build = [](const TargetDesc& td) {
+    return td.type == "executable" || td.type == "static_library" || td.type == "shared_library";
+  };
+  std::map<std::string, size_t> index_by_name;
+  for (size_t i = 0; i < base.targets.size(); ++i)
+    index_by_name[base.targets[i].second.name] = i;
+
+  for (auto& ovr : overlay.targets) {
+    const std::string& n = ovr.second.name;
+    const auto it = index_by_name.find(n);
+    if (it == index_by_name.end()) {
+      index_by_name[n] = base.targets.size();
+      base.targets.push_back(std::move(ovr));
+      continue;
+    }
+    auto& slot = base.targets[it->second];
+    TargetDesc& b = slot.second;
+    TargetDesc& o = ovr.second;
+    if (is_installed_type(b.type) && is_native_build(o) && !o.sources.empty()) {
+      slot.first = std::move(ovr.first);
+      b = std::move(o);
+    } else if (is_native_build(b) && is_native_build(o)) {
+      for (const auto& d : o.dependencies) {
+        if (std::find(b.dependencies.begin(), b.dependencies.end(), d) == b.dependencies.end())
+          b.dependencies.push_back(d);
+      }
+      for (const auto& inc : o.includes) {
+        bool dup = false;
+        for (const auto& bi : b.includes) {
+          if (bi.kind == inc.kind && bi.from == inc.from) {
+            dup = true;
+            break;
+          }
+        }
+        if (!dup)
+          b.includes.push_back(inc);
+      }
+    }
+  }
+}
+
+}  // namespace
+
 int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>& args) {
   auto finish = [](int code) {
     std::cout << "project: finished with " << (code == 0 ? "success" : "failure") << " (code " << code << ")\n";
@@ -213,7 +264,8 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
                 << "  --legacy-cmake-parse  for CMake projects: skip <cmake/> scaffold; old import_from_probe (CMake text scan).\n"
                 << "  --cmake-query   CMake only: use File API only (fail if cmake/configure or codemodel yields no libs).\n"
                 << "                         Default already tries install scan, then File API, then source scan.\n"
-                << "  --cmake-no-file-api  CMake scaffold: skip the File API step (no `cmake` subprocess from up project).\n"
+                << "  --cmake-no-file-api  CMake scaffold: skip the File API step (no `cmake` configure subprocess).\n"
+                << "                         Less accurate than codemodel (no real configure); install scan + source scan only.\n"
                 << "  --cmake-query-build-dir <path>  scratch dir for File API (default: <write_root>/.up/cmake_file_api_query)\n"
                 << "  --cmake-query-keep-build        keep the File API build directory after use (default: delete)\n"
                 << "  --project-dir|-C <path>  probe/write under this dir (override default cwd from the OS)\n"
@@ -428,6 +480,20 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
         std::cout << "project: [cmake] source_scan: " << imported.targets.size() << " target(s)\n";
         if (!imported.targets.empty())
           cmake_targets_from = CmakeTargetsProvenance::SourceScan;
+      } else if (cmake_no_file_api) {
+        std::cout << "project: [cmake] source_scan: merging CMakeLists heuristics + static link/include hints "
+                     "(--cmake-no-file-api)\n";
+        ImportedPackage src_overlay;
+        std::vector<std::string> owarn;
+        std::string oerr;
+        import_cmake_file(probe.anchor, write_root, src_overlay, owarn, oerr);
+        for (auto& w : owarn)
+          imported.warnings.push_back(std::move(w));
+        const size_t overlay_n = src_overlay.targets.size();
+        merge_cmake_source_overlay_into(imported, std::move(src_overlay));
+        std::cout << "project: [cmake] source_scan: merged overlay; " << imported.targets.size()
+                  << " target(s) total (overlay had " << overlay_n << ")\n";
+        cmake_targets_from = CmakeTargetsProvenance::SourceScan;
       }
     }
     cli_verbose_phase("project", "cmake_import_done");

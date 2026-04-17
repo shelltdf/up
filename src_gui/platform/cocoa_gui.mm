@@ -201,10 +201,12 @@ static std::string build_configure_args_line() {
   }
 }
 
+#if UP_ENABLE_PROJECT
 - (void)doProject:(id)sender {
   (void)sender;
   run_up_async("project");
 }
+#endif
 
 - (void)doConfigure:(id)sender {
   (void)sender;
@@ -349,9 +351,11 @@ static void build_window() {
   NSMenuItem* actTop = [[NSMenuItem alloc] initWithTitle:@"Actions" action:nil keyEquivalent:@""];
   NSMenu* actMenu = [[NSMenu alloc] initWithTitle:@"Actions"];
   NSMenuItem* m;
+#if UP_ENABLE_PROJECT
   m = [[NSMenuItem alloc] initWithTitle:@"Project" action:@selector(doProject:) keyEquivalent:@"j"];
   [m setTarget:ctrl];
   [actMenu addItem:m];
+#endif
   m = [[NSMenuItem alloc] initWithTitle:@"Configure" action:@selector(doConfigure:) keyEquivalent:@"k"];
   [m setTarget:ctrl];
   [actMenu addItem:m];
@@ -372,14 +376,20 @@ static void build_window() {
   [NSApp setMainMenu:mainBar];
 
   __block CGFloat y = H - 40;
-  NSButton* b0 = makeBtn(@"Project", ctrl, @selector(doProject:));
   NSButton* b1 = makeBtn(@"Configure", ctrl, @selector(doConfigure:));
   NSButton* b2 = makeBtn(@"Build", ctrl, @selector(doBuild:));
   NSButton* b3 = makeBtn(@"Run", ctrl, @selector(doRun:));
   NSButton* b4 = makeBtn(@"Test", ctrl, @selector(doTest:));
   NSButton* b5 = makeBtn(@"Pack", ctrl, @selector(doPack:));
+#if UP_ENABLE_PROJECT
+  NSButton* b0 = makeBtn(@"Project", ctrl, @selector(doProject:));
+#endif
   CGFloat x = 20;
+#if UP_ENABLE_PROJECT
   for (NSButton* b in @[ b0, b1, b2, b3, b4, b5 ]) {
+#else
+  for (NSButton* b in @[ b1, b2, b3, b4, b5 ]) {
+#endif
     [b setFrame:NSMakeRect(x, y, 100, 28)];
     [root addSubview:b];
     x += 108;

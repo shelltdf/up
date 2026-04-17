@@ -8,22 +8,16 @@ if(MSVC)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
-add_executable(up
+option(UP_ENABLE_PROJECT "Build the up project subcommand and CMake/qmake/… importers" OFF)
+
+set(UP_CORE_SOURCES
   src/cli/main.cpp
   src/engine/commands/configure.cpp
   src/engine/commands/build.cpp
   src/engine/commands/run.cpp
   src/engine/commands/test.cpp
   src/engine/commands/pack.cpp
-  src/engine/commands/project.cpp
-  src/engine/project/project_import.cpp
-  src/engine/project/project_import_common.cpp
-  src/engine/project/import_cmake.cpp
-  src/engine/project/import_autotools.cpp
-  src/engine/project/import_qmake.cpp
-  src/engine/project/import_meson.cpp
-  src/engine/project/import_sources.cpp
-  src/engine/project/project_probe.cpp
+  src/engine/commands/spec.cpp
   src/engine/commands/commands_common.cpp
   src/engine/backends/cmake/cmake_backend.cpp
   src/engine/backends/ninja/ninja_backend.cpp
@@ -39,7 +33,7 @@ add_executable(up
   src/engine/commands/run.hpp
   src/engine/commands/test.hpp
   src/engine/commands/pack.hpp
-  src/engine/commands/project.hpp
+  src/engine/commands/spec.hpp
   src/engine/commands/commands_common.hpp
   src/engine/backends/core/backend_types.hpp
   src/engine/backends/cmake/cmake_backend.hpp
@@ -50,6 +44,25 @@ add_executable(up
   src/infra/platform/paths.hpp
   src/engine/xml/simple_xml.hpp
 )
+if(UP_ENABLE_PROJECT)
+  list(APPEND UP_CORE_SOURCES
+    src/engine/commands/project.cpp
+    src/engine/commands/project.hpp
+    src/engine/project/project_import.cpp
+    src/engine/project/project_import_common.cpp
+    src/engine/project/import_cmake.cpp
+    src/engine/project/import_autotools.cpp
+    src/engine/project/import_qmake.cpp
+    src/engine/project/import_meson.cpp
+    src/engine/project/import_sources.cpp
+    src/engine/project/project_probe.cpp
+    src/engine/project/project_import.hpp
+    src/engine/project/project_import_internal.hpp
+    src/engine/project/project_import_common.hpp
+  )
+endif()
+
+add_executable(up ${UP_CORE_SOURCES})
 
 target_include_directories(up PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/commands"
@@ -63,6 +76,11 @@ target_include_directories(up PRIVATE
 if(MSVC)
   target_compile_definitions(up PRIVATE _CRT_SECURE_NO_WARNINGS)
   target_compile_options(up PRIVATE /utf-8)
+endif()
+if(UP_ENABLE_PROJECT)
+  target_compile_definitions(up PRIVATE UP_ENABLE_PROJECT=1)
+else()
+  target_compile_definitions(up PRIVATE UP_ENABLE_PROJECT=0)
 endif()
 
 # up-gui: thin shell around up.exe — MUST NOT compile, include, or link any file under src/.
@@ -114,6 +132,11 @@ target_include_directories(up-gui PRIVATE
 if(MSVC)
   target_compile_definitions(up-gui PRIVATE _CRT_SECURE_NO_WARNINGS)
   target_compile_options(up-gui PRIVATE /utf-8)
+endif()
+if(UP_ENABLE_PROJECT)
+  target_compile_definitions(up-gui PRIVATE UP_ENABLE_PROJECT=1)
+else()
+  target_compile_definitions(up-gui PRIVATE UP_ENABLE_PROJECT=0)
 endif()
 
 # build.py / install.py 仅针对下列目标；安装时使用 COMPONENT 以便 cmake --install --component

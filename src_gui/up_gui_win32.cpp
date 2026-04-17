@@ -2626,7 +2626,9 @@ void SetUiRunning(bool running) {
     EnableMenuItem(menu, IDM_EXIT, ena);
     EnableMenuItem(menu, IDM_ABOUT, running ? gray : ena);
     EnableMenuItem(menu, IDM_UP_HELP, running ? gray : ena);
+#if UP_ENABLE_PROJECT
     EnableMenuItem(menu, IDC_PROJECT, running ? gray : ena);
+#endif
     EnableMenuItem(menu, IDC_CONFIGURE, running ? gray : ena);
     EnableMenuItem(menu, IDC_BUILD, running ? gray : ena);
     EnableMenuItem(menu, IDC_TEST, running ? gray : ena);
@@ -3059,7 +3061,9 @@ void CreateMainMenu(HWND hwnd) {
   AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(file), T(L"文件(&F)", L"&File"));
 
   HMENU tools = CreateMenu();
+#if UP_ENABLE_PROJECT
   AppendMenuW(tools, MF_STRING, IDC_PROJECT, T(L"工程(&J)", L"pro&ject"));
+#endif
   AppendMenuW(tools, MF_STRING, IDC_CONFIGURE, T(L"配置(&C)", L"&configure"));
   AppendMenuW(tools, MF_STRING, IDC_BUILD, T(L"编译(&B)", L"&build"));
   AppendMenuW(tools, MF_STRING, IDC_TEST, T(L"测试(&T)", L"&test"));
@@ -3557,7 +3561,9 @@ void CreateToolbarButtons(HWND tb) {
     const wchar_t* text;
   };
   const Entry entries[] = {
+#if UP_ENABLE_PROJECT
       {IDC_PROJECT, STD_FILEOPEN, T(L"工程", L"project")},
+#endif
       {IDC_CONFIGURE, STD_PROPERTIES, T(L"配置", L"configure")},
       {IDC_BUILD, STD_REPLACE, T(L"编译", L"build")},
       {IDC_RUN, STD_FILENEW, T(L"运行", L"run")},
@@ -4071,10 +4077,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         SendMessageW(g_scan_list, LB_SETCURSEL, static_cast<WPARAM>(dst), 0);
         return 0;
       }
+#if UP_ENABLE_PROJECT
       if (id == IDC_PROJECT) {
         RunUpAsync(L"project");
         return 0;
       }
+#endif
       if (id == IDC_CONFIGURE) {
         if (ShowConfigureOptionDialog(hwnd))
           RunUpAsync(L"configure");

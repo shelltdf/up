@@ -2,6 +2,7 @@
 #include "project_import_common.hpp"
 
 #include "cli_verbose.hpp"
+#include "path_check.hpp"
 #include "paths.hpp"
 
 #include <iostream>
@@ -671,6 +672,239 @@ void emit_find_package_dep_list(const std::map<std::string, bool>& deps,
     out_deps.push_back(kv);
 }
 
+void replace_all_inplace(std::string& s, const std::string& from, const std::string& to) {
+  if (from.empty())
+    return;
+  size_t pos = 0;
+  while ((pos = s.find(from, pos)) != std::string::npos) {
+    s.replace(pos, from.size(), to);
+    pos += to.size();
+  }
+}
+
+bool is_link_scope_keyword(const std::string& u) {
+  return u == "PUBLIC" || u == "PRIVATE" || u == "INTERFACE" || u == "LINK_PUBLIC" || u == "LINK_PRIVATE";
+}
+
+bool is_link_config_keyword(const std::string& u) {
+  return u == "DEBUG" || u == "OPTIMIZED" || u == "GENERAL";
+}
+
+bool is_include_dir_keyword(const std::string& u) {
+  return u == "PUBLIC" || u == "PRIVATE" || u == "INTERFACE" || u == "BEFORE" || u == "AFTER" || u == "SYSTEM" ||
+         u == "FILE_SET" || u == "TYPE" || u == "ITEMS" || u == "FILES" || u == "BASE_DIRS";
+}
+
+bool target_type_is_importable_link_dep(const std::string& ty) {
+  return ty == "static_library" || ty == "shared_library" || ty == "imported_static_library" ||
+         ty == "imported_shared_library" || ty == "imported_installed_static_library" ||
+         ty == "imported_installed_shared_library" || ty == "asset_bundle";
+}
+
+void expand_static_cmake_path_vars(std::string& tok, const std::filesystem::path& current_list_dir,
+                                   const std::filesystem::path& project_source_root) {
+  const std::string cur = project_import::posix_str(current_list_dir);
+  const std::string root = project_import::posix_str(project_source_root);
+  replace_all_inplace(tok, "${CMAKE_CURRENT_SOURCE_DIR}", cur);
+  replace_all_inplace(tok, "${CMAKE_CURRENT_LIST_DIR}", cur);
+  replace_all_inplace(tok, "${PROJECT_SOURCE_DIR}", root);
+  replace_all_inplace(tok, "${CMAKE_SOURCE_DIR}", root);
+}
+
+void collect_target_link_library_items(const std::vector<std::string>& parts, std::vector<std::string>& out_items) {
+  out_items.clear();
+  if (parts.size() < 2)
+    return;
+  for (size_t i = 1; i < parts.size(); ++i) {
+    std::string t = parts[i];
+    strip_quotes(t);
+    if (t.empty())
+      continue;
+    std::string u;
+    u.reserve(t.size());
+    for (char c : t)
+      u += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    if (is_link_scope_keyword(u))
+      continue;
+    if (is_link_config_keyword(u)) {
+      if (i + 1 < parts.size())
+        ++i;
+      continue;
+    }
+    out_items.push_back(std::move(t));
+  }
+}
+
+void collect_target_include_path_tokens(const std::vector<std::string>& parts, std::vector<std::string>& out_paths) {
+  out_paths.clear();
+  if (parts.size() < 2)
+    return;
+  for (size_t i = 1; i < parts.size(); ++i) {
+    std::string t = parts[i];
+    strip_quotes(t);
+    if (t.empty())
+      continue;
+    std::string u;
+    u.reserve(t.size());
+    for (char c : t)
+      u += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    if (is_include_dir_keyword(u))
+      continue;
+    out_paths.push_back(std::move(t));
+  }
+}
+
+struct CmakeStaticGraphMaps {
+  std::map<std::string, TargetDesc*> by_name;
+  std::map<std::string, std::string> subdir_by_name;
+};
+
+void import_cmake_static_graph_recursive(const std::filesystem::path& cmake_file,
+                                         const std::filesystem::path& write_root,
+                                         const std::filesystem::path& project_source_root, CmakeStaticGraphMaps& maps,
+                                         std::vector<std::string>& warnings, std::string& error,
+                                         std::set<std::string>& seen_cmake_files, int depth) {
+  if (depth > 16)
+    return;
+  std::error_code ec;
+  const std::filesystem::path canon = std::filesystem::weakly_canonical(cmake_file, ec);
+  const std::string canon_s = project_import::posix_str(canon);
+  if (seen_cmake_files.count(canon_s))
+    return;
+  seen_cmake_files.insert(canon_s);
+
+  const std::string text = project_import::read_file_text(cmake_file, error);
+  if (!error.empty())
+    return;
+
+  const std::filesystem::path cmake_dir = cmake_file.parent_path();
+
+  const std::string link_needle = "target_link_libraries(";
+  size_t lp = 0;
+  while ((lp = text.find(link_needle, lp)) != std::string::npos) {
+    if (lp > 0 && (std::isalnum(static_cast<unsigned char>(text[lp - 1])) || text[lp - 1] == '_')) {
+      ++lp;
+      continue;
+    }
+    const size_t lparen = lp + link_needle.size() - 1;
+    auto inner_opt = balanced_paren_content(text, lparen);
+    if (!inner_opt) {
+      lp = lparen + 1;
+      continue;
+    }
+    std::vector<std::string> parts;
+    split_cmake_args(*inner_opt, parts);
+    if (parts.empty()) {
+      lp = lparen + 1;
+      continue;
+    }
+    strip_quotes(parts[0]);
+    const std::string consumer = project_import::sanitize_id(parts[0]);
+    auto cons_it = maps.by_name.find(consumer);
+    if (cons_it == maps.by_name.end() || !cons_it->second) {
+      lp = lparen + 1;
+      continue;
+    }
+    TargetDesc* consumer_td = cons_it->second;
+    std::vector<std::string> items;
+    collect_target_link_library_items(parts, items);
+    for (const std::string& raw_item : items) {
+      if (raw_item.find('$') != std::string::npos || raw_item.find('<') != std::string::npos)
+        continue;
+      if (!project_import::plausible_cmake_target_name_token(raw_item))
+        continue;
+      const std::string dep_name = project_import::sanitize_id(raw_item);
+      if (dep_name.empty() || dep_name == consumer)
+        continue;
+      auto dep_it = maps.by_name.find(dep_name);
+      if (dep_it == maps.by_name.end() || !dep_it->second)
+        continue;
+      if (!target_type_is_importable_link_dep(dep_it->second->type))
+        continue;
+      project_import::add_target_dependency(*consumer_td, dep_name);
+    }
+    lp = lparen + 1;
+  }
+
+  const std::string inc_needle = "target_include_directories(";
+  size_t ip = 0;
+  while ((ip = text.find(inc_needle, ip)) != std::string::npos) {
+    if (ip > 0 && (std::isalnum(static_cast<unsigned char>(text[ip - 1])) || text[ip - 1] == '_')) {
+      ++ip;
+      continue;
+    }
+    const size_t lparen = ip + inc_needle.size() - 1;
+    auto inner_opt = balanced_paren_content(text, lparen);
+    if (!inner_opt) {
+      ip = lparen + 1;
+      continue;
+    }
+    std::vector<std::string> parts;
+    split_cmake_args(*inner_opt, parts);
+    if (parts.empty()) {
+      ip = lparen + 1;
+      continue;
+    }
+    strip_quotes(parts[0]);
+    const std::string consumer = project_import::sanitize_id(parts[0]);
+    auto cons_it = maps.by_name.find(consumer);
+    if (cons_it == maps.by_name.end() || !cons_it->second) {
+      ip = lparen + 1;
+      continue;
+    }
+    TargetDesc* consumer_td = cons_it->second;
+    const auto sub_it = maps.subdir_by_name.find(consumer);
+    if (sub_it == maps.subdir_by_name.end()) {
+      ip = lparen + 1;
+      continue;
+    }
+    std::vector<std::string> path_toks;
+    collect_target_include_path_tokens(parts, path_toks);
+    for (std::string tok : path_toks) {
+      expand_static_cmake_path_vars(tok, cmake_dir, project_source_root);
+      if (tok.find('$') != std::string::npos)
+        continue;
+      if (project_import::plausible_cmake_target_name_token(tok) && tok.find('/') == std::string::npos &&
+          tok.find('\\') == std::string::npos && tok.find('.') == std::string::npos) {
+        // Single identifier without path separators: could be an INTERFACE target (skip).
+        auto maybe_tgt = maps.by_name.find(project_import::sanitize_id(tok));
+        if (maybe_tgt != maps.by_name.end())
+          continue;
+      }
+      std::filesystem::path rel(tok);
+      std::filesystem::path abs_p = rel.is_absolute() ? rel : (cmake_dir / rel);
+      std::error_code ecp;
+      abs_p = std::filesystem::weakly_canonical(abs_p, ecp);
+      if (ecp)
+        abs_p = std::filesystem::absolute(abs_p);
+      if (!std::filesystem::exists(abs_p))
+        continue;
+      project_import::add_target_include_dir(*consumer_td, write_root, sub_it->second, abs_p, warnings);
+    }
+    ip = lparen + 1;
+  }
+
+  for (const auto& child : collect_subdirectory_cmakes(cmake_dir, text))
+    import_cmake_static_graph_recursive(child, write_root, project_source_root, maps, warnings, error, seen_cmake_files,
+                                        depth + 1);
+}
+
+void import_cmake_apply_static_target_graph(const std::filesystem::path& top_cmake_file,
+                                            const std::filesystem::path& write_root, ImportedPackage& out,
+                                            std::vector<std::string>& warnings, std::string& error) {
+  if (out.targets.empty())
+    return;
+  CmakeStaticGraphMaps maps;
+  for (auto& pr : out.targets) {
+    maps.by_name[pr.second.name] = &pr.second;
+    maps.subdir_by_name[pr.second.name] = pr.first;
+  }
+  std::set<std::string> seen;
+  const std::filesystem::path project_root = top_cmake_file.parent_path();
+  import_cmake_static_graph_recursive(top_cmake_file, write_root, project_root, maps, warnings, error, seen, 0);
+  error.clear();
+}
+
 void import_cmake_find_packages_recursive(const std::filesystem::path& cmake_file, std::set<std::string>& seen_cmake_files,
                                          std::map<std::string, bool>& deps, std::string& error, int depth) {
   if (depth > 16)
@@ -1012,6 +1246,7 @@ void import_cmake_file(const std::filesystem::path& cmake_file, const std::files
   std::map<std::string, int> bucket_claims;
   import_cmake_recursive(cmake_file, write_root, out, warnings, error, var_paths, seen_cmake_files, seen_target_names,
                          bucket_claims, 0);
+  import_cmake_apply_static_target_graph(cmake_file, write_root, out, warnings, error);
 
   if (out.targets.empty()) {
     warnings.push_back("CMake: no add_executable/add_library with recognizable sources (trying source-tree fallback).");

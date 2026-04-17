@@ -5,8 +5,11 @@
 #include "lang.hpp"
 #include "pack.hpp"
 #include "paths.hpp"
-#include "project.hpp"
 #include "run.hpp"
+#include "spec.hpp"
+#if UP_ENABLE_PROJECT
+#include "project.hpp"
+#endif
 #include "test.hpp"
 
 #include <cstdlib>
@@ -230,6 +233,12 @@ int main(int argc, char** argv) {
     }
     return up::cmd_test(install_dir_from_leaf(cwd, leaf), test_name);
   }
+  if (cmd == "spec") {
+    std::vector<std::string> sargs;
+    for (size_t i = 1; i < args.size(); ++i)
+      sargs.push_back(args[i]);
+    return up::cmd_spec(sargs);
+  }
   if (cmd == "pack") {
     std::vector<std::filesystem::path> install_dirs;
     for (size_t i = 1; i < args.size(); ++i) {
@@ -244,6 +253,7 @@ int main(int argc, char** argv) {
     }
     return up::cmd_pack(cwd, install_dirs);
   }
+#if UP_ENABLE_PROJECT
   if (cmd == "project") {
     std::vector<std::string> pargs;
     for (size_t i = 1; i < args.size(); ++i)
@@ -252,6 +262,12 @@ int main(int argc, char** argv) {
     const auto cwd_for_project = std::filesystem::current_path(ec_proj);
     return up::cmd_project(ec_proj ? cwd : cwd_for_project, pargs);
   }
+#else
+  if (cmd == "project") {
+    std::cerr << "up: subcommand \"project\" is disabled in this build. Rebuild with -DUP_ENABLE_PROJECT=ON.\n";
+    return 2;
+  }
+#endif
 
   std::cerr << "unknown command: " << cmd << "\n";
   print_usage();
