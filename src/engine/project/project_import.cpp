@@ -73,4 +73,11 @@ bool import_cmake_installed_from_probe(const std::filesystem::path& cmake_file, 
   return error.empty();
 }
 
+bool import_cmake_dependencies_from_probe(const std::filesystem::path& cmake_file,
+                                          std::vector<std::pair<std::string, bool>>& deps, std::string& error) {
+  deps.clear();
+  import_cmake_find_package_deps(cmake_file, deps, error);
+  return error.empty();
+}
+
 }  // namespace up

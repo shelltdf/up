@@ -12,6 +12,7 @@
 #include <optional>
 #include <regex>
 #include <sstream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -180,6 +181,19 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
     PackageExternalCmake ec;
     ec.source_dir = cmake_rel_dir;
     pkg.external_cmake = std::move(ec);
+    std::vector<std::pair<std::string, bool>> deps;
+    std::string dep_err;
+    if (import_cmake_dependencies_from_probe(probe.anchor, deps, dep_err)) {
+      std::set<std::string> uniq;
+      for (const auto& d : deps) {
+        if (d.first.empty() || d.first == pkg.name || d.first == "cmake")
+          continue;
+        if (uniq.insert(d.first).second)
+          pkg.dependencies.emplace_back(d.first, !d.second);
+      }
+    } else if (!dep_err.empty()) {
+      std::cout << "project: warning: failed to parse CMake find_package deps: " << dep_err << "\n";
+    }
   }
 
   std::cout << "project: probe=" << probe_label(probe.kind) << "\n";

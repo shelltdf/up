@@ -184,6 +184,9 @@
 - 当探测到 CMake 工程时，`up project` 默认会：
   - 生成 `package.xml`（包含 `<cmake source_dir="..."/>`）
   - 尝试解析 `install(TARGETS ...)`，自动生成 `imported_installed_*` 的 `target.xml`（默认写到 `.targets/<name>/target.xml`）
+  - 尝试解析 `find_package(...)`，自动写入包级 `<dependency .../>`：
+    - `find_package(Xxx REQUIRED ...)` -> `<dependency name="xxx" optional="false"/>`
+    - 其它 `find_package(Xxx ...)` -> `<dependency name="xxx" optional="true"/>`
 - 目标名优先使用 CMake target 名（必要时做 sanitize / 去重）。
 - 包名默认优先取 `CMakeLists.txt` 中 `project(...)` 名；若无法解析则回退目录名（`--package-name` 仍最高优先）。
 - `install(TARGETS ...)` 解析不到库规则时，仅生成 `package.xml` 并输出提示；可改用 `--legacy-cmake-parse` 或手工补充 `target.xml`。

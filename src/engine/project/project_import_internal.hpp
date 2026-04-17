@@ -14,6 +14,9 @@ void import_cmake_file(const std::filesystem::path& cmake_file, const std::files
 void import_cmake_installed_wrappers(const std::filesystem::path& cmake_file, ImportedPackage& out,
                                      std::vector<std::string>& warnings, std::string& error);
 
+void import_cmake_find_package_deps(const std::filesystem::path& cmake_file,
+                                    std::vector<std::pair<std::string, bool>>& out_deps, std::string& error);
+
 void import_autotools(const std::filesystem::path& scan_root, const std::filesystem::path& write_root, ImportedPackage& out,
                       std::vector<std::string>& warnings, std::string& error);
 

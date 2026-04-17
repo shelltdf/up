@@ -252,6 +252,9 @@ Default behavior highlights:
 
 - `up project` writes `package.xml` with `<cmake source_dir="..."/>`
 - Tries to generate `imported_installed_*` wrappers from `install(TARGETS ...)`
+- Tries to generate package-level dependencies from `find_package(...)`:
+  - `REQUIRED` -> `<dependency ... optional="false"/>`
+  - non-`REQUIRED` -> `<dependency ... optional="true"/>`
 - Package name prefers CMake `project(...)` by default (`--package-name` overrides)
 - Library-only packages (no executable) are supported for configure/build
 

@@ -12,7 +12,8 @@ int cmd_test(const std::filesystem::path& install_dir, const std::string& test_n
   const auto inst = std::filesystem::absolute(install_dir);
   const auto bin = inst / "bin";
   if (!std::filesystem::exists(bin)) {
-    std::cerr << "test: missing install bin directory: " << to_posix_path_string(bin) << "\n";
+    std::cerr << "test: missing install bin directory: " << to_posix_path_string(bin)
+              << " (library-only package may have no executable tests)\n";
     return 2;
   }
   const TestBackendContext backend_ctx{

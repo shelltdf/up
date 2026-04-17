@@ -3785,15 +3785,21 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         return 0;
       }
       if (id == IDC_TEST) {
+        const int test_idx = static_cast<int>(SendMessageW(g_test_target, CB_GETCURSEL, 0, 0));
+        const int run_idx = static_cast<int>(SendMessageW(g_run_target, CB_GETCURSEL, 0, 0));
+        if (test_idx == CB_ERR && run_idx == CB_ERR) {
+          AppendLog(g_ui_lang_zh ? L"[提示] 当前包没有可运行/可测试目标（纯库包场景正常）。\r\n"
+                               : L"[Info] No run/test targets in current package (normal for library-only packages).\r\n");
+          return 0;
+        }
         std::wstring testarg = L"test";
         if (!AppendInstallDirFlagOrAbort(testarg, true))
           return 0;
-        const int idx = static_cast<int>(SendMessageW(g_test_target, CB_GETCURSEL, 0, 0));
-        if (idx != CB_ERR) {
-          const int n = static_cast<int>(SendMessageW(g_test_target, CB_GETLBTEXTLEN, static_cast<WPARAM>(idx), 0));
+        if (test_idx != CB_ERR) {
+          const int n = static_cast<int>(SendMessageW(g_test_target, CB_GETLBTEXTLEN, static_cast<WPARAM>(test_idx), 0));
           if (n > 0) {
             std::wstring tgt(static_cast<size_t>(n), L'\0');
-            SendMessageW(g_test_target, CB_GETLBTEXT, static_cast<WPARAM>(idx), reinterpret_cast<LPARAM>(tgt.data()));
+            SendMessageW(g_test_target, CB_GETLBTEXT, static_cast<WPARAM>(test_idx), reinterpret_cast<LPARAM>(tgt.data()));
             testarg += L" ";
             if (tgt.find(L' ') != std::wstring::npos)
               testarg += L"\"" + tgt + L"\"";
@@ -3829,8 +3835,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       if (id == IDC_RUN) {
         const int idx = static_cast<int>(SendMessageW(g_run_target, CB_GETCURSEL, 0, 0));
         if (idx == CB_ERR) {
-          AppendLog(g_ui_lang_zh ? L"[错误] 运行目标列表为空，请先 configure。\r\n"
-                               : L"[Error] Run target list is empty; configure first.\r\n");
+          AppendLog(g_ui_lang_zh ? L"[提示] 当前包没有可运行目标（纯库包场景正常）。\r\n"
+                               : L"[Info] No run target in current package (normal for library-only packages).\r\n");
           return 0;
         }
         const int n = static_cast<int>(SendMessageW(g_run_target, CB_GETLBTEXTLEN, static_cast<WPARAM>(idx), 0));

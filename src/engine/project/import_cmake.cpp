@@ -120,6 +120,12 @@ std::string upper_ascii(std::string s) {
   return s;
 }
 
+std::string lower_ascii(std::string s) {
+  for (char& c : s)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return s;
+}
+
 std::string normalize_rel_install_path(std::string s) {
   for (char& c : s) {
     if (c == '\\')
@@ -252,10 +258,13 @@ void append_resolved_paths(const std::filesystem::path& cmake_dir, const std::st
 std::vector<std::filesystem::path> collect_subdirectory_cmakes(const std::filesystem::path& parent_dir,
                                                                  const std::string& text) {
   std::vector<std::filesystem::path> out;
+  std::string lower = text;
+  for (char& c : lower)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   const std::string needle = "add_subdirectory(";
   size_t pos = 0;
-  while ((pos = text.find(needle, pos)) != std::string::npos) {
-    if (pos > 0 && (std::isalnum(static_cast<unsigned char>(text[pos - 1])) || text[pos - 1] == '_')) {
+  while ((pos = lower.find(needle, pos)) != std::string::npos) {
+    if (pos > 0 && (std::isalnum(static_cast<unsigned char>(lower[pos - 1])) || lower[pos - 1] == '_')) {
       ++pos;
       continue;
     }
@@ -485,6 +494,71 @@ void import_cmake_wrappers_recursive(const std::filesystem::path& cmake_file,
                                    depth + 1);
 }
 
+void collect_find_package_names(const std::string& text, std::map<std::string, bool>& out_names) {
+  std::string lower = text;
+  for (char& c : lower)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  const std::string needle = "find_package(";
+  size_t p = 0;
+  while ((p = lower.find(needle, p)) != std::string::npos) {
+    if (p > 0 && (std::isalnum(static_cast<unsigned char>(lower[p - 1])) || lower[p - 1] == '_')) {
+      ++p;
+      continue;
+    }
+    const size_t lparen = p + needle.size() - 1;
+    auto inner_opt = balanced_paren_content(text, lparen);
+    if (!inner_opt) {
+      p = lparen + 1;
+      continue;
+    }
+    std::vector<std::string> toks;
+    split_cmake_args(*inner_opt, toks);
+    if (!toks.empty()) {
+      std::string pkg = toks[0];
+      strip_quotes(pkg);
+      if (!pkg.empty() && pkg.find('$') == std::string::npos) {
+        pkg = lower_ascii(project_import::sanitize_id(pkg));
+        if (!pkg.empty() && pkg != "required" && pkg != "quiet") {
+          bool required = false;
+          for (size_t i = 1; i < toks.size(); ++i) {
+            std::string tk = toks[i];
+            strip_quotes(tk);
+            if (upper_ascii(tk) == "REQUIRED") {
+              required = true;
+              break;
+            }
+          }
+          auto it = out_names.find(pkg);
+          if (it == out_names.end())
+            out_names[pkg] = required;
+          else if (required)
+            it->second = true;
+        }
+      }
+    }
+    p = lparen + 1;
+  }
+}
+
+void import_cmake_find_packages_recursive(const std::filesystem::path& cmake_file, std::set<std::string>& seen_cmake_files,
+                                         std::map<std::string, bool>& deps, std::string& error, int depth) {
+  if (depth > 16)
+    return;
+  std::error_code ec;
+  const std::filesystem::path canon = std::filesystem::weakly_canonical(cmake_file, ec);
+  const std::string canon_s = project_import::posix_str(canon);
+  if (seen_cmake_files.count(canon_s))
+    return;
+  seen_cmake_files.insert(canon_s);
+
+  const std::string text = project_import::read_file_text(cmake_file, error);
+  if (!error.empty())
+    return;
+  collect_find_package_names(text, deps);
+  for (const auto& child : collect_subdirectory_cmakes(cmake_file.parent_path(), text))
+    import_cmake_find_packages_recursive(child, seen_cmake_files, deps, error, depth + 1);
+}
+
 void import_cmake_recursive(const std::filesystem::path& cmake_file, const std::filesystem::path& write_root,
                             ImportedPackage& out, std::vector<std::string>& warnings, std::string& error,
                             std::map<std::string, std::vector<std::filesystem::path>>& var_paths,
@@ -663,6 +737,18 @@ void import_cmake_installed_wrappers(const std::filesystem::path& cmake_file, Im
   if (out.targets.empty())
     warnings.push_back("CMake: no install(TARGETS ...) library rules resolved for imported_installed_* wrappers.");
   error.clear();
+}
+
+void import_cmake_find_package_deps(const std::filesystem::path& cmake_file,
+                                    std::vector<std::pair<std::string, bool>>& out_deps, std::string& error) {
+  std::set<std::string> seen_cmake_files;
+  std::map<std::string, bool> deps;
+  import_cmake_find_packages_recursive(cmake_file, seen_cmake_files, deps, error, 0);
+  if (!error.empty())
+    return;
+  out_deps.clear();
+  for (const auto& kv : deps)
+    out_deps.push_back(kv);
 }
 
 }  // namespace up

@@ -275,6 +275,9 @@ up run rock_app_one
 
 - `up project` 会写 `package.xml`（含 `<cmake source_dir="..."/>`）
 - 并尝试根据 `install(TARGETS ...)` 生成 `imported_installed_*` 包装目标
+- 并尝试根据 `find_package(...)` 生成包级依赖：
+  - `REQUIRED` -> `<dependency ... optional="false"/>`
+  - 非 `REQUIRED` -> `<dependency ... optional="true"/>`
 - 包名默认优先取 `CMakeLists.txt` 的 `project(...)`（可用 `--package-name` 覆盖）
 - 纯库包（无 executable）也支持 configure/build
 

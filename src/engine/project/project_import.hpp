@@ -38,4 +38,8 @@ bool import_from_probe(const std::filesystem::path& scan_root, const std::filesy
 // Parse CMake install(TARGETS ...) and emit imported_installed_* wrapper targets.
 bool import_cmake_installed_from_probe(const std::filesystem::path& cmake_file, ImportedPackage& out, std::string& error);
 
+// Parse CMake find_package(...) and return normalized package dependency names + required flag.
+bool import_cmake_dependencies_from_probe(const std::filesystem::path& cmake_file,
+                                          std::vector<std::pair<std::string, bool>>& deps, std::string& error);
+
 }  // namespace up

@@ -680,7 +680,7 @@ int cmd_configure(const std::filesystem::path& cwd,
     std::cerr << "configure: no package resolved for current scan roots.\n";
     return 4;
   }
-  if (pkg_targets.empty()) {
+  if (pkg_targets.empty() && !primary_pkg.external_cmake.has_value()) {
     std::cerr << "configure: package has no target.xml under the same directory tree.\n";
     return 4;
   }
