@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <filesystem>
 #include <map>
@@ -16,6 +16,8 @@ struct BuildBackendContext {
   std::string cmake_generator;
   std::string config_name;
   bool multi_config = false;
+  // Extra -DCMAKE_PREFIX_PATH=... for the top-level super-build (optional).
+  std::string cmake_prefix_path;
 };
 
 struct TestBackendContext {
@@ -56,6 +58,17 @@ struct ConfigureTargetModel {
   std::vector<SourceRule> source_rules;
   std::vector<std::string> include_dirs;
   std::vector<std::string> links;
+  bool imported_prebuilt = false;
+  // True: IMPORTED_* paths are ${CMAKE_INSTALL_PREFIX}/<rel> after ExternalProject install.
+  bool imported_from_install_prefix = false;
+  std::string install_rel_artifact;
+  std::string install_rel_interface_include;
+  // Windows shared IMPORTED: import library path relative to CMAKE_INSTALL_PREFIX.
+  std::string install_rel_implib;
+  // IMPORTED_LOCATION (shared: primary binary), IMPORTED_IMPLIB (Windows .lib)
+  std::string imported_location;
+  std::string imported_implib;
+  std::string imported_dll;
 };
 
 struct ConfigureInstallDirRule {
@@ -72,6 +85,14 @@ struct ConfigureInstallFileRule {
   std::string postprocess_command;
 };
 
+struct ConfigureExternalCmake {
+  std::string ep_target_name;
+  std::filesystem::path source_dir;
+  std::filesystem::path binary_dir;
+  std::filesystem::path install_prefix;
+  std::vector<std::pair<std::string, std::string>> upstream_cmake_args;  // -DName=Value after UPSTREAM_ strip
+};
+
 struct ConfigureGraphModel {
   std::string build_system;
   std::string package_name;
@@ -85,6 +106,9 @@ struct ConfigureGraphModel {
   std::vector<ConfigureInstallFileRule> install_file_rules;
   std::vector<ConfigureInstallDirRule> asset_dir_rules;
   std::vector<ConfigureInstallFileRule> asset_file_rules;
+  std::vector<ConfigureExternalCmake> external_cmake;
+  std::string cmake_prefix_path;
+  bool cmake_parent_multi_config = false;
 };
 
 }  // namespace up

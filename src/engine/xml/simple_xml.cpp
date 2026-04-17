@@ -1,4 +1,4 @@
-#include "simple_xml.hpp"
+﻿#include "simple_xml.hpp"
 
 #include "paths.hpp"
 
@@ -112,6 +112,22 @@ bool load_package_xml(const std::filesystem::path& path, PackageDesc& out, std::
     }
     out.dependencies.emplace_back(dep_name, optional);
   }
+
+  std::regex cmake_re(R"rx(<cmake\s+([^>]+?)/\s*>)rx");
+  for (std::sregex_iterator it(raw.begin(), raw.end(), cmake_re), end; it != end; ++it) {
+    const std::string attrs = (*it)[1].str();
+    std::string sd;
+    if (!attr_string(attrs, "source_dir", sd))
+      continue;
+    sd = trim_copy(sd);
+    if (sd.empty())
+      continue;
+    PackageExternalCmake c;
+    c.source_dir = std::move(sd);
+    out.external_cmake = std::move(c);
+    break;
+  }
+
   error.clear();
   return true;
 }
@@ -256,6 +272,49 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
     }
   }
 
+  const size_t prebuilt_open = raw.find("<prebuilt");
+  if (prebuilt_open != std::string::npos) {
+    const size_t prebuilt_gt = raw.find('>', prebuilt_open);
+    if (prebuilt_gt != std::string::npos) {
+      const std::string head = raw.substr(prebuilt_open, prebuilt_gt - prebuilt_open + 1);
+      TargetDesc::PrebuiltDesc pb;
+      attr_string(head, "import_lib", pb.import_lib);
+      attr_string(head, "location", pb.location);
+      attr_string(head, "dll", pb.dll);
+      pb.import_lib = trim_copy(pb.import_lib);
+      pb.location = trim_copy(pb.location);
+      pb.dll = trim_copy(pb.dll);
+      if (!pb.import_lib.empty() || !pb.location.empty() || !pb.dll.empty())
+        out.prebuilt = std::move(pb);
+    }
+  }
+
+  const size_t install_open = raw.find("<install");
+  if (install_open != std::string::npos) {
+    const size_t install_gt = raw.find('>', install_open);
+    if (install_gt != std::string::npos) {
+      const std::string head = raw.substr(install_open, install_gt - install_open + 1);
+      std::string art;
+      if (attr_string(head, "artifact", art)) {
+        TargetDesc::InstalledWrapDesc iw;
+        iw.artifact = trim_copy(art);
+        attr_string(head, "implib", iw.implib);
+        iw.implib = trim_copy(iw.implib);
+        const size_t iface_open = raw.find("<interface_include");
+        if (iface_open != std::string::npos) {
+          const size_t iface_gt = raw.find('>', iface_open);
+          if (iface_gt != std::string::npos) {
+            const std::string ih = raw.substr(iface_open, iface_gt - iface_open + 1);
+            attr_string(ih, "dir", iw.interface_include);
+            iw.interface_include = trim_copy(iw.interface_include);
+          }
+        }
+        if (!iw.artifact.empty())
+          out.installed_wrap = std::move(iw);
+      }
+    }
+  }
+
   error.clear();
   return true;
 }
@@ -267,6 +326,9 @@ bool write_package_xml(std::ostream& out, const PackageDesc& pkg) {
     out << "  <dependency name=\"" << xml_escape_text(d.first) << "\" optional=\""
         << (d.second ? "true" : "false") << "\"/>\n";
   }
+  if (pkg.external_cmake.has_value()) {
+    out << "  <cmake source_dir=\"" << xml_escape_text(pkg.external_cmake->source_dir) << "\"/>\n";
+  }
   out << "</package>\n";
   return static_cast<bool>(out);
 }
@@ -274,20 +336,45 @@ bool write_package_xml(std::ostream& out, const PackageDesc& pkg) {
 bool write_target_xml(std::ostream& out, const TargetDesc& desc) {
   out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
   out << "<target name=\"" << xml_escape_text(desc.name) << "\" type=\"" << xml_escape_text(desc.type) << "\">\n";
-  out << "  <sources>\n";
-  if (!desc.source_entries.empty()) {
-    for (const auto& se : desc.source_entries) {
-      if (se.kind == "glob") {
-        out << "    <glob from=\"" << xml_escape_text(se.from) << "\"/>\n";
-      } else {
-        out << "    <file>" << xml_escape_text(se.from.empty() ? "" : se.from) << "</file>\n";
+  const bool skip_sources =
+      desc.type == "asset_bundle" || desc.type == "imported_static_library" || desc.type == "imported_shared_library" ||
+      desc.type == "imported_installed_static_library" || desc.type == "imported_installed_shared_library";
+  if (!skip_sources || !desc.source_entries.empty() || !desc.sources.empty()) {
+    out << "  <sources>\n";
+    if (!desc.source_entries.empty()) {
+      for (const auto& se : desc.source_entries) {
+        if (se.kind == "glob") {
+          out << "    <glob from=\"" << xml_escape_text(se.from) << "\"/>\n";
+        } else {
+          out << "    <file>" << xml_escape_text(se.from.empty() ? "" : se.from) << "</file>\n";
+        }
       }
+    } else {
+      for (const auto& s : desc.sources)
+        out << "    <file>" << xml_escape_text(s) << "</file>\n";
     }
-  } else {
-    for (const auto& s : desc.sources)
-      out << "    <file>" << xml_escape_text(s) << "</file>\n";
+    out << "  </sources>\n";
   }
-  out << "  </sources>\n";
+  if (desc.prebuilt.has_value()) {
+    const auto& pb = *desc.prebuilt;
+    out << "  <prebuilt";
+    if (!pb.import_lib.empty())
+      out << " import_lib=\"" << xml_escape_text(pb.import_lib) << "\"";
+    if (!pb.location.empty())
+      out << " location=\"" << xml_escape_text(pb.location) << "\"";
+    if (!pb.dll.empty())
+      out << " dll=\"" << xml_escape_text(pb.dll) << "\"";
+    out << "/>\n";
+  }
+  if (desc.installed_wrap.has_value()) {
+    const auto& iw = *desc.installed_wrap;
+    out << "  <install artifact=\"" << xml_escape_text(iw.artifact) << "\"";
+    if (!iw.implib.empty())
+      out << " implib=\"" << xml_escape_text(iw.implib) << "\"";
+    out << "/>\n";
+    if (!iw.interface_include.empty())
+      out << "  <interface_include dir=\"" << xml_escape_text(iw.interface_include) << "\"/>\n";
+  }
   if (!desc.dependencies.empty()) {
     for (const auto& d : desc.dependencies)
       out << "  <dependency name=\"" << xml_escape_text(d) << "\"/>\n";

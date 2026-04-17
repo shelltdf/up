@@ -1,4 +1,4 @@
-#include "build.hpp"
+﻿#include "build.hpp"
 #include "commands_common.hpp"
 #include "configure.hpp"
 #include "lang.hpp"

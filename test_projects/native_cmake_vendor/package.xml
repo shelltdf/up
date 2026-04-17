@@ -1,0 +1,4 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<package name="native_cmake_vendor" version="0.1.0">
+  <cmake source_dir="vendor_stub"/>
+</package>

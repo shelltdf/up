@@ -1,4 +1,4 @@
-#include "gui_unix_shared.hpp"
+﻿#include "gui_unix_shared.hpp"
 
 #include <cctype>
 #include <cstdio>

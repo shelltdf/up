@@ -1,67 +1,98 @@
-﻿# `package.xml` 涓?`target.xml` 瑙勮寖璇存槑
+﻿# `package.xml` 与 `target.xml` 规范说明
 
-鏈枃妗ｆ弿杩?**up** 褰撳墠瀹炵幇瀵逛袱绉嶆弿杩版枃浠剁殑**瑙ｆ瀽绾﹀畾**涓?**configure** 闃舵鐨?*璇箟绾︽潫**銆傚疄鐜伴噰鐢ㄨ交閲忔鍒欐壂鎻忥紙瑙?`src/simple_xml.cpp`锛夛紝**涓嶆槸**瀹屾暣 XML 鏍￠獙鍣細寤鸿浠嶅啓鎴愯壇鏋?XML锛屽苟閬靛畧涓嬪垪鍙瘑鍒舰鎬併€?
+本文档描述 **up** 当前实现对两种描述文件的**解析约定**与 **configure** 阶段的**语义约束**。实现采用轻量正则扫描（见 `src/simple_xml.cpp`），**不是**完整 XML 校验器：建议仍写成良构 XML，并遵守下列可识别形态。
+
 ---
 
-## 1. 鏂囦欢瑙掕壊涓庢斁缃?
-| 鏂囦欢 | 鏀剧疆浣嶇疆 | 浣滅敤 |
-|------|----------|------|
-| **`package.xml`** | 姣忎釜**鐙珛鍖?*鐨勬牴鐩綍锛堜笌鍖呭唴 `target.xml` 鏍戠殑涓婂眰涓€鑷达級 | 澹版槑鍖呭悕銆佺増鏈€?*鍖呯骇**渚濊禆锛堝叾浠栧寘鍚嶏級銆?|
-| **`target.xml`** | 鍖呭唴**姣忎釜鏋勫缓鐩爣鐙崰涓€涓瓙鐩綍**锛岃鐩綍涓?*鎭板ソ涓€涓?* `target.xml` | 澹版槑鐩爣鍚嶃€佺被鍨嬨€佹簮鏂囦欢銆佸彲閫夌殑澶存枃浠舵悳绱㈣矾寰勩€?*鐩爣绾?*渚濊禆锛堝叾浠?target锛岄€氬父涓哄簱锛夈€?|
+## 1. 文件角色与放置
 
-- **褰掑睘**锛歚target.xml` 蹇呴』浣嶄簬鏌愪竴 `package.xml` 鎵€鍦ㄧ洰褰曠殑**瀛愭爲鍐?*锛沗configure` 浼氭妸 target 褰掑埌璺緞涓?*鏈€杩?*鐨勫寘鏍逛笅锛堣 `configure.cpp` 涓?`nearest_package_parent`锛夈€?- **鎵弿**锛歚up configure` 鍦ㄦ壂鎻忔牴锛堥粯璁?cwd锛屾垨 `--scan` 鎸囧畾鐩綍锛変笅**閫掑綊**鏌ユ壘鎵€鏈?`package.xml` 涓?`target.xml`銆?
+| 文件 | 放置位置 | 作用 |
+|------|----------|------|
+| **`package.xml`** | 每个**独立包**的根目录（与包内 `target.xml` 树的上层一致） | 声明包名、版本、**包级**依赖（其他包名）。 |
+| **`target.xml`** | 包内**每个构建目标独占一个子目录**，该目录下**恰好一个** `target.xml` | 声明目标名、类型、源文件、可选的头文件搜索路径、**目标级**依赖（其他 target，通常为库）。 |
+
+- **归属**：`target.xml` 必须位于某一 `package.xml` 所在目录的**子树内**；`configure` 会把 target 归到路径上**最近**的包根下（见 `configure.cpp` 中 `nearest_package_parent`）。
+- **扫描**：`up configure` 在扫描根（默认 cwd，或 `--scan` 指定目录）下**递归**查找所有 `package.xml` 与 `target.xml`。
+
 ---
 
 ## 2. `package.xml`
 
-### 2.1 鏍瑰厓绱?
-- 鏂囦欢涓』鍑虹幇**绗竴涓?*鍖归厤瀛愪覆 **`<package`** 鐨勭墖娈碉紝瑙ｆ瀽鍣ㄥ彇鍏跺埌**绗竴涓?`>`** 涓烘鐨?*璧峰鏍囩**浣滀负鍖呭ご锛堜笉瑕佹眰瀹屾暣 XML 鏍戞牎楠岋級銆?- **蹇呴€夊睘鎬?*
-  - **`name`**锛堝瓧绗︿覆锛夛細鍖呭悕銆傚湪涓€娆℃壂鎻忓唴蹇呴』**鍏ㄥ眬鍞竴**锛涗笌 `target.xml` 閲?`package:target` 褰㈠紡寮曠敤鏃剁殑鍖呭悕涓€鑷淬€?- **鍙€夊睘鎬?*
-  - **`version`**锛堝瓧绗︿覆锛夛細鐗堟湰鍙枫€傜渷鐣ユ椂瀹炵幇涓婇粯璁や负 **`0.0.0`**銆?
-绀轰緥锛?
+### 2.1 根元素
+
+- 文件中须出现**第一个**匹配子串 **`<package`** 的片段，解析器取其到**第一个 `>`** 为止的**起始标签**作为包头（不要求完整 XML 树校验）。
+- **必选属性**
+  - **`name`**（字符串）：包名。在一次扫描内必须**全局唯一**；与 `target.xml` 里 `package:target` 形式引用时的包名一致。
+- **可选属性**
+  - **`version`**（字符串）：版本号。省略时实现上默认为 **`0.0.0`**。
+
+示例：
+
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <package name="hello_demo" version="0.1.0">
-  <dependency name="hello_simple_lib"/>
+  <dependency name="hello_lib"/>
 </package>
 ```
 
-### 2.2 鍖呬緷璧?`<dependency ... />`
+### 2.2 包依赖 `<dependency ... />`
 
-- 褰㈠紡锛氳嚜闂悎鏍囩 **`<dependency ... />`**锛屼笖鏍囩鍐呴渶鍖呭惈 **`name="..."`**锛堝弻寮曞彿瀛楃涓诧級銆?- **`name`**锛氭墍渚濊禆鐨?*鍏朵粬鍖?*鐨勫寘鍚嶏紱璇ュ寘蹇呴』鍦?*鍚屼竴娆?configure 鎵弿缁撴灉**涓嚭鐜帮紝鍚﹀垯锛?  - 鑻?**`optional="true"`**锛堟垨鍊间负 **`1` / `yes`**锛屽ぇ灏忓啓鎸夊疄鐜拌В鏋愶級锛氫粎浣滃彲閫夊０鏄庯紱
-  - 鍚﹀垯 **configure 澶辫触**锛屾姤閿欐彁绀虹己灏戣鍖呫€?- **`optional`**锛氬彲閫夈€傝嫢瀛樺湪 **`optional="..."`**锛屼粎褰撳€间负 **`true` / `1` / `yes`** 鏃惰涓哄彲閫変緷璧栵紱鍏跺畠鍐欐硶瑙嗕负闈炲彲閫夈€?
-瀹炵幇鐢ㄦ鍒欏尮閰嶆墍鏈?`<dependency` 鈥?`/>` 鐗囨锛?*涓?*瑕佹眰瀹冧滑宓屽湪鏌愪釜鐖惰妭鐐逛笅锛涗负鍙鎬у缓璁啓鍦?`<package>` 鍐呫€?
-### 2.3 涓?`target.xml` 鐨勫叧绯?
-鑻ユ湰鍖呭唴鏌?`target.xml` 浣跨敤 **`澶栧寘鍖呭悕:鐩爣鍚峘** 寮曠敤渚濊禆锛屽垯琚紩鐢ㄥ寘鍚?*蹇呴』**鍦ㄦ湰 `package.xml` 鐨?`<dependency name="璇ュ寘鍚?/>` 涓０鏄庯紙鍙€変緷璧栭櫎澶栨寜涓婅堪瑙勫垯锛夛紝鍚﹀垯 **configure 澶辫触**銆?
+- 形式：自闭合标签 **`<dependency ... />`**，且标签内需包含 **`name="..."`**（双引号字符串）。
+- **`name`**：所依赖的**其他包**的包名；该包必须在**同一次 configure 扫描结果**中出现，否则：
+  - 若 **`optional="true"`**（或值为 **`1` / `yes`**，大小写按实现解析）：仅作可选声明；
+  - 否则 **configure 失败**，报错提示缺少该包。
+- **`optional`**：可选。若存在 **`optional="..."`**，仅当值为 **`true` / `1` / `yes`** 时视为可选依赖；其它写法视为非可选。
+
+实现用正则匹配所有 `<dependency` … `/>` 片段，**不**要求它们嵌在某个父节点下；为可读性建议写在 `<package>` 内。
+
+### 2.3 与 `target.xml` 的关系
+
+若本包内某 `target.xml` 使用 **`外包包名:目标名`** 引用依赖，则被引用包名**必须**在本 `package.xml` 的 `<dependency name="该包名"/>` 中声明（可选依赖除外按上述规则），否则 **configure 失败**。
+
 ---
 
 ## 3. `target.xml`
 
-### 3.1 鏍瑰厓绱?
-- 椤诲瓨鍦?**`<target`** 璧峰鏍囩锛涜В鏋愭柟寮忎笌 `package` 鐩稿悓锛屽彇鍒扮涓€涓?**`>`** 涓烘銆?- **蹇呴€夊睘鎬?*
-  - **`name`**锛欳Make 鐩爣鍚嶏紙涓庡彲鎵ц鏂囦欢鍚嶃€乣up run` 鎵€鐢ㄥ悕绛変竴鑷达級銆?- **鍙€夊睘鎬?*
-  - **`type`**锛氱洰鏍囩被鍨嬨€傜渷鐣ユ椂榛樿涓?**`executable`**銆傚疄鐜拌瘑鍒紙澶у皬鍐欐寜鐢熸垚鍚庣浣跨敤鍓嶄负鍑嗭紝寤鸿灏忓啓锛夛細
-    - **`executable`**锛氬彲鎵ц绋嬪簭銆?    - **`static_library`**锛氶潤鎬佸簱銆?    - **`shared_library`**锛氬姩鎬佸簱銆?
-### 3.2 婧愭枃浠?`<file> ... </file>`
+### 3.1 根元素
 
-- 姣忎釜婧愭枃浠朵竴瀵规爣绛撅細**`<file>`** 涓?**`</file>`**锛堟爣绛惧悕鍓嶅悗鍏佽绌虹櫧锛屽 `</file >` 绛夊舰寮忛渶涓庡疄鐜版鍒欎竴鑷达紱**寤鸿**浣跨敤瑙勮寖鍐欐硶 `<file>...</file>`锛夈€?- 鏍囩鍐呮枃鏈紙鍘绘帀棣栧熬绌虹櫧锛変负**鐩稿璺緞**锛?*鐩稿浜庢湰 `target.xml` 鎵€鍦ㄧ洰褰?*銆?- 鍚屼竴鏂囦欢鍙嚭鐜?*澶氫釜** `<file>`锛岄『搴忓嵆鍔犲叆鏋勫缓鐨勬簮鏂囦欢鍒楄〃椤哄簭銆?
+- 须存在 **`<target`** 起始标签；解析方式与 `package` 相同，取到第一个 **`>`** 为止。
+- **必选属性**
+  - **`name`**：CMake 目标名（与可执行文件名、`up run` 所用名等一致）。
+- **可选属性**
+  - **`type`**：目标类型。省略时默认为 **`executable`**。实现识别（大小写按生成后端使用前为准，建议小写）：
+    - **`executable`**：可执行程序。
+    - **`static_library`**：静态库。
+    - **`shared_library`**：动态库。
+
+### 3.2 源文件 `<file> ... </file>`
+
+- 每个源文件一对标签：**`<file>`** 与 **`</file>`**（标签名前后允许空白，如 `</file >` 等形式需与实现正则一致；**建议**使用规范写法 `<file>...</file>`）。
+- 标签内文本（去掉首尾空白）为**相对路径**，**相对于本 `target.xml` 所在目录**。
+- 同一文件可出现**多个** `<file>`，顺序即加入构建的源文件列表顺序。
+
 ```xml
 <sources>
   <file>main.cpp</file>
 </sources>
 ```
 
-璇存槑锛?*褰撳墠瑙ｆ瀽鍣ㄤ笉渚濊禆 `<sources>` 鐖惰妭鐐?*锛屽彧瑕佹枃浠朵腑瀛樺湪绗﹀悎妯″紡鐨?`<file>...</file>` 鍗充細鏀跺綍锛涗娇鐢?`<sources>` 浠呬负鍙鎬т笌涓?DESIGN 鍙欒堪涓€鑷淬€?
-### 3.3 澶存枃浠惰緭鍏ヤ笌瀹夎杈撳嚭 `<includes>`
+说明：**当前解析器不依赖 `<sources>` 父节点**，只要文件中存在符合模式的 `<file>...</file>` 即会收录；使用 `<sources>` 仅为可读性与与 DESIGN 叙述一致。
 
-`<includes>` 缁熶竴浣跨敤 **`from/to`** 鑷棴鍚堟潯鐩紝鏀寔涓夌绫诲瀷锛?
+### 3.3 头文件输入与安装输出 `<includes>`
+
+`<includes>` 统一使用 **`from/to`** 自闭合条目，支持三种类型：
+
 - **`<dir from="..." to="..."/>`**
 - **`<file from="..." to="..."/>`**
 - **`<glob from="..." to="..."/>`**
 
-鍏朵腑锛?
-- **`from`**锛氬繀濉紝璺緞鐩稿 `target.xml` 鎵€鍦ㄧ洰褰曘€?- **`to`**锛氬彲閫夛紝瀹夎鐩爣鐩綍锛岀浉瀵瑰畨瑁呭墠缂€涓嬬殑 `include/`锛涚┖鍊兼垨鐪佺暐琛ㄧず瀹夎鍒?`include/` 鏍广€?
-绀轰緥锛?
+其中：
+
+- **`from`**：必填，路径相对 `target.xml` 所在目录。
+- **`to`**：可选，安装目标目录，相对安装前缀下的 `include/`；空值或省略表示安装到 `include/` 根。
+
+示例：
+
 ```xml
 <includes>
   <dir from="../../include/rockBase" to="rockBase"/>
@@ -70,48 +101,72 @@
 </includes>
 ```
 
-缂栬瘧鏈燂紙CMake 鐢熸垚锛夛細
+编译期（CMake 生成）：
 
-- `dir.from` 鐩存帴浣滀负 include 鐩綍銆?- `file.from` 鍙栫埗鐩綍浣滀负 include 鐩綍銆?- `glob.from` 鍙?glob 鍩虹洰褰曚綔涓?include 鐩綍銆?
-瀹夎鏈燂紙CMake 鐢熸垚锛夛細
+- `dir.from` 直接作为 include 目录。
+- `file.from` 取父目录作为 include 目录。
+- `glob.from` 取 glob 基目录作为 include 目录。
 
-- `dir` 鐢熸垚鐩綍瀹夎瑙勫垯锛歚install(DIRECTORY ... DESTINATION include/<to>)`銆?- `file` 鐢熸垚鏂囦欢瀹夎瑙勫垯锛歚install(FILES ... DESTINATION include/<to>)`銆?- `glob` 鍦?configure 闃舵瑙ｆ瀽鍖归厤鏂囦欢骞舵寜鏂囦欢瀹夎鍒?`include/<to>`锛堟棤鍖归厤浼氱粰 warning锛夈€?
-> 鍏煎鎬ц鏄庯細鏃у啓娉?`<includes><dir>path</dir></includes>` 宸蹭笉鍐嶆敮鎸侊紱鑻ヤ粛浣跨敤浼氬湪 configure 闃舵鎶ラ敊銆?
-### 3.4 鐩爣渚濊禆 `<dependency name="..."/>`
+安装期（CMake 生成）：
 
-- 鑷棴鍚?**` <dependency name="..."/> `**锛屽彲澶氭鍑虹幇銆?- **`name`** 鏀寔涓ょ褰㈠紡锛?  1. **`鐩爣鍚峘**锛氫笌鏈寘鍐呮煇涓€**搴?* target 鍚屽悕锛岃〃绀轰緷璧栨湰鍖呰搴撱€?  2. **`鍖呭悕:鐩爣鍚峘**锛氫緷璧?*鍏朵粬鍖?*涓殑鏌愪竴搴?target锛堣鍖呴』鍦?`package.xml` 涓０鏄庯紝涓旇 target 椤诲湪鎵弿闆嗕腑瀛樺湪锛夈€?- **绾︽潫**锛氫緷璧栨寚鍚戠殑鐩爣绫诲瀷椤讳负 **`static_library` 鎴?`shared_library`**锛涜В鏋愪笉鍒版垨绫诲瀷涓嶅鍒?**configure 澶辫触**銆?
-**鐢熸垚琛屼负锛圕Make 妯″紡锛屽綋鍓嶅疄鐜帮級**锛?
-- **鍙墽琛岀洰鏍?*锛氶櫎鏄惧紡 `<dependency>` 澶栵紝浼?**PRIVATE 閾炬帴鏈寘鍐呭叏閮ㄥ簱 target**锛涘啀灏嗗悇 `<dependency>` 瑙ｆ瀽鍑虹殑搴撳悕骞跺叆閾炬帴鍒楄〃锛堝幓閲嶃€佹帓搴忥級銆?- **搴撶洰鏍?*锛歚<dependency>` 浼氬弬涓庝緷璧栨牎楠屼笌銆屽鍖呭寘鍐呭簱銆嶅姞鍏ョ敓鎴愬浘锛?*褰撳墠涓嶄細**涓洪潤鎬佸簱涓庨潤鎬佸簱涔嬮棿鐢熸垚 `target_link_libraries` 閾惧紡閾炬帴銆傝嫢鐢插簱瀹炵幇闇€璋冪敤涔欏簱绗﹀彿锛岄渶鍦ㄥ伐绋嬪眰闈㈣嚜琛屼繚璇侀摼鎺ラ『搴忔垨鍚堝苟鐩爣锛堜緥濡傜敱鏈€缁堝彲鎵ц鏂囦欢閾炬帴鍏ㄩ儴搴擄級锛涜瑙?`test_projects` 涓ず渚嬪彇鑸嶃€?
+- `dir` 生成目录安装规则：`install(DIRECTORY ... DESTINATION include/<to>)`。
+- `file` 生成文件安装规则：`install(FILES ... DESTINATION include/<to>)`。
+- `glob` 在 configure 阶段解析匹配文件并按文件安装到 `include/<to>`（无匹配会给 warning）。
+
+> 兼容性说明：旧写法 `<includes><dir>path</dir></includes>` 已不再支持；若仍使用会在 configure 阶段报错。
+
+### 3.4 目标依赖 `<dependency name="..."/>`
+
+- 自闭合 **` <dependency name="..."/> `**，可多次出现。
+- **`name`** 支持两种形式：
+  1. **`目标名`**：与本包内某一**库** target 同名，表示依赖本包该库。
+  2. **`包名:目标名`**：依赖**其他包**中的某一库 target（该包须在 `package.xml` 中声明，且该 target 须在扫描集中存在）。
+- **约束**：依赖指向的目标类型须为 **`static_library` 或 `shared_library`**；解析不到或类型不对则 **configure 失败**。
+
+**生成行为（CMake 模式，当前实现）**：
+
+- **可执行目标**：除显式 `<dependency>` 外，会 **PRIVATE 链接本包内全部库 target**；再将各 `<dependency>` 解析出的库名并入链接列表（去重、排序）。
+- **库目标**：`<dependency>` 会参与依赖校验与「外包包内库」加入生成图；**当前不会**为静态库与静态库之间生成 `target_link_libraries` 链式链接。若甲库实现需调用乙库符号，需在工程层面自行保证链接顺序或合并目标（例如由最终可执行文件链接全部库）；详见 `test_projects` 中示例取舍。
+
 ---
 
-## 4. 缂栫爜涓庤矾寰?
-- 鏂囦欢鍐呭寤鸿浣跨敤 **UTF-8**锛堜笌 [DESIGN.md](../DESIGN.md) 涓寘鎻忚堪缂栫爜璇存槑涓€鑷达級銆?- **configure** 浼氬鐩稿叧璺緞鍋?**ASCII 璺緞**绛夋牎楠岋紱璺緞涓惈闈?ASCII 绛夊彲鑳芥寜瀹炵幇鐩存帴鎶ラ敊锛岃閬垮厤銆?
+## 4. 编码与路径
+
+- 文件内容建议使用 **UTF-8**（与 [DESIGN.md](../DESIGN.md) 中包描述编码说明一致）。
+- **configure** 会对相关路径做 **ASCII 路径**等校验；路径中含非 ASCII 等可能按实现直接报错，请避免。
+
 ---
 
-## 5. configure 瀵广€屼富鍖呫€嶄笌鐩爣鐨勯澶栬姹?
-- **涓诲寘**锛氫紭鍏堝彇 **cwd 绛変簬鍏?`package.xml` 鐖剁洰褰昤** 鐨勯偅涓€涓寘锛涜嫢鏃犲尮閰嶏紝鍒欏彇鎵弿鍒扮殑**绗竴涓?*鍖呬綔涓轰富鍖咃紙澶氬寘鍚屾壂鏃堕『搴忎緷璧栨枃浠剁郴缁燂紝寤鸿鍗曞寘鐩綍涓嬫墽琛屾垨鏄庣‘鏂囨。鍖栨壂鎻忛『搴忛闄╋級銆?- 涓诲寘涓嬮』鑷冲皯鏈?**涓€涓彲鎵ц** target锛屽惁鍒?configure 澶辫触銆?- 鍚屼竴 **`鍖呭悕:鐩爣鍚峘** 鍦ㄦ壂鎻忕粨鏋滀腑涓嶅緱閲嶅銆?
+## 5. configure 对「主包」与目标的额外要求
+
+- **主包**：优先取 **cwd 等于其 `package.xml` 父目录`** 的那一个包；若无匹配，则取扫描到的**第一个**包作为主包（多包同扫时顺序依赖文件系统，建议单包目录下执行或明确文档化扫描顺序风险）。
+- 主包下须至少有 **一个可执行** target，否则 configure 失败。
+- 同一 **`包名:目标名`** 在扫描结果中不得重复。
+
 ---
 
-## 6. 娴嬭瘯涓庣ず渚?
-浠撳簱 **`test_projects/`** 涓嬪悇瀛愮洰褰曚负瀹屾暣绀轰緥锛堝惈璺ㄥ寘渚濊禆銆佸搴撱€佸垎绂荤殑 `include/` / `src/` / `app/` / `test/` 绛夛級锛岃 [test_projects/README.md](../test_projects/README.md)銆?
+## 6. 测试与示例
+
+仓库 **`test_projects/`** 下各子目录为完整示例（含跨包依赖、多库、分离的 `include/` / `src/` / `app/` / `test/` 等），见 [test_projects/README.md](../test_projects/README.md)。
+
 ---
 
-## 7. 涓庡疄鐜扮殑瀵瑰簲鍏崇郴
+## 7. 与实现的对应关系
 
-| 璇濋 | 婧愮爜浣嶇疆 |
+| 话题 | 源码位置 |
 |------|----------|
-| 瑙ｆ瀽 `package.xml` / `target.xml` | `src/simple_xml.cpp`锛坄load_package_xml` / `load_target_xml`锛?|
-| 渚濊禆鏍￠獙銆佺敓鎴?CMake | `src/configure.cpp` |
-| 鏁版嵁缁撴瀯 | `src/simple_xml.hpp`锛坄PackageDesc` / `TargetDesc`锛?|
+| 解析 `package.xml` / `target.xml` | `src/simple_xml.cpp`（`load_package_xml` / `load_target_xml`） |
+| 依赖校验、生成 CMake | `src/configure.cpp` |
+| 数据结构 | `src/simple_xml.hpp`（`PackageDesc` / `TargetDesc`） |
 
-鍚庣画鑻ュ紩鍏?XSD/JSON Schema锛屽彲鍦ㄦ湰鏂囦欢椤堕儴澧炲姞鐗堟湰鍙蜂笌鍙樻洿璁板綍銆?
+后续若引入 XSD/JSON Schema，可在本文件顶部增加版本号与变更记录。
 
 ---
 
-## 8. assets and process stages (phase 1)
+## 11. `up project` 对 CMake 的默认生成行为（补充）
 
-- `target.xml` supports `<assets>` with `dir/file/glob` entries.
-- Each `sources` / `includes` / `assets` entry can optionally define:
-  - `<preprocess command="..."/>`
-  - `<postprocess command="..."/>`
-- In phase 1, each stage accepts a single `command` only.
+- 当探测到 CMake 工程时，`up project` 默认会：
+  - 生成 `package.xml`（包含 `<cmake source_dir="..."/>`）
+  - 尝试解析 `install(TARGETS ...)`，自动生成 `imported_installed_*` 的 `target.xml`
+- 目标名优先使用 CMake target 名（必要时做 sanitize / 去重）。
+- `install(TARGETS ...)` 解析不到库规则时，仅生成 `package.xml` 并输出提示；可改用 `--legacy-cmake-parse` 或手工补充 `target.xml`。

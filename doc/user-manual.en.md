@@ -97,6 +97,25 @@ Backend behavior:
   - `executable`
   - `static_library`
   - `shared_library`
+  - `asset_bundle` (install-only resources, no compile units)
+  - `imported_static_library` / `imported_shared_library` (prebuilt SDKs; use `<prebuilt .../>`, paths relative to `target.xml` unless absolute). See [`test_projects/prebuilt_static_stub/`](../test_projects/prebuilt_static_stub/README.md) for an end-to-end sample (ships an MSVC `stub_import.lib`; the stub CMake writes to `lib/import/` so it is not ignored by the repo-root `dist/` `.gitignore` rule).
+
+### 3.1b Native CMake subtree (`<cmake/>`)
+
+In `package.xml` you may add **`<cmake source_dir="relative/path"/>`** (relative to the directory containing `package.xml`). That directory must contain a `CMakeLists.txt`. The aggregate CMake backend builds it with **`ExternalProject_Add`** before compiling targets declared in this package, using the same install prefix as `.intermediate/install/<arch>/`.
+
+Optional cache variables for the subtree use the **`UPSTREAM_`** prefix, e.g. `up configure --opt UPSTREAM_BUILD_TESTS=OFF` becomes `-DBUILD_TESTS=OFF` in the child CMake.
+
+**Limitation:** `<cmake/>` is supported only with **`UP_TARGET_BUILD_SYSTEM=cmake`**. Ninja mode reports an error.
+
+### 3.1c `CMAKE_PREFIX_PATH` merging
+
+The generated super-build and external projects receive **`CMAKE_PREFIX_PATH`** built as:
+
+1. This configure’s install prefix (`.intermediate/install/<arch>/` for the current `cwd`), **always first**.
+2. Extra directories from **`--opt UP_CMAKE_PREFIX_PATH=dir1;dir2`** (semicolon-separated). Relative entries are resolved against **`cwd`**.
+
+Duplicates are removed after canonicalization.
 
 ### 3.2 Dependency levels
 
@@ -167,7 +186,9 @@ Common commands:
 - `up run <target-name>`
 - `up test [test-target-name]`
 - `up pack`
-- `up project` (placeholder)
+- `up project [--dry-run] [--force] [--output-dir <path>] [--package-name <name>] [--legacy-cmake-parse]`
+  - **Default** when a **CMake** tree is detected: writes **`<cmake source_dir="..."/>`** and tries to auto-generate `imported_installed_*` wrapper `target.xml` files from `install(TARGETS ...)` rules (target names prefer CMake target names). If parsing fails, only `package.xml` is written with warnings.
+  - **`--legacy-cmake-parse`**: restore heuristic `add_library` / `add_executable` import into `target.xml`.
 
 ### 4.4 Work in a single package directory
 

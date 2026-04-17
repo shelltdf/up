@@ -1,4 +1,4 @@
-#include "project_import.hpp"
+﻿#include "project_import.hpp"
 
 #include "project_import_internal.hpp"
 #include "project_import_common.hpp"
@@ -60,6 +60,17 @@ bool import_from_probe(const std::filesystem::path& scan_root, const std::filesy
   }
   error = "internal: unknown probe kind";
   return false;
+}
+
+bool import_cmake_installed_from_probe(const std::filesystem::path& cmake_file, ImportedPackage& out, std::string& error) {
+  out.targets.clear();
+  out.warnings.clear();
+  std::string pn = cmake_file.parent_path().filename().string();
+  if (pn.empty() || pn == "." || pn == "..")
+    pn = "package";
+  out.package_name = project_import::sanitize_id(pn);
+  import_cmake_installed_wrappers(cmake_file, out, out.warnings, error);
+  return error.empty();
 }
 
 }  // namespace up

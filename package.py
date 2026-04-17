@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Pack up.exe and up-gui.exe into a distributable archive (zip / tar.gz).
 

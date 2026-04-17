@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Install only up and up-gui via CMake install COMPONENT (cmake --install).
 

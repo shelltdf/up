@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "simple_xml.hpp"
 
@@ -34,5 +34,8 @@ ProbeResult probe_build_system(const std::filesystem::path& scan_root);
 // Fills ImportedPackage from scan_root; paths in TargetDesc are relative to write_root/<subdir>/.
 bool import_from_probe(const std::filesystem::path& scan_root, const std::filesystem::path& write_root, const ProbeResult& probe,
                        ImportedPackage& out, std::string& error);
+
+// Parse CMake install(TARGETS ...) and emit imported_installed_* wrapper targets.
+bool import_cmake_installed_from_probe(const std::filesystem::path& cmake_file, ImportedPackage& out, std::string& error);
 
 }  // namespace up

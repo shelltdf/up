@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <target name="rockBase" type="static_library">
   <sources>
     <file>rock_base.cpp</file>

@@ -1,4 +1,4 @@
-#include "ninja/ninja_backend.hpp"
+﻿#include "ninja/ninja_backend.hpp"
 
 #include "paths.hpp"
 
@@ -44,6 +44,16 @@ std::string build_ninja_install_command(const BuildBackendContext& ctx) {
 }
 
 int write_ninja_file(const ConfigureGraphModel& model) {
+  if (!model.external_cmake.empty()) {
+    std::cerr << "configure: ninja backend does not support package.xml <cmake> (external CMake projects).\n";
+    return 9;
+  }
+  for (const auto& t : model.targets) {
+    if (t.imported_prebuilt) {
+      std::cerr << "configure: ninja backend does not support imported_* prebuilt targets.\n";
+      return 9;
+    }
+  }
   std::filesystem::create_directories(model.out_dir);
   const auto ninja_path = model.out_dir / "build.ninja";
   std::ofstream nf(ninja_path);

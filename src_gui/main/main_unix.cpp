@@ -1,4 +1,4 @@
-namespace up::gui::platform::gtk {
+﻿namespace up::gui::platform::gtk {
 int run(int argc, char** argv);
 }
 

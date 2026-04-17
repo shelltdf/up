@@ -1,0 +1,23 @@
+root = true
+
+[*.{c,cc,cpp,cxx,h,hh,hpp,hxx,ipp,inl}]
+charset = utf-8-bom
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 2
+
+[*.{md,xml,txt}]
+charset = utf-8-bom
+end_of_line = lf
+insert_final_newline = true
+
+[*.{cmake,ps1,bat,cmd,py,sh,json,yml,yaml}]
+charset = utf-8-bom
+end_of_line = lf
+insert_final_newline = true
+
+[CMakeLists.txt]
+charset = utf-8-bom
+end_of_line = lf
+insert_final_newline = true

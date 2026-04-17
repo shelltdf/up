@@ -1,4 +1,4 @@
-# `up project` fixtures
+﻿# `up project` fixtures
 
 Manual checks (from repository root, using built `up.exe`):
 

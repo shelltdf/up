@@ -119,6 +119,22 @@ cmake --build _build --config Release
   - `executable`
   - `static_library`
   - `shared_library`
+  - `asset_bundle`（仅安装资源，无编译单元）
+  - `imported_static_library` / `imported_shared_library`：预置二进制 SDK，配合 `<prebuilt .../>`（路径相对 `target.xml` 目录）。完整示例见 [`test_projects/prebuilt_static_stub/`](../test_projects/prebuilt_static_stub/README.md)（内含已提交的 MSVC `stub_import.lib`；子库输出目录使用 `lib/import/` 以免被仓库根 `.gitignore` 的 `dist/` 规则误忽略）。
+  - `imported_installed_static_library` / `imported_installed_shared_library`：**先**由同包 `<cmake/>` 子工程 `install` 到本包安装前缀，**再**在 `target.xml` 里用 `<install artifact="..."/>` 把安装产物声明为 IMPORTED 库（`artifact` / 可选 `interface_include` 均相对 `CMAKE_INSTALL_PREFIX`，与 ExternalProject 安装根一致）。Windows 下 shared 还需 `implib="..."`。此类目标不能与磁盘预置的 `<prebuilt/>` 混用。
+
+### 3.1b 原生 CMake 子工程（`<cmake/>`）
+
+在 `package.xml` 中可增加一行 **`<cmake source_dir="相对路径"/>`**（相对 `package.xml` 所在目录），指向已有 `CMakeLists.txt` 的上游工程。`configure` 生成的聚合工程会通过 **`ExternalProject_Add`** 先配置、构建并安装该子工程（安装前缀与本包 `.intermediate/install/<arch>/` 一致），再构建本包内由 `target.xml` 描述的目标。传给上游 CMake 的可选缓存变量可使用 **`UPSTREAM_`** 前缀（例如 `up configure --opt UPSTREAM_BUILD_TESTS=OFF`），实现内会去掉前缀后作为 `-D` 传入子工程。
+
+限制：**仅 CMake 聚合后端**支持 `<cmake/>`；`UP_TARGET_BUILD_SYSTEM=ninja` 时会报错。
+
+### 3.1c `CMAKE_PREFIX_PATH` 合并
+
+聚合工程与 **`<cmake/>`** 子工程会带上 **`CMAKE_PREFIX_PATH`**，由以下部分**去重后**拼接（分号分隔，与 CMake 列表一致）：
+
+1. 当前 `cwd` 下本配置的安装前缀 **`.intermediate/install/<arch>/`**（始终排在最前，便于优先找到本工作区已安装的包）。
+2. **`--opt UP_CMAKE_PREFIX_PATH=路径1;路径2`** 中的额外前缀（如第三方 SDK 的 CMake 包根）；相对路径按 **`cwd`** 解析。
 
 ### 3.2 依赖层次
 
@@ -193,7 +209,9 @@ python package.py
 - `up run <target-name>`
 - `up test [test-target-name]`
 - `up pack`
-- `up project`（预留）
+- `up project [--dry-run] [--force] [--output-dir <path>] [--package-name <n>] [--legacy-cmake-parse]`
+  - 默认：若探测到 **CMake** 工程，写入 **`<cmake source_dir="..."/>`**，并尽量从 `install(TARGETS ...)` 自动生成 `imported_installed_*` 包装 `target.xml`（目标名优先使用 CMake target 名，解析不到时仅生成 package.xml 并给出提示）。
+  - **`--legacy-cmake-parse`**：恢复旧的「从 `CMakeLists.txt` 猜 `add_library`/`add_executable`」行为。
 
 ### 4.4 在单包目录工作
 

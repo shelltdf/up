@@ -1,4 +1,4 @@
-// Unit tests for hello_foo lib; run via CTest / `up test`.
+﻿// Unit tests for hello_foo lib; run via CTest / `up test`.
 
 #include "../hello_foo/foo.hpp"
 

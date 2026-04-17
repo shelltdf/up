@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """开发调试入口：先打包，再运行 dist/bin/up-gui.exe。"""
 

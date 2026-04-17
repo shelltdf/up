@@ -1,4 +1,4 @@
-#include "gui_core_actions.hpp"
+﻿#include "gui_core_actions.hpp"
 
 #include <algorithm>
 

@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<target name="tiny_vendor" type="imported_static_library">
+  <includes>
+    <dir from="../lib/inc" to="tiny"/>
+  </includes>
+  <prebuilt import_lib="../lib/import/stub_import.lib"/>
+</target>

@@ -1,4 +1,4 @@
-#include "commands_common.hpp"
+﻿#include "commands_common.hpp"
 
 #include "paths.hpp"
 
@@ -19,7 +19,7 @@ std::map<std::string, std::string> load_up_options_from_build_dir(const std::fil
       continue;
     const std::string k = line.substr(0, pos);
     const std::string v = line.substr(pos + 1);
-    if (k.rfind("UP_", 0) == 0)
+    if (k.rfind("UP_", 0) == 0 || k.rfind("UPSTREAM_", 0) == 0)
       out[k] = v;
   }
   return out;

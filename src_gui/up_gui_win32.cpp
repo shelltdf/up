@@ -1,4 +1,4 @@
-// up-gui：本地 Win32 外壳，仅通过命令行调用与 up-gui.exe 同目录的 up.exe；不链接、不包含 src 下业务代码（见 DESIGN.md / mindmap）。
+﻿// up-gui：本地 Win32 外壳，仅通过命令行调用与 up-gui.exe 同目录的 up.exe；不链接、不包含 src 下业务代码（见 DESIGN.md / mindmap）。
 
 #ifndef NOMINMAX
 #define NOMINMAX

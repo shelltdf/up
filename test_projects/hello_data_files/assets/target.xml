@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <target name="hello_data_assets" type="asset_bundle">
   <assets>
     <file from="./sample.xml" to="assets/hello_data_files"/>

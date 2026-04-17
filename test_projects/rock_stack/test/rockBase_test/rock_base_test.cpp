@@ -1,4 +1,4 @@
-#include <cassert>
+﻿#include <cassert>
 #include <cstring>
 
 #include <rock_base.hpp>

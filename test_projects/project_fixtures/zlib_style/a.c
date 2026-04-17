@@ -1,2 +1,2 @@
-/* fixture */
+﻿/* fixture */
 void fa(void) {}

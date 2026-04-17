@@ -1,4 +1,4 @@
-// Linux GTK3：与 Win32 up-gui 同一套 up_gui_settings.txt 与 configure 传参逻辑（CWD、扫描目录、环境 --opt、build-dir-name）。
+﻿// Linux GTK3：与 Win32 up-gui 同一套 up_gui_settings.txt 与 configure 传参逻辑（CWD、扫描目录、环境 --opt、build-dir-name）。
 // 未实现：Win32 上的「编译环境」三 Tab 弹窗、选项表 ListView、从 up_cache 自动填运行目标等（可后续补）。
 
 #include "../core/gui_unix_shared.hpp"

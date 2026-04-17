@@ -15,6 +15,8 @@
 | [hello_data_files/](hello_data_files/) | 演示 `xml/json/svg` 数据文件随安装产物落盘并由可执行程序启动加载。 |
 | [meta_codegen/](meta_codegen/) | 演示 `moc/uic/rc` 风格代码生成工具：`.h -> .meta.cpp`、`.ui -> .h+.cpp`、`.rc -> .h+.cpp`。 |
 | [plugin_runtime/](plugin_runtime/) | 演示插件共享库动态加载：默认导出 `init/update/shutdown/info` 并由测试程序运行。 |
+| [native_cmake_vendor/](native_cmake_vendor/) | 演示 `package.xml` 中 **`<cmake source_dir="..."/>`**：上游子目录由 `ExternalProject` 构建安装后再编本包可执行文件。 |
+| [prebuilt_static_stub/](prebuilt_static_stub/) | 演示 **`imported_static_library`** + **`<prebuilt import_lib="..."/>`**：链入预编译的 `stub_import.lib`（Windows MSVC x64 已提交 `lib/import/`；可再用 `lib/CMakeLists.txt` 重生）。 |
 
 ### 包依赖关系
 
@@ -28,6 +30,7 @@ flowchart LR
   hello_data_files["hello_data_files"]
   meta_codegen["meta_codegen"]
   plugin_runtime["plugin_runtime"]
+  native_cmake_vendor["native_cmake_vendor"]
   hello_demo --> hello_simple_lib
   hello_demo --> rock_stack
   hello_demo --> hello_parent_child

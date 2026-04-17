@@ -1,4 +1,4 @@
-#include "cmake/cmake_backend.hpp"
+﻿#include "cmake/cmake_backend.hpp"
 #include "cmake/cmake_third_party_heuristics.hpp"
 
 #include "paths.hpp"
@@ -36,6 +36,8 @@ bool path_starts_with(const std::filesystem::path& prefix_raw, const std::filesy
 std::optional<std::filesystem::path> infer_common_source_root(const ConfigureGraphModel& model) {
   std::vector<std::filesystem::path> paths;
   for (const auto& t : model.targets) {
+    if (t.imported_prebuilt)
+      continue;
     for (const auto& sp : t.source_paths)
       paths.emplace_back(sp);
   }
@@ -56,6 +58,20 @@ std::optional<std::filesystem::path> infer_common_source_root(const ConfigureGra
   return common;
 }
 
+std::string cmake_escape_string_value(const std::string& v) {
+  std::string o;
+  o.reserve(v.size() + 8);
+  for (char c : v) {
+    if (c == '\\')
+      o += "\\\\";
+    else if (c == '"')
+      o += "\\\"";
+    else
+      o.push_back(c);
+  }
+  return o;
+}
+
 }  // namespace
 
 std::string build_cmake_build_command(const BuildBackendContext& ctx) {
@@ -66,12 +82,20 @@ std::string build_cmake_build_command(const BuildBackendContext& ctx) {
     cmd << " -G \"" << ctx.cmake_generator << "\"";
   }
   for (const auto& kv : ctx.opts) {
+    if (kv.first.rfind("UP_", 0) != 0)
+      continue;
+    if (kv.first.rfind("UPSTREAM_", 0) == 0)
+      continue;
+    if (kv.first == "UP_CMAKE_PREFIX_PATH")
+      continue;
     cmd << " -D" << kv.first << "=\"" << kv.second << "\"";
+  }
+  if (!ctx.cmake_prefix_path.empty()) {
+    cmd << " -DCMAKE_PREFIX_PATH=\"" << ctx.cmake_prefix_path << "\"";
   }
   if (!ctx.multi_config) {
     cmd << " -DCMAKE_BUILD_TYPE=" << ctx.config_name;
   }
-  // --verbose: ask CMake to run the underlying tool verbosely (e.g. MSBuild shows more than default minimal).
   cmd << " && cmake --build \"" << to_posix_path_string(ctx.bin_dir) << "\" --verbose";
   if (ctx.multi_config) {
     cmd << " --config " << ctx.config_name;
@@ -100,11 +124,80 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
   cm << "set(CMAKE_CXX_STANDARD 17)\n";
   cm << "set(CMAKE_CXX_STANDARD_REQUIRED ON)\n";
 
+  const std::string cfg_label = (model.config_mode == "debug") ? "Debug" : "Release";
+
+  if (!model.external_cmake.empty()) {
+    cm << "include(ExternalProject)\n";
+    for (const auto& ep : model.external_cmake) {
+      const std::string bdir = to_posix_path_string(ep.binary_dir);
+      const std::string sdir = to_posix_path_string(ep.source_dir);
+      const std::string idir = to_posix_path_string(ep.install_prefix);
+      cm << "ExternalProject_Add(" << ep.ep_target_name << "\n";
+      cm << "  SOURCE_DIR \"" << sdir << "\"\n";
+      cm << "  BINARY_DIR \"" << bdir << "\"\n";
+      cm << "  CMAKE_ARGS\n";
+      cm << "    \"-DCMAKE_INSTALL_PREFIX=" << cmake_escape_string_value(idir) << "\"\n";
+      cm << "    \"-DCMAKE_PREFIX_PATH=" << cmake_escape_string_value(model.cmake_prefix_path) << "\"\n";
+      if (!model.cmake_parent_multi_config)
+        cm << "    \"-DCMAKE_BUILD_TYPE=" << cfg_label << "\"\n";
+      for (const auto& kv : ep.upstream_cmake_args) {
+        cm << "    \"-D" << kv.first << "=" << cmake_escape_string_value(kv.second) << "\"\n";
+      }
+      cm << "  BUILD_COMMAND \"${CMAKE_COMMAND}\" --build \"" << bdir << "\" --config " << cfg_label << "\n";
+      cm << "  INSTALL_COMMAND \"${CMAKE_COMMAND}\" --install \"" << bdir << "\" --config " << cfg_label << "\n";
+      cm << ")\n";
+    }
+    cm << "add_custom_target(up_external_cmake_aggregate)\n";
+    for (const auto& ep : model.external_cmake)
+      cm << "add_dependencies(up_external_cmake_aggregate " << ep.ep_target_name << ")\n";
+  }
+
   const std::optional<std::filesystem::path> pkg_src_root = infer_common_source_root(model);
   if (pkg_src_root)
     cmake_third_party::emit_detected_upstream_snippets(cm, *pkg_src_root);
 
   for (const auto& t : model.targets) {
+    if (!t.imported_prebuilt)
+      continue;
+    const bool sh =
+        (t.type == "imported_shared_library" || t.type == "imported_installed_shared_library");
+    cm << "add_library(" << t.name << " " << (sh ? "SHARED" : "STATIC") << " IMPORTED)\n";
+    if (sh) {
+      cm << "if(WIN32)\n";
+      cm << "  set_target_properties(" << t.name << " PROPERTIES\n";
+      cm << "    IMPORTED_LOCATION \"" << cmake_escape_string_value(t.imported_location) << "\"\n";
+      if (!t.imported_implib.empty())
+        cm << "    IMPORTED_IMPLIB \"" << cmake_escape_string_value(t.imported_implib) << "\"\n";
+      cm << "  )\n";
+      cm << "else()\n";
+      cm << "  set_target_properties(" << t.name << " PROPERTIES IMPORTED_LOCATION \""
+         << cmake_escape_string_value(t.imported_location) << "\")\n";
+      cm << "endif()\n";
+    } else {
+      cm << "set_target_properties(" << t.name << " PROPERTIES IMPORTED_LOCATION \""
+         << cmake_escape_string_value(t.imported_location) << "\")\n";
+    }
+    if (!t.include_dirs.empty()) {
+      cm << "target_include_directories(" << t.name << " INTERFACE";
+      for (const auto& inc : t.include_dirs)
+        cm << " \"" << inc << "\"";
+      cm << ")\n";
+    }
+    if (t.imported_from_install_prefix) {
+      if (!t.install_rel_interface_include.empty())
+        cm << "target_include_directories(" << t.name << " INTERFACE \"${CMAKE_INSTALL_PREFIX}/"
+           << cmake_escape_string_value(t.install_rel_interface_include) << "\")\n";
+    } else if (pkg_src_root) {
+      cm << "target_include_directories(" << t.name << " INTERFACE \""
+          << to_posix_path_string(std::filesystem::absolute(*pkg_src_root)) << "\")\n";
+    }
+    if (t.imported_from_install_prefix && !model.external_cmake.empty())
+      cm << "add_dependencies(" << t.name << " up_external_cmake_aggregate)\n";
+  }
+
+  for (const auto& t : model.targets) {
+    if (t.imported_prebuilt || t.type == "asset_bundle")
+      continue;
     if (!(t.type == "static_library" || t.type == "shared_library"))
       continue;
     const char* kind = (t.type == "shared_library") ? "SHARED" : "STATIC";
@@ -134,6 +227,8 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
         cm << "add_custom_command(TARGET " << t.name << " POST_BUILD COMMAND " << s.postprocess_command << ")\n";
       }
     }
+    if (!model.external_cmake.empty())
+      cm << "add_dependencies(" << t.name << " up_external_cmake_aggregate)\n";
   }
 
   for (const auto& t : model.targets) {
@@ -155,6 +250,8 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
         cm << " \"" << inc << "\"";
       cm << ")\n";
     }
+    if (!model.external_cmake.empty())
+      cm << "add_dependencies(" << t.name << " up_external_cmake_aggregate)\n";
   }
 
   cm << "include(CTest)\n";
@@ -163,10 +260,32 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
     if (t.type == "executable")
       cm << "add_test(NAME " << t.name << " COMMAND $<TARGET_FILE:" << t.name << ">)\n";
   }
-  cm << "install(TARGETS";
-  for (const auto& exe_name : model.install_exe_names)
-    cm << " " << exe_name;
-  cm << " RUNTIME DESTINATION bin)\n";
+  if (!model.install_exe_names.empty()) {
+    cm << "install(TARGETS";
+    for (const auto& exe_name : model.install_exe_names)
+      cm << " " << exe_name;
+    cm << " RUNTIME DESTINATION bin)\n";
+  }
+
+  for (const auto& t : model.targets) {
+    if (!t.imported_prebuilt)
+      continue;
+    if (t.imported_from_install_prefix)
+      continue;
+    if (t.type == "imported_shared_library") {
+      cm << "if(WIN32)\n";
+      if (!t.imported_dll.empty())
+        cm << "  install(FILES \"" << cmake_escape_string_value(t.imported_dll) << "\" DESTINATION bin)\n";
+      if (!t.imported_implib.empty())
+        cm << "  install(FILES \"" << cmake_escape_string_value(t.imported_implib) << "\" DESTINATION lib)\n";
+      cm << "else()\n";
+      cm << "  install(FILES \"" << cmake_escape_string_value(t.imported_location) << "\" DESTINATION lib)\n";
+      cm << "endif()\n";
+    } else {
+      cm << "install(FILES \"" << cmake_escape_string_value(t.imported_location) << "\" DESTINATION lib)\n";
+    }
+  }
+
   for (const auto& rule : model.install_dir_rules) {
     if (!rule.preprocess_command.empty())
       cm << "add_custom_target(pre_include_dir_" << command_idx++ << " COMMAND " << rule.preprocess_command << ")\n";
@@ -197,13 +316,15 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
     cm << "install(FILES \"" << rule.src << "\" DESTINATION " << rule.dst << ")\n";
   }
 
+  // Ensure Visual Studio generators always emit an install target even for library-wrapper-only packages.
+  cm << "install(CODE \"message(STATUS \\\"up: install stage complete\\\")\")\n";
+
   const auto out_cmake = model.build_root / "CMakeLists.txt";
   std::ofstream f(out_cmake);
   if (!f) {
     return 5;
   }
   f << cm.str();
-  // Flush before a later system(cmake) so captured stdout does not splice into this line.
   std::cout << "Wrote " << to_posix_path_string(out_cmake) << std::endl;
   return 0;
 }

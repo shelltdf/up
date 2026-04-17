@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<target name="prebuilt_import_demo_app" type="executable">
+  <sources>
+    <file>main.cpp</file>
+  </sources>
+  <dependency name="prebuilt_stub_lib"/>
+</target>

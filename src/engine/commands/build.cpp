@@ -1,4 +1,4 @@
-#include "build.hpp"
+﻿#include "build.hpp"
 #include "core/backend_dispatch.hpp"
 #include "commands_common.hpp"
 #include "paths.hpp"
@@ -51,8 +51,16 @@ int cmd_build(const std::filesystem::path& cwd, const std::filesystem::path& bui
   if (equals_ci(build_system, "cmake") && cmake_generator.empty())
     multi_config = true;  // default VS generator on Windows
 #endif
-  BuildBackendContext backend_ctx{
-      src_dir, bin_dir, inst, opts, build_system, cmake_generator, config_name, multi_config};
+  const std::string cmake_prefix_path = option_or(opts, "UP_CMAKE_PREFIX_PATH", "");
+  BuildBackendContext backend_ctx{src_dir,
+                                    bin_dir,
+                                    inst,
+                                    opts,
+                                    build_system,
+                                    cmake_generator,
+                                    config_name,
+                                    multi_config,
+                                    cmake_prefix_path};
   return run_build_backend(backend_ctx, 1);
 }
 
