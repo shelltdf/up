@@ -1,4 +1,5 @@
 ﻿#include "build.hpp"
+#include "cli_verbose.hpp"
 #include "core/backend_dispatch.hpp"
 #include "commands_common.hpp"
 #include "paths.hpp"
@@ -9,6 +10,7 @@
 namespace up {
 
 int cmd_build(const std::filesystem::path& cwd, const std::filesystem::path& build_dir) {
+  cli_verbose_phase("build", "start");
   (void)cwd;
   const auto bd = std::filesystem::absolute(build_dir);
   const auto cache = bd / "up_cache.txt";
@@ -61,6 +63,7 @@ int cmd_build(const std::filesystem::path& cwd, const std::filesystem::path& bui
                                     config_name,
                                     multi_config,
                                     cmake_prefix_path};
+  cli_verbose_phase("build", "build_backend");
   return run_build_backend(backend_ctx, 1);
 }
 

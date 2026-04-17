@@ -13,6 +13,8 @@ namespace up::project_import {
 std::string read_file_text(const std::filesystem::path& path, std::string& error);
 bool is_src_ext(const std::string& ext);
 bool skip_dir_name(const std::string& name);
+// False for ${VAR}, $<GENEX>, __-style placeholders, common macro formal names (SETUP_TARGET_NAME, …), etc.
+bool plausible_cmake_target_name_token(const std::string& raw);
 std::string sanitize_id(std::string s);
 std::string normalize_dep_package_name(std::string s);
 std::string posix_str(const std::filesystem::path& p);

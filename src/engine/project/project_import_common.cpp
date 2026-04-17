@@ -3,6 +3,7 @@
 #include "path_check.hpp"
 #include "paths.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <filesystem>
 #include <fstream>
@@ -59,6 +60,81 @@ bool skip_dir_name(const std::string& name) {
   return name == ".git" || name == ".svn" || name == ".hg" || name == ".intermediate" || name == "build" ||
          name == "out" || name == "cmake-build-debug" || name == "cmake-build-release" || name == "node_modules" ||
          name == ".vs" || name == "Debug" || name == "Release" || name == "x64" || name == "x86";
+}
+
+namespace {
+
+std::string ascii_upper_underscore_token(const std::string& raw) {
+  std::string u;
+  u.reserve(raw.size());
+  for (unsigned char uc : raw) {
+    const char c = static_cast<char>(uc);
+    if (c >= 'a' && c <= 'z')
+      u += static_cast<char>(c - 'a' + 'A');
+    else if (c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_')
+      u += c;
+    else
+      return {};
+  }
+  return u;
+}
+
+bool is_denied_macro_style_target_upper(const std::string& u) {
+  if (u.empty())
+    return true;
+  // Looks like a CMake cache / internal variable, not a target.
+  if (u.rfind("CMAKE_", 0) == 0)
+    return true;
+  // Typical macro / configure_file formal parameters (never use these as real target names).
+  static const char* kExact[] = {"SETUP_TARGET_NAME",
+                                 "TARGET_NAME",
+                                 "LIB_NAME",
+                                 "EXE_NAME",
+                                 "BINARY_NAME",
+                                 "OUTPUT_NAME",
+                                 "PROJECT_NAME",
+                                 "PACKAGE_NAME",
+                                 "UPSTREAM_TARGET",
+                                 "MANGLE_TARGET_NAME",
+                                 "ARGN"};
+  for (const char* s : kExact) {
+    if (u == s)
+      return true;
+  }
+  // Very long ALL_CAPS_SNAKE tokens are usually macro glue, not targets.
+  if (u.size() >= 28) {
+    bool all_caps_snake = true;
+    for (char c : u) {
+      if (c != '_' && !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9')) {
+        all_caps_snake = false;
+        break;
+      }
+    }
+    if (all_caps_snake && std::count(u.begin(), u.end(), '_') >= 4)
+      return true;
+  }
+  return false;
+}
+
+}  // namespace
+
+bool plausible_cmake_target_name_token(const std::string& raw) {
+  if (raw.empty())
+    return false;
+  if (raw.find('$') != std::string::npos || raw.find('<') != std::string::npos)
+    return false;
+  // Double-leading-underscore names are almost always macros / template placeholders, not real targets.
+  if (raw.size() >= 2 && raw[0] == '_' && raw[1] == '_')
+    return false;
+  // Namespaced imported targets (Qt5::Core, …): only apply $ / __ rules.
+  if (raw.find("::") != std::string::npos)
+    return true;
+  const std::string u = ascii_upper_underscore_token(raw);
+  if (u.empty())
+    return false;
+  if (is_denied_macro_style_target_upper(u))
+    return false;
+  return true;
 }
 
 std::string sanitize_id(std::string s) {

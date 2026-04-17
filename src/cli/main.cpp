@@ -1,4 +1,5 @@
 ﻿#include "build.hpp"
+#include "cli_verbose.hpp"
 #include "commands_common.hpp"
 #include "configure.hpp"
 #include "lang.hpp"
@@ -8,6 +9,7 @@
 #include "run.hpp"
 #include "test.hpp"
 
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <map>
@@ -15,9 +17,24 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace {
 
 void print_usage() { up::lang::print_usage(std::cout); }
+
+void init_console_utf8_best_effort() {
+#ifdef _WIN32
+  // Best-effort: keep CLI text output in UTF-8 for both cmd and PowerShell consoles.
+  SetConsoleOutputCP(CP_UTF8);
+  SetConsoleCP(CP_UTF8);
+#endif
+}
 
 // A single directory name under .intermediate/build or .intermediate/install (no path separators).
 bool intermediate_leaf_name_ok(const std::string& s) {
@@ -45,13 +62,37 @@ std::filesystem::path install_dir_from_leaf(const std::filesystem::path& cwd, co
   return up::default_install_root(cwd) / std::filesystem::u8path(leaf);
 }
 
+bool env_verbose_enabled() {
+  const char* e = std::getenv("UP_VERBOSE");
+  if (!e || e[0] == '\0')
+    return false;
+  const std::string s = up::lower_ascii(e);
+  return s == "1" || s == "true" || s == "yes" || s == "on";
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+  init_console_utf8_best_effort();
   const std::filesystem::path cwd = std::filesystem::current_path();
   std::vector<std::string> args;
   for (int i = 1; i < argc; ++i)
     args.emplace_back(argv[i]);
+
+  bool verbose_flag = env_verbose_enabled();
+  {
+    std::vector<std::string> filtered;
+    filtered.reserve(args.size());
+    for (auto& a : args) {
+      if (a == "--verbose" || a == "-v") {
+        verbose_flag = true;
+        continue;
+      }
+      filtered.push_back(std::move(a));
+    }
+    args = std::move(filtered);
+  }
+  up::set_cli_verbose(verbose_flag);
 
   if (args.empty()) {
     print_usage();
@@ -207,7 +248,9 @@ int main(int argc, char** argv) {
     std::vector<std::string> pargs;
     for (size_t i = 1; i < args.size(); ++i)
       pargs.push_back(args[i]);
-    return up::cmd_project(cwd, pargs);
+    std::error_code ec_proj;
+    const auto cwd_for_project = std::filesystem::current_path(ec_proj);
+    return up::cmd_project(ec_proj ? cwd : cwd_for_project, pargs);
   }
 
   std::cerr << "unknown command: " << cmd << "\n";

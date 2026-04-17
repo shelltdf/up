@@ -1,10 +1,26 @@
 ﻿#include "commands_common.hpp"
+#include "cli_verbose.hpp"
 
 #include "paths.hpp"
 
 #include <fstream>
+#include <iostream>
 
 namespace up {
+
+namespace {
+bool g_cli_verbose = false;
+}  // namespace
+
+void set_cli_verbose(bool on) { g_cli_verbose = on; }
+
+bool cli_verbose() { return g_cli_verbose; }
+
+void cli_verbose_phase(const char* command, const char* phase) {
+  if (!g_cli_verbose)
+    return;
+  std::cerr << command << ": [verbose] phase=" << phase << "\n" << std::flush;
+}
 
 std::map<std::string, std::string> load_up_options_from_build_dir(const std::filesystem::path& build_dir) {
   std::map<std::string, std::string> out;

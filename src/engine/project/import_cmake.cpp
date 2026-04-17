@@ -1,9 +1,16 @@
 ﻿#include "project_import_internal.hpp"
 #include "project_import_common.hpp"
 
+#include "cli_verbose.hpp"
+#include "paths.hpp"
+
+#include <iostream>
+
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <optional>
 #include <regex>
@@ -285,6 +292,46 @@ std::vector<std::filesystem::path> collect_subdirectory_cmakes(const std::filesy
   return out;
 }
 
+void collect_executable_targets_from_cmake(const std::string& text, std::set<std::string>& out) {
+  const std::string needle = "add_executable(";
+  size_t p = 0;
+  while ((p = text.find(needle, p)) != std::string::npos) {
+    if (p > 0 && (std::isalnum(static_cast<unsigned char>(text[p - 1])) || text[p - 1] == '_')) {
+      ++p;
+      continue;
+    }
+    const size_t lparen = p + needle.size() - 1;
+    auto inner_opt = balanced_paren_content(text, lparen);
+    if (!inner_opt) {
+      p = lparen + 1;
+      continue;
+    }
+    std::vector<std::string> toks;
+    split_cmake_args(*inner_opt, toks);
+    if (toks.empty()) {
+      p = lparen + 1;
+      continue;
+    }
+    strip_quotes(toks[0]);
+    if (!project_import::plausible_cmake_target_name_token(toks[0])) {
+      p = lparen + 1;
+      continue;
+    }
+    bool skip = false;
+    for (const auto& t : toks) {
+      const std::string u = upper_ascii(t);
+      if (u == "ALIAS" || u == "IMPORTED")
+        skip = true;
+    }
+    if (!skip) {
+      const std::string id = project_import::sanitize_id(toks[0]);
+      if (!id.empty())
+        out.insert(id);
+    }
+    p = lparen + 1;
+  }
+}
+
 void collect_library_targets_from_cmake(const std::string& text, std::map<std::string, CmakeLibraryInfo>& libs) {
   const std::string needle = "add_library(";
   size_t p = 0;
@@ -306,6 +353,10 @@ void collect_library_targets_from_cmake(const std::string& text, std::map<std::s
       continue;
     }
     strip_quotes(toks[0]);
+    if (!project_import::plausible_cmake_target_name_token(toks[0])) {
+      p = lparen + 1;
+      continue;
+    }
     const std::string sanitized = project_import::sanitize_id(toks[0]);
     if (sanitized.empty()) {
       p = lparen + 1;
@@ -381,7 +432,7 @@ std::optional<InstallTargetRule> parse_install_targets_rule(const std::string& i
         mode = u;
         continue;
       }
-      if (!tok.empty() && tok[0] != '$')
+      if (!tok.empty() && project_import::plausible_cmake_target_name_token(tok))
         rule.targets.push_back(project_import::sanitize_id(tok));
       continue;
     }
@@ -459,6 +510,7 @@ void collect_install_files_include(const std::string& text, const std::map<std::
 void import_cmake_wrappers_recursive(const std::filesystem::path& cmake_file,
                                      std::set<std::string>& seen_cmake_files,
                                      std::map<std::string, CmakeLibraryInfo>& libs,
+                                     std::set<std::string>& exe_names,
                                      std::map<std::string, std::string>& scalar_vars,
                                      std::vector<InstallTargetRule>& install_rules, std::string& include_dir,
                                      std::string& error, int depth) {
@@ -476,6 +528,7 @@ void import_cmake_wrappers_recursive(const std::filesystem::path& cmake_file,
     return;
   collect_set_scalar_vars(text, scalar_vars);
   collect_library_targets_from_cmake(text, libs);
+  collect_executable_targets_from_cmake(text, exe_names);
   collect_install_target_rules(text, scalar_vars, install_rules);
   if (include_dir.empty()) {
     collect_install_directory_include(text, scalar_vars, include_dir);
@@ -484,8 +537,54 @@ void import_cmake_wrappers_recursive(const std::filesystem::path& cmake_file,
   }
 
   for (const auto& child : collect_subdirectory_cmakes(cmake_file.parent_path(), text))
-    import_cmake_wrappers_recursive(child, seen_cmake_files, libs, scalar_vars, install_rules, include_dir, error,
-                                   depth + 1);
+    import_cmake_wrappers_recursive(child, seen_cmake_files, libs, exe_names, scalar_vars, install_rules, include_dir,
+                                   error, depth + 1);
+}
+
+void push_installed_wrappers_for_lib(const CmakeLibraryInfo& lib, const std::string& runtime_dest,
+                                     const std::string& archive_dest, const std::string& library_dest,
+                                     const std::string& iface_dir, std::set<std::string>& emitted,
+                                     ImportedPackage& out) {
+  const bool build_static =
+      (lib.kind == CmakeLibraryInfo::Kind::StaticOnly || lib.kind == CmakeLibraryInfo::Kind::Unknown);
+  const bool build_shared =
+      (lib.kind == CmakeLibraryInfo::Kind::SharedOnly || lib.kind == CmakeLibraryInfo::Kind::Unknown);
+
+  if (build_static) {
+    TargetDesc td;
+    td.name = lib.name;
+    td.type = "imported_installed_static_library";
+    TargetDesc::InstalledWrapDesc iw;
+#if defined(_WIN32)
+    iw.artifact = join_rel_install_path(archive_dest, lib.name + ".lib");
+#else
+    iw.artifact = join_rel_install_path(archive_dest, "lib" + lib.name + ".a");
+#endif
+    iw.interface_include = iface_dir;
+    td.installed_wrap = std::move(iw);
+    const std::string key = "." + td.name + ":" + td.type;
+    if (emitted.insert(key).second)
+      out.targets.push_back({".targets/" + td.name, std::move(td)});
+  }
+  if (build_shared) {
+    TargetDesc td;
+    td.name = (build_static ? (lib.name + "_shared") : lib.name);
+    td.type = "imported_installed_shared_library";
+    TargetDesc::InstalledWrapDesc iw;
+#if defined(_WIN32)
+    iw.artifact = join_rel_install_path(runtime_dest, lib.name + ".dll");
+    iw.implib = join_rel_install_path(archive_dest, lib.name + ".lib");
+#elif defined(__APPLE__)
+    iw.artifact = join_rel_install_path(library_dest, "lib" + lib.name + ".dylib");
+#else
+    iw.artifact = join_rel_install_path(library_dest, "lib" + lib.name + ".so");
+#endif
+    iw.interface_include = iface_dir;
+    td.installed_wrap = std::move(iw);
+    const std::string key = "." + td.name + ":" + td.type;
+    if (emitted.insert(key).second)
+      out.targets.push_back({".targets/" + td.name, std::move(td)});
+  }
 }
 
 void collect_find_package_names(const std::string& text, std::map<std::string, bool>& out_names) {
@@ -634,6 +733,10 @@ void import_cmake_recursive(const std::filesystem::path& cmake_file, const std::
         continue;
       }
       strip_quotes(toks[0]);
+      if (!project_import::plausible_cmake_target_name_token(toks[0])) {
+        p = lparen + 1;
+        continue;
+      }
       const std::string tname = project_import::sanitize_id(toks[0]);
       if (seen_target_names.count(tname)) {
         p = lparen + 1;
@@ -684,7 +787,222 @@ void import_cmake_recursive(const std::filesystem::path& cmake_file, const std::
                            bucket_claims, depth + 1);
 }
 
+std::optional<std::string> json_string_field(const std::string& blob, const char* key) {
+  const std::string k = std::string("\"") + key + "\"";
+  size_t pos = 0;
+  while ((pos = blob.find(k, pos)) != std::string::npos) {
+    if (pos > 0 && (std::isalnum(static_cast<unsigned char>(blob[pos - 1])) || blob[pos - 1] == '_')) {
+      pos += k.size();
+      continue;
+    }
+    pos = blob.find(':', pos + k.size());
+    if (pos == std::string::npos)
+      return std::nullopt;
+    ++pos;
+    while (pos < blob.size() && std::isspace(static_cast<unsigned char>(blob[pos])))
+      ++pos;
+    if (pos >= blob.size() || blob[pos] != '"')
+      return std::nullopt;
+    ++pos;
+    std::string out;
+    while (pos < blob.size()) {
+      const char c = blob[pos];
+      if (c == '"')
+        return out;
+      if (c == '\\' && pos + 1 < blob.size()) {
+        out += blob[pos + 1];
+        pos += 2;
+        continue;
+      }
+      out += c;
+      ++pos;
+    }
+    return std::nullopt;
+  }
+  return std::nullopt;
+}
+
+bool json_bool_field_default_false(const std::string& blob, const char* key) {
+  const std::string k = std::string("\"") + key + "\"";
+  size_t pos = blob.find(k);
+  if (pos == std::string::npos)
+    return false;
+  pos = blob.find(':', pos + k.size());
+  if (pos == std::string::npos)
+    return false;
+  ++pos;
+  while (pos < blob.size() && std::isspace(static_cast<unsigned char>(blob[pos])))
+    ++pos;
+  if (pos + 4 <= blob.size() && blob.compare(pos, 4, "true") == 0)
+    return true;
+  return false;
+}
+
+bool run_cmake_configure_for_file_api(const std::filesystem::path& source_dir, const std::filesystem::path& build_dir,
+                                      std::string& error) {
+  std::error_code ec;
+  // CMake File API: owned stateless query is an empty file at
+  // `.cmake/api/v1/query/client-<id>/codemodel-v<major>` (not `client-*.json` in `query/`).
+  const std::filesystem::path query_dir = build_dir / ".cmake" / "api" / "v1" / "query" / "client-up-0";
+  std::filesystem::create_directories(query_dir, ec);
+  if (ec) {
+    error = "cannot create cmake file-api query directory: " + ec.message();
+    return false;
+  }
+  {
+    const std::filesystem::path marker = query_dir / "codemodel-v2";
+    std::ofstream out(marker, std::ios::binary);
+    if (!out) {
+      error = "cannot write cmake file-api codemodel query marker";
+      return false;
+    }
+  }
+
+  const std::string s = to_posix_path_string(std::filesystem::absolute(source_dir));
+  const std::string b = to_posix_path_string(std::filesystem::absolute(build_dir));
+#if defined(_WIN32)
+  const std::string cmd = "cmake -S \"" + s + "\" -B \"" + b + "\"";
+#else
+  const std::string cmd = "cmake -S \"" + s + "\" -B \"" + b + "\"";
+#endif
+  std::cout << "project: [cmake] file_api: running `cmake` configure for File API (source=" << s << " build=" << b << ")\n"
+            << std::flush;
+  if (cli_verbose())
+    std::cerr << "project: [cmake] [verbose] exec: " << cmd << "\n" << std::flush;
+  const int code = std::system(cmd.c_str());
+  if (code != 0) {
+    error = "cmake configure failed (exit " + std::to_string(code) + "); is `cmake` on PATH? command: " + cmd;
+    return false;
+  }
+  return true;
+}
+
+bool file_api_query_impl(const std::filesystem::path& source_dir, const std::filesystem::path& build_dir,
+                         ImportedPackage& out, std::string& error) {
+  out.targets.clear();
+  out.warnings.clear();
+  {
+    std::error_code ec_path;
+    const auto abs_src = std::filesystem::absolute(source_dir, ec_path);
+    const auto abs_bd = std::filesystem::absolute(build_dir, ec_path);
+    if (ec_path) {
+      error = "cannot resolve CMake file-api paths: " + ec_path.message();
+      return false;
+    }
+    const auto can_src = std::filesystem::weakly_canonical(abs_src, ec_path);
+    const auto can_bd = std::filesystem::weakly_canonical(abs_bd, ec_path);
+    if (!ec_path && can_src == can_bd) {
+      error =
+          "CMake file-api query build directory must not be the same as the CMake source directory "
+          "(refusing to wipe the source tree). Use a dedicated build directory (default: "
+          "<write_root>/.up/cmake_file_api_query or --cmake-query-build-dir).";
+      return false;
+    }
+  }
+  std::error_code ec;
+  std::filesystem::remove_all(build_dir, ec);
+  ec.clear();
+  std::filesystem::create_directories(build_dir, ec);
+  if (ec) {
+    error = "cannot prepare cmake query build directory: " + ec.message();
+    return false;
+  }
+  if (!run_cmake_configure_for_file_api(source_dir, build_dir, error))
+    return false;
+
+  const std::filesystem::path reply = build_dir / ".cmake" / "api" / "v1" / "reply";
+  if (!std::filesystem::is_directory(reply, ec)) {
+    error = "cmake file-api reply directory missing: " + to_posix_path_string(reply);
+    return false;
+  }
+
+  std::set<std::string> emitted;
+  std::set<std::string> seen_lib_names;
+  const std::string iface;
+  const std::string def_runtime = "bin";
+  const std::string def_archive = "lib";
+  const std::string def_library = "lib";
+  size_t skipped = 0;
+
+  for (const auto& ent : std::filesystem::directory_iterator(reply, ec)) {
+    if (ec)
+      break;
+    if (!ent.is_regular_file(ec))
+      continue;
+    const std::string fn = ent.path().filename().string();
+    if (fn.size() < 12 || fn.rfind(".json") != fn.size() - 5)
+      continue;
+    if (fn.rfind("target-", 0) != 0)
+      continue;
+    std::string blob = project_import::read_file_text(ent.path(), error);
+    if (!error.empty())
+      return false;
+    if (json_bool_field_default_false(blob, "imported")) {
+      ++skipped;
+      continue;
+    }
+    const auto name_opt = json_string_field(blob, "name");
+    const auto type_opt = json_string_field(blob, "type");
+    if (!name_opt.has_value() || !type_opt.has_value())
+      continue;
+    const std::string name_raw = *name_opt;
+    const std::string type_raw = *type_opt;
+    if (!project_import::plausible_cmake_target_name_token(name_raw))
+      continue;
+    const std::string name = project_import::sanitize_id(name_raw);
+    if (name.empty())
+      continue;
+    std::string type_u = type_raw;
+    for (char& c : type_u)
+      c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+
+    if (type_u == "INTERFACE_LIBRARY" || type_u == "OBJECT_LIBRARY" || type_u == "UTILITY" || type_u == "ALIAS_LIBRARY")
+      continue;
+    if (type_u == "EXECUTABLE") {
+      ++skipped;
+      continue;
+    }
+
+    CmakeLibraryInfo lib;
+    lib.name = name;
+    if (type_u == "STATIC_LIBRARY")
+      lib.kind = CmakeLibraryInfo::Kind::StaticOnly;
+    else if (type_u == "SHARED_LIBRARY" || type_u == "MODULE_LIBRARY")
+      lib.kind = CmakeLibraryInfo::Kind::SharedOnly;
+    else if (type_u == "UNKNOWN_LIBRARY")
+      lib.kind = CmakeLibraryInfo::Kind::Unknown;
+    else {
+      ++skipped;
+      continue;
+    }
+
+    if (!seen_lib_names.insert(name).second)
+      continue;
+    push_installed_wrappers_for_lib(lib, def_runtime, def_archive, def_library, iface, emitted, out);
+  }
+
+  if (skipped > 0)
+    out.warnings.push_back("CMake file-api: skipped " + std::to_string(skipped) +
+                           " non-library / imported / unsupported codemodel targets.");
+  if (out.targets.empty()) {
+    error = "cmake file-api codemodel produced no usable STATIC_LIBRARY/SHARED_LIBRARY targets under " +
+           to_posix_path_string(reply);
+    return false;
+  }
+  out.warnings.push_back(
+      "CMake file-api: target list comes from a real `cmake` configure; imported_installed_* artifact paths are "
+      "still heuristics under CMAKE_INSTALL_PREFIX — verify after install.");
+  error.clear();
+  return true;
+}
+
 }  // namespace
+
+bool import_cmake_targets_from_file_api_query(const std::filesystem::path& source_dir,
+                                              const std::filesystem::path& query_build_dir, ImportedPackage& out,
+                                              std::string& error) {
+  return file_api_query_impl(source_dir, query_build_dir, out, error);
+}
 
 void import_cmake_file(const std::filesystem::path& cmake_file, const std::filesystem::path& write_root,
                        ImportedPackage& out, std::vector<std::string>& warnings, std::string& error) {
@@ -706,15 +1024,17 @@ void import_cmake_installed_wrappers(const std::filesystem::path& cmake_file, Im
                                      std::vector<std::string>& warnings, std::string& error) {
   std::set<std::string> seen_cmake_files;
   std::map<std::string, CmakeLibraryInfo> libs;
+  std::set<std::string> exe_names;
   std::map<std::string, std::string> scalar_vars;
   std::vector<InstallTargetRule> install_rules;
   std::string include_dir;
-  import_cmake_wrappers_recursive(cmake_file, seen_cmake_files, libs, scalar_vars, install_rules, include_dir, error,
-                                  0);
+  import_cmake_wrappers_recursive(cmake_file, seen_cmake_files, libs, exe_names, scalar_vars, install_rules, include_dir,
+                                  error, 0);
   if (!error.empty())
     return;
 
   std::set<std::string> emitted;
+  std::set<std::string> libs_emitted_via_install;
   for (const auto& rule : install_rules) {
     for (const auto& tgt : rule.targets) {
       const auto it = libs.find(tgt);
@@ -725,49 +1045,39 @@ void import_cmake_installed_wrappers(const std::filesystem::path& cmake_file, Im
       const std::string archive_dest = rule.archive_dest.empty() ? "lib" : rule.archive_dest;
       const std::string library_dest = rule.library_dest.empty() ? "lib" : rule.library_dest;
       const std::string iface_dir = !rule.include_dest.empty() ? rule.include_dest : include_dir;
-      const bool build_static = (lib.kind == CmakeLibraryInfo::Kind::StaticOnly || lib.kind == CmakeLibraryInfo::Kind::Unknown);
-      const bool build_shared = (lib.kind == CmakeLibraryInfo::Kind::SharedOnly || lib.kind == CmakeLibraryInfo::Kind::Unknown);
-
-      if (build_static) {
-        TargetDesc td;
-        td.name = lib.name;
-        td.type = "imported_installed_static_library";
-        TargetDesc::InstalledWrapDesc iw;
-#if defined(_WIN32)
-        iw.artifact = join_rel_install_path(archive_dest, lib.name + ".lib");
-#else
-        iw.artifact = join_rel_install_path(archive_dest, "lib" + lib.name + ".a");
-#endif
-        iw.interface_include = iface_dir;
-        td.installed_wrap = std::move(iw);
-        const std::string key = "." + td.name + ":" + td.type;
-        if (emitted.insert(key).second)
-          out.targets.push_back({".targets/" + td.name, std::move(td)});
-      }
-      if (build_shared) {
-        TargetDesc td;
-        td.name = (build_static ? (lib.name + "_shared") : lib.name);
-        td.type = "imported_installed_shared_library";
-        TargetDesc::InstalledWrapDesc iw;
-#if defined(_WIN32)
-        iw.artifact = join_rel_install_path(runtime_dest, lib.name + ".dll");
-        iw.implib = join_rel_install_path(archive_dest, lib.name + ".lib");
-#elif defined(__APPLE__)
-        iw.artifact = join_rel_install_path(library_dest, "lib" + lib.name + ".dylib");
-#else
-        iw.artifact = join_rel_install_path(library_dest, "lib" + lib.name + ".so");
-#endif
-        iw.interface_include = iface_dir;
-        td.installed_wrap = std::move(iw);
-        const std::string key = "." + td.name + ":" + td.type;
-        if (emitted.insert(key).second)
-          out.targets.push_back({".targets/" + td.name, std::move(td)});
-      }
+      push_installed_wrappers_for_lib(lib, runtime_dest, archive_dest, library_dest, iface_dir, emitted, out);
+      libs_emitted_via_install.insert(tgt);
     }
   }
 
+  const std::string def_runtime = "bin";
+  const std::string def_archive = "lib";
+  const std::string def_library = "lib";
+  const std::string iface_fallback = include_dir;
+  size_t fallback_libs = 0;
+  for (const auto& kv : libs) {
+    if (libs_emitted_via_install.count(kv.first))
+      continue;
+    push_installed_wrappers_for_lib(kv.second, def_runtime, def_archive, def_library, iface_fallback, emitted, out);
+    ++fallback_libs;
+  }
+
+  if (fallback_libs > 0) {
+    warnings.push_back(
+        "CMake: inferred imported_installed_* for " + std::to_string(fallback_libs) +
+        " add_library target(s) without a matching install(TARGETS ...) rule; "
+        "artifact paths assume lib/ and bin/ under CMAKE_INSTALL_PREFIX — verify after install.");
+  }
+
+  if (!exe_names.empty()) {
+    warnings.push_back(
+        "CMake: detected " + std::to_string(exe_names.size()) +
+        " add_executable target(s); scaffold does not emit target.xml for executables yet "
+        "(configure requires sources or install(RUNTIME) support).");
+  }
+
   if (out.targets.empty())
-    warnings.push_back("CMake: no install(TARGETS ...) library rules resolved for imported_installed_* wrappers.");
+    warnings.push_back("CMake: no add_library targets with emitted imported_installed_* wrappers (check install rules).");
   error.clear();
 }
 

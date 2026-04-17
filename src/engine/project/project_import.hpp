@@ -38,6 +38,12 @@ bool import_from_probe(const std::filesystem::path& scan_root, const std::filesy
 // Parse CMake install(TARGETS ...) and emit imported_installed_* wrapper targets.
 bool import_cmake_installed_from_probe(const std::filesystem::path& cmake_file, ImportedPackage& out, std::string& error);
 
+// Run `cmake -S <source_dir> -B <query_build_dir>` with CMake File API (codemodel v2) and emit
+// imported_installed_* wrappers from real codemodel targets (requires a working `cmake` on PATH).
+bool import_cmake_targets_from_file_api_query(const std::filesystem::path& source_dir,
+                                              const std::filesystem::path& query_build_dir, ImportedPackage& out,
+                                              std::string& error);
+
 // Parse CMake find_package(...) and return normalized package dependency names + required flag.
 bool import_cmake_dependencies_from_probe(const std::filesystem::path& cmake_file,
                                           std::vector<std::pair<std::string, bool>>& deps, std::string& error);

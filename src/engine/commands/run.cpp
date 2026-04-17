@@ -1,5 +1,6 @@
 ﻿#include "run.hpp"
 
+#include "cli_verbose.hpp"
 #include "paths.hpp"
 
 #include <cstdlib>
@@ -10,6 +11,7 @@
 namespace up {
 
 int cmd_run(const std::filesystem::path& install_dir, const std::string& target_name) {
+  cli_verbose_phase("run", "start");
   const auto inst = std::filesystem::absolute(install_dir);
   const auto exe_dir = inst / "bin";
   std::filesystem::path exe = exe_dir / target_name;
@@ -21,6 +23,7 @@ int cmd_run(const std::filesystem::path& install_dir, const std::string& target_
     std::cerr << "run: executable not found: " << to_posix_path_string(exe) << "\n";
     return 2;
   }
+  cli_verbose_phase("run", "exec");
   std::ostringstream cmd;
   cmd << "\"" << to_posix_path_string(exe) << "\"";
   return std::system(cmd.str().c_str());

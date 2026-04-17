@@ -1,5 +1,6 @@
 ﻿#include "configure.hpp"
 
+#include "cli_verbose.hpp"
 #include "core/backend_dispatch.hpp"
 #include "lang.hpp"
 #include "path_check.hpp"
@@ -599,6 +600,7 @@ int cmd_configure(const std::filesystem::path& cwd,
                   const std::vector<std::string>& scan_roots,
                   const std::vector<std::string>& opt_kvs,
                   const std::optional<std::string>& build_dir_name_override) {
+  cli_verbose_phase("configure", "start");
   std::vector<std::filesystem::path> roots;
   if (scan_roots.empty())
     roots.push_back(cwd);
@@ -619,6 +621,7 @@ int cmd_configure(const std::filesystem::path& cwd,
     if (!has_cwd)
       roots.push_back(cwd);
   }
+  cli_verbose_phase("configure", "scan_roots");
 
   if (!require_ascii_path(cwd))
     return 6;
@@ -626,6 +629,7 @@ int cmd_configure(const std::filesystem::path& cwd,
     if (!require_ascii_path(r))
       return 6;
   }
+  cli_verbose_phase("configure", "paths_ascii_ok");
 
   std::vector<std::filesystem::path> package_files;
   std::vector<std::filesystem::path> target_files;
@@ -647,6 +651,7 @@ int cmd_configure(const std::filesystem::path& cwd,
     dedup(package_files);
     dedup(target_files);
   }
+  cli_verbose_phase("configure", "collect_desc_files");
 
   for (const auto& p : package_files) {
     if (!require_ascii_path(p))
@@ -661,6 +666,7 @@ int cmd_configure(const std::filesystem::path& cwd,
     std::cerr << "configure: no package.xml or target.xml found under scan roots.\n";
     return 2;
   }
+  cli_verbose_phase("configure", "load_xml");
 
   std::vector<std::pair<std::filesystem::path, PackageDesc>> loaded_packages;
   std::map<std::string, std::filesystem::path> package_name_to_dir;
@@ -718,6 +724,7 @@ int cmd_configure(const std::filesystem::path& cwd,
     target_index[key] = all_targets.size();
     all_targets.push_back(std::move(lt));
   }
+  cli_verbose_phase("configure", "targets_bound");
 
   std::cout << "Package / target graph (conceptual tree):\n";
   for (const auto& pkg_pair : loaded_packages) {
@@ -734,6 +741,7 @@ int cmd_configure(const std::filesystem::path& cwd,
                 << "\n";
     }
   }
+  cli_verbose_phase("configure", "graph_summary");
 
   const std::string host_arch = detect_arch_tag();
   std::map<std::string, std::string> seed_opts = merge_up_options({}, opt_kvs);
@@ -771,6 +779,7 @@ int cmd_configure(const std::filesystem::path& cwd,
   const std::string arch = compose_arch_tag(system, cpu, build_system, toolchain, link_mode, config_mode, crt_mode);
   std::filesystem::create_directories(build_root);
   const auto cache_path = build_root / "up_cache.txt";
+  cli_verbose_phase("configure", "build_root_ready");
 
   PackageDesc primary_pkg;
   std::vector<LoadedTarget> pkg_targets;
@@ -1368,6 +1377,7 @@ int cmd_configure(const std::filesystem::path& cwd,
 #endif
   }
 
+  cli_verbose_phase("configure", "generate_backend");
   const int gen_code = run_generate_backend(graph_model);
   if (gen_code != 0)
     return gen_code;
@@ -1378,10 +1388,13 @@ int cmd_configure(const std::filesystem::path& cwd,
   std::map<std::string, std::string> cache_opts = opts;
   if (!graph_model.cmake_prefix_path.empty())
     cache_opts["UP_CMAKE_PREFIX_PATH"] = graph_model.cmake_prefix_path;
+  cli_verbose_phase("configure", "write_cache");
   write_up_cache(cache_path, cwd, arch, primary_pkg.name, generated_file, roots_cached, cache_opts);
   write_packages_md(cache_path.parent_path() / "packages.md", loaded_packages, roots_cached);
-  if (equals_ci(build_system, "ninja"))
+  if (equals_ci(build_system, "ninja")) {
+    cli_verbose_phase("configure", "done_ninja");
     return 0;
+  }
 
   // In cmake mode, configure backend files immediately (e.g. .sln on Windows).
   const auto out_dir = graph_model.out_dir;
@@ -1400,6 +1413,7 @@ int cmd_configure(const std::filesystem::path& cwd,
 #endif
   const ConfigureBackendContext backend_ctx{
       build_root, out_dir, cmake_generator, config_name, multi_config};
+  cli_verbose_phase("configure", "cmake_configure_backend");
   return run_configure_backend(backend_ctx);
 }
 

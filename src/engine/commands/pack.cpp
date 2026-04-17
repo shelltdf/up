@@ -1,5 +1,6 @@
 ﻿#include "pack.hpp"
 
+#include "cli_verbose.hpp"
 #include "core/backend_dispatch.hpp"
 #include "paths.hpp"
 
@@ -11,6 +12,7 @@
 namespace up {
 
 int cmd_pack(const std::filesystem::path& cwd, const std::vector<std::filesystem::path>& install_dirs) {
+  cli_verbose_phase("pack", "start");
   if (install_dirs.empty()) {
     std::cerr << "pack: missing --install-dir-name <name> (repeatable; under .intermediate/install)\n";
     return 2;
@@ -52,6 +54,7 @@ int cmd_pack(const std::filesystem::path& cwd, const std::vector<std::filesystem
         config_name,
         pack_backend,
         allow_fallback};
+    cli_verbose_phase("pack", "pack_backend");
     last = run_pack_backend(backend_ctx);
     if (last != 0)
       return last;
