@@ -9,7 +9,7 @@ namespace {
 // English-only: embedded copy of rules aligned with doc/package-target-xml-spec.md for AI/tools without repo .md.
 // Split into named chunks: MSVC ~16kB string literal limit; edit the slice you need.
 constexpr const char* kXmlSpecEnThroughSection3 =
-  R"SPEC(UP_XML_SPEC_REVISION=10
+  R"SPEC(UP_XML_SPEC_REVISION=11
 
 # up — package.xml and target.xml (machine-oriented summary)
 
@@ -113,9 +113,9 @@ Rules:
 
 ## 2b. Variable merge order (builtin / package / target / workspace)
 
-Used for `@KEY@` substitution in **target-level** `<config_files>` templates (full stack below), **package-level**
-`<config_files>` (builtins + package `<vars>` + workspace only; `UP_TARGET_NAME` empty), and for evaluating `when="..."`
-on sources and headers.
+Used for **`@KEY@`** and **`${KEY}`** substitution in **target-level** `<config_files>` templates (full stack below),
+**package-level** `<config_files>` (builtins + package `<vars>` + workspace only; `UP_TARGET_NAME` empty), and for
+evaluating `when="..."` on sources and headers.
 
 **Layers (later overrides earlier):**
 
@@ -127,7 +127,8 @@ on sources and headers.
 4. **Workspace options**: keys from `--opt` and `up_cache.txt` (same map as `UP_*` switches, plus extra identifiers;
    **overrides** XML defaults for the same key).
 
-**Template syntax:** only **`@NAME@`** is replaced (CMake-style); unknown names are left unchanged.
+**Template syntax:** **`@NAME@`** and **`${NAME}`** are replaced (CMake `configure_file`-style); `NAME` must be a C
+identifier; unknown names are left unchanged. **`$<...>`** generator expressions are not interpreted.
 
 ### `when` attribute — where it is supported today
 
@@ -201,11 +202,12 @@ outside the forms above.
 - Block: `<config_files>...</config_files>` with **`<file in="template.rel" to="out.rel"/>`** (both required).
 - `in` is relative to **`target.xml` directory**; `to` is relative to **`.intermediate/generated/<package>/<target>/`** and
   must be a safe relative path (no `..` segments, not absolute).
-- During **configure**, `up` reads each template, applies **`@NAME@`** substitution using the **full** merged variable map
-  (§2b), writes the output under the generated directory, and adds that file to the target’s compile sources. The target’s
+- During **configure**, `up` reads each template, applies **`@NAME@`** and **`${NAME}`** substitution (same merged variable
+  map as §2b; unknown names are left unchanged) using the **full** merged variable map for target-level templates, then
+  writes the output under the generated directory, and adds that file to the target’s compile sources. The target’s
   generated directory is also added as an **include directory** for `executable` / `static_library` / `shared_library`
   targets.
-- After `@NAME@` replacement, lines **`#cmakedefine NAME ...`** and **`#cmakedefine01 NAME`** are expanded like CMake
+- After `@` / `${}` replacement, lines **`#cmakedefine NAME ...`** and **`#cmakedefine01 NAME`** are expanded like CMake
   `configure_file` (subset): unknown / empty / `0` / `false` / `off` / `no` treat as false; `#cmakedefine01` becomes
   **`#define NAME 0|1`**. This helps zlib-style `zconf.h` templates; it is **not** a full CMake `configure_file` engine.
 
@@ -412,7 +414,7 @@ optional `when`), `<assets>` (same `from` / `to` / preprocess / postprocess patt
 | Load/parse XML | src/engine/xml/simple_xml.cpp |
 | Types | src/engine/xml/simple_xml.hpp (`PackageDesc`, `TargetDesc`, `ConfigFileEntry`, `DefineEntry`) |
 | Configure validation / graph | src/engine/commands/configure.cpp |
-| Variable merge + `@KEY@` + `when` + `#cmakedefine` (config_files) | src/engine/xml/var_subst.cpp |
+| Variable merge + `@` / `${}` + `when` + `#cmakedefine` (config_files) | src/engine/xml/var_subst.cpp |
 
 End of embedded spec.
 )SPEC";

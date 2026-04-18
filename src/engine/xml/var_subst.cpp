@@ -150,6 +150,38 @@ std::string substitute_at_vars(const std::string& text, const std::map<std::stri
   return out;
 }
 
+std::string substitute_dollar_brace_vars(const std::string& text, const std::map<std::string, std::string>& vars) {
+  static const std::regex key_ok(R"(^[A-Za-z_][A-Za-z0-9_]*$)");
+  std::string out;
+  out.reserve(text.size() + 16);
+  for (size_t i = 0; i < text.size();) {
+    const size_t d = text.find("${", i);
+    if (d == std::string::npos) {
+      out.append(text, i, text.size() - i);
+      break;
+    }
+    out.append(text, i, d - i);
+    const size_t e = text.find('}', d + 2);
+    if (e == std::string::npos) {
+      out.append(text, d, text.size() - d);
+      break;
+    }
+    const std::string key = text.substr(d + 2, e - d - 2);
+    if (!std::regex_match(key, key_ok)) {
+      out.append(text, d, e - d + 1);
+      i = e + 1;
+      continue;
+    }
+    const auto it = vars.find(key);
+    if (it != vars.end())
+      out += it->second;
+    else
+      out.append(text, d, e - d + 1);
+    i = e + 1;
+  }
+  return out;
+}
+
 std::string apply_cmakedefine_directives(const std::string& text, const std::map<std::string, std::string>& vars) {
   return apply_cmakedefine_directives_impl(text, vars);
 }

@@ -25,6 +25,10 @@ std::map<std::string, std::string> merge_var_layers(const std::map<std::string, 
 // Replace @KEY@ using map; unknown keys left unchanged.
 std::string substitute_at_vars(const std::string& text, const std::map<std::string, std::string>& vars);
 
+// Replace `${KEY}` (CMake configure_file style) using the same map; unknown keys left unchanged. `KEY` must be a C
+// identifier. Does not interpret `$<...>` generator expressions.
+std::string substitute_dollar_brace_vars(const std::string& text, const std::map<std::string, std::string>& vars);
+
 // After `@KEY@` substitution: expand CMake-style `#cmakedefine` / `#cmakedefine01` lines using the same `vars` map
 // (subset of CMake `configure_file`; unknown macros => false / #undef).
 std::string apply_cmakedefine_directives(const std::string& text, const std::map<std::string, std::string>& vars);
