@@ -304,6 +304,11 @@ static void activate(GtkApplication* app, gpointer) {
   g_win = GTK_WIDGET(w);
   gtk_window_set_title(w, "up-gui");
   gtk_window_set_default_size(w, 920, 680);
+  {
+    const std::filesystem::path icon_path = unix_shared::executable_parent_dir() / "up_gui.png";
+    if (std::filesystem::exists(icon_path))
+      gtk_window_set_icon_from_file(w, icon_path.string().c_str(), nullptr);
+  }
   g_signal_connect(w, "destroy", G_CALLBACK(on_window_destroy), nullptr);
 
   GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);

@@ -89,7 +89,7 @@ set(UP_GUI_CORE_SOURCES
   src_gui/core/gui_core_actions.cpp
 )
 if(WIN32)
-  set(UP_GUI_PLATFORM_SOURCES src_gui/up_gui_win32.cpp)
+  set(UP_GUI_PLATFORM_SOURCES src_gui/up_gui_win32.cpp src_gui/resources/up_gui.rc)
 elseif(APPLE)
   set(UP_GUI_PLATFORM_SOURCES
     src_gui/main/main_cocoa.mm
@@ -139,6 +139,16 @@ else()
   target_compile_definitions(up-gui PRIVATE UP_ENABLE_PROJECT=0)
 endif()
 
+# GTK/Cocoa load up_gui.png from the executable directory; keep in sync with install rule.
+add_custom_command(
+  TARGET up-gui
+  POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${CMAKE_CURRENT_SOURCE_DIR}/src_gui/resources/up_gui.png"
+          "$<TARGET_FILE_DIR:up-gui>/up_gui.png"
+  COMMENT "Copy up_gui.png next to up-gui for dock/window icon")
+
 # build.py / install.py 仅针对下列目标；安装时使用 COMPONENT 以便 cmake --install --component
 set(UP_RUNTIME_COMPONENT up_runtime)
 install(TARGETS up up-gui RUNTIME DESTINATION bin COMPONENT ${UP_RUNTIME_COMPONENT})
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/src_gui/resources/up_gui.png" DESTINATION bin COMPONENT ${UP_RUNTIME_COMPONENT})

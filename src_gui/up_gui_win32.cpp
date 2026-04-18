@@ -32,6 +32,22 @@ namespace {
 constexpr wchar_t kClassName[] = L"UpGuiMainClass";
 constexpr wchar_t kTitle[] = L"up-gui";
 
+// Must match numeric id in src_gui/resources/up_gui.rc (RT_ICON).
+enum : WORD { kUpGuiAppIconResourceId = 1 };
+
+static void attach_default_gui_icons(WNDCLASSW& wc) {
+  static HICON s_lg{};
+  static bool s_loaded = false;
+  if (!s_loaded) {
+    s_loaded = true;
+    HINSTANCE hi = GetModuleHandleW(nullptr);
+    s_lg = static_cast<HICON>(LoadImageW(hi, MAKEINTRESOURCEW(kUpGuiAppIconResourceId), IMAGE_ICON,
+                                         GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), 0));
+  }
+  // WNDCLASSW has no hIconSm (that is WNDCLASSEXW); taskbar/small icon fall back from hIcon.
+  wc.hIcon = s_lg;
+}
+
 constexpr int IDC_PATH = 101;
 constexpr int IDC_BROWSE = 102;
 constexpr int IDC_CONFIGURE = 103;
@@ -1905,6 +1921,7 @@ bool ShowEnvSettingsDialog(HWND owner) {
     wc.lpszClassName = kEnvClass;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    attach_default_gui_icons(wc);
     RegisterClassW(&wc);
     cls_registered = true;
   }
@@ -3174,6 +3191,7 @@ void ShowUpHelpDialog(HWND owner, const std::wstring& text) {
     wc.lpszClassName = kHelpClass;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    attach_default_gui_icons(wc);
     RegisterClassW(&wc);
     cls_registered = true;
   }
@@ -3511,6 +3529,7 @@ bool ShowConfigureOptionDialog(HWND owner) {
     wc.lpszClassName = kClass;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    attach_default_gui_icons(wc);
     RegisterClassW(&wc);
     cls_registered = true;
   }
@@ -4202,6 +4221,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int show) {
   wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
   wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
   wc.lpszMenuName = nullptr;
+  attach_default_gui_icons(wc);
   RegisterClassW(&wc);
 
   RECT want{0, 0, 860, 680};

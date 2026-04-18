@@ -328,6 +328,16 @@ static void build_window() {
   (void)unix_shared::load_settings(g_settings_file, g_persist);
   g_scan_rows = [NSMutableArray array];
 
+  {
+    const std::filesystem::path icon_path = unix_shared::executable_parent_dir() / "up_gui.png";
+    if (std::filesystem::exists(icon_path)) {
+      NSString* ip = [NSString stringWithUTF8String:icon_path.string().c_str()];
+      NSImage* img = [[NSImage alloc] initWithContentsOfFile:ip];
+      if (img)
+        [NSApp setApplicationIconImage:img];
+    }
+  }
+
   const CGFloat W = 920, H = 680;
   NSRect rect = NSMakeRect(100, 100, W, H);
   NSWindow* win = [[NSWindow alloc] initWithContentRect:rect styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
