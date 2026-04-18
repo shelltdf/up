@@ -43,6 +43,22 @@ std::string trim_copy(std::string s) {
   return s.substr(b, e - b);
 }
 
+// Normalized: private | public | interface. On invalid attribute sets `error` and returns "".
+std::string parse_target_dependency_visibility(const std::string& frag, std::string& error) {
+  std::smatch vm;
+  if (!std::regex_search(frag, vm, std::regex(R"rx(\bvisibility\s*=\s*"([^"]*)")rx")))
+    return "private";
+  std::string raw = trim_copy(vm[1].str());
+  std::string v;
+  v.reserve(raw.size());
+  for (unsigned char uc : raw)
+    v.push_back(static_cast<char>(std::tolower(uc)));
+  if (v == "private" || v == "public" || v == "interface")
+    return v;
+  error = "target.xml <dependency>: invalid visibility \"" + raw + "\" (expected private|public|interface)";
+  return {};
+}
+
 std::string xml_escape_text(const std::string& s) {
   std::string o;
   o.reserve(s.size() + 8);
@@ -332,8 +348,15 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
   }
 
   std::regex dep_re(R"rx(<dependency\s+[^>]*name\s*=\s*"([^"]*)"[^>]*/>)rx");
-  for (std::sregex_iterator it(raw.begin(), raw.end(), dep_re), end; it != end; ++it)
-    out.dependencies.push_back((*it)[1].str());
+  for (std::sregex_iterator it(raw.begin(), raw.end(), dep_re), end; it != end; ++it) {
+    const std::string frag = (*it)[0].str();
+    TargetDesc::DependencyEntry de;
+    de.name = (*it)[1].str();
+    de.visibility = parse_target_dependency_visibility(frag, error);
+    if (!error.empty())
+      return false;
+    out.dependencies.push_back(std::move(de));
+  }
 
   const size_t defines_open = raw.find("<defines");
   if (defines_open != std::string::npos) {
@@ -629,8 +652,12 @@ bool write_target_xml(std::ostream& out, const TargetDesc& desc) {
       out << "  <interface_include dir=\"" << xml_escape_text(iw.interface_include) << "\"/>\n";
   }
   if (!desc.dependencies.empty()) {
-    for (const auto& d : desc.dependencies)
-      out << "  <dependency name=\"" << xml_escape_text(d) << "\"/>\n";
+    for (const auto& d : desc.dependencies) {
+      out << "  <dependency name=\"" << xml_escape_text(d.name) << "\"";
+      if (!d.visibility.empty() && d.visibility != "private")
+        out << " visibility=\"" << xml_escape_text(d.visibility) << "\"";
+      out << "/>\n";
+    }
   }
   if (!desc.defines.empty()) {
     out << "  <defines>\n";

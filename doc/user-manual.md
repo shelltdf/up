@@ -149,6 +149,8 @@ $ARCH = .\_build\Release\up.exe print-build-dir-name
 - **目标级依赖**：写在 `target.xml` 的 `<dependency name="..."/>`
   - 同包引用：`<dependency name="myLib"/>`
   - 跨包引用：`<dependency name="otherPkg:otherLib"/>`
+  - **可见性（CMake 后端）**：可写 **`visibility="private|public|interface"`**（可选，默认 **`private`**，大小写不敏感），对应 `target_link_libraries` 的 **`PRIVATE` / `PUBLIC` / `INTERFACE`**。**可执行目标**若对某依赖写 **`interface`**，configure 会失败。库目标之间的链式 `target_link_libraries` 当前不生成，多库符号由消费方（例如 exe）自行链接齐全。
+  - **`when`** 目前**不**作用于 `<dependency/>`；哪些标签支持条件、表达式语法以 **`up spec`** 与 **[doc/package-target-xml-spec.md](package-target-xml-spec.md)** 为准。
 
 ### 3.3 `<headers>` 头文件块（from/to）
 

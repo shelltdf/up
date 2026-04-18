@@ -259,9 +259,26 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
       cm << " \"" << s << "\"";
     cm << ")\n";
     if (!t.links.empty()) {
-      cm << "target_link_libraries(" << t.name << " PRIVATE";
-      for (const auto& n : t.links)
-        cm << " " << n;
+      cm << "target_link_libraries(" << t.name;
+      std::vector<std::string> priv, pub, iface;
+      for (const auto& pr : t.links) {
+        if (pr.second == "public")
+          pub.push_back(pr.first);
+        else if (pr.second == "interface")
+          iface.push_back(pr.first);
+        else
+          priv.push_back(pr.first);
+      }
+      auto emit_group = [&](const char* kw, const std::vector<std::string>& names) {
+        if (names.empty())
+          return;
+        cm << " " << kw;
+        for (const auto& n : names)
+          cm << " " << n;
+      };
+      emit_group("PRIVATE", priv);
+      emit_group("PUBLIC", pub);
+      emit_group("INTERFACE", iface);
       cm << ")\n";
     }
     if (!t.include_dirs.empty()) {

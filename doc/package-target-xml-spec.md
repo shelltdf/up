@@ -1,6 +1,6 @@
 ﻿# `package.xml` 与 `target.xml` 规范说明
 
-本文档描述 **up** 当前实现对两种描述文件的**解析约定**与 **configure** 阶段的**语义约束**。实现采用轻量正则扫描（见 `src/simple_xml.cpp`），**不是**完整 XML 校验器：建议仍写成良构 XML，并遵守下列可识别形态。
+本文档描述 **up** 当前实现对两种描述文件的**解析约定**与 **configure** 阶段的**语义约束**。实现采用轻量正则扫描（见 `src/engine/xml/simple_xml.cpp`），**不是**完整 XML 校验器：建议仍写成良构 XML，并遵守下列可识别形态。与 **`up spec`** 内嵌英文规范不一致时，以 **`up spec`** 与源码为准；本文件侧重中文说明与仓库内交叉引用。
 
 ---
 
@@ -176,14 +176,31 @@
 
 仅支持 **`@NAME@`** 占位符（类 CMake 子集）；未定义的 `NAME` 保持原文不替换。`up configure` 生成的 **`packages.md`** 中会列出各包/目标的 `<vars>` 默认值，并标出该 KEY 是否也出现在本次 configure 的选项映射中（便于核对是否被 `--opt` / 缓存覆盖）。
 
-#### `when` 语义（configure 报错或跳过）
+#### `when` 适用的标签（当前实现）
 
-- 省略或空白：恒为真。
-- **`true` / `false`**（大小写不敏感）。
-- **`KEY==token`** 或 **`KEY!=token`**：对合并变量表中 `KEY` 的值与 `token` 做 **ASCII 大小写不敏感**比较。
-- **单独一个标识符**：必须在合并表中有定义，再按「真值」判断（`0`、`false`、`off`、`no`、空串为假，其余为真）。
-- 无法解析的裸表达式：**configure 失败**并给出错误信息。
-- 为假时：该条目不参与编译源列表 / 不参与头文件 `include` 与安装规则收集。
+- **已实现求值**：**`<sources>`** 内带 `from=` 的 **`<file>` / `<glob>`**（自闭合或配对开标签上的 `when`）；**`<headers>`** 内 **`<dir>` / `<file>` / `<glob>`** 上的 `when`。
+- **未实现（勿依赖；写了也不会按条件生效）**：**`<assets>`**、**`<define>`**、**`<dependency/>`**、**`<config_files>`** 内 **`<file>`**、**`<var>`**、包级行、**`<prebuilt/>`**、**`<install/>`**、预处理/后处理子标签、以及 **`<package>` / `<target>` 根标签**。
+- 产品上可为更多「行级」配置逐步统一 `when`，但需逐类定义语义并实现（例如跳过依赖与「未声明依赖」的边界）。
+
+#### `when` 表达式语法（与 `eval_when`，`src/engine/xml/var_subst.cpp` 一致）
+
+对 `when="..."` 的字符串先做 **ASCII 首尾空白** 修剪，再按下列 **唯一一种** 形式匹配（**自上而下**；整串须完全属于该形式）：
+
+1. **空串**（修剪后）：视为 **真**（恒包含该项）。
+2. **布尔字面量**：整串为 **`true`** 或 **`false`**（ASCII，**大小写不敏感**）。
+3. **比较式**：整串须匹配 **`KEY == RHS`** 或 **`KEY != RHS`**（`==` / `!=` 两侧可有空白），其中：
+   - **`KEY`**：单个 C 风格标识符 **`[A-Za-z_][A-Za-z0-9_]*`**，在 **§3.5 变量合并** 得到的映射表中查找。
+   - **`RHS`**：单个 token，**仅** **`[A-Za-z0-9_.]+`**（**不能**含空格、引号、`-`、`/` 等；若值里含连字符等，请改用「单独 KEY + 裸变量真值」或其它变量设计，勿指望在字面 RHS 里写 `dynamic-md` 这类 token）。
+   - 将表中 **`KEY` 的值** 与 **`RHS` 字面** 均转为 **ASCII 小写** 后做字符串相等 / 不等比较。
+   - 若表中 **无 `KEY`**：比较时 **`KEY` 的值按空串** 参与。
+4. **裸标识符**：整串为 **一个** 标识符 **`[A-Za-z_][A-Za-z0-9_]*`**，且 **必须** 在合并表中 **存在**；取其值做 **真值**判断：
+   - **假**：值为空，或（大小写不敏感）为 **`0`**、**`false`**、**`off`**、**`no`**；
+   - **真**：其它任意值。
+   - 若 **键不存在**：**configure 失败**（未知 `when`）。
+
+**不支持**：逻辑与/或（`&&` `||`）、括号分组、函数调用、子串匹配、引号包裹的任意文本、或上述形式以外的自由表达式。
+
+**为假时**（且该标签已实现 `when`）：对应 **`<sources>` / `<headers>`** 条目被跳过（不进入编译源列表 / 不参与头文件 include 推导与安装规则）。
 
 #### `<config_files>`（类 configure_file 的最小子集）
 
@@ -199,17 +216,18 @@
 - 或配对标签开标签上的 **`when`**。
 - 为假时该源条目被跳过（glob 不展开）。
 
-### 3.6 目标依赖 `<dependency name="..."/>`
+### 3.6 目标依赖 `<dependency name="..." visibility="..."/>`
 
-- 自闭合 **` <dependency name="..."/> `**，可多次出现。
+- 自闭合 **`<dependency .../>`**，可多次出现。
 - **`name`** 支持两种形式：
   1. **`目标名`**：与本包内某一**库** target 同名，表示依赖本包该库。
   2. **`包名:目标名`**：依赖**其他包**中的某一库 target（该包须在 `package.xml` 中声明，且该 target 须在扫描集中存在）。
-- **约束**：依赖指向的目标类型须为库目标（`static_library` / `shared_library` / `imported_static_library` / `imported_shared_library` / `imported_installed_static_library` / `imported_installed_shared_library`）；解析不到或类型不对则 **configure 失败**。
+- **`visibility`**（可选，默认 **`private`**，解析时大小写不敏感）：取值为 **`private` / `public` / `interface`**，对应 CMake `target_link_libraries` 的 **`PRIVATE` / `PUBLIC` / `INTERFACE`**。**可执行文件**作为消费者时，**不允许**使用 **`interface`**（可执行文件必须实际链接该库；否则 configure 失败）。
+- **约束**：依赖指向的目标类型须为库目标（`static_library` / `shared_library` / `imported_static_library` / `imported_shared_library` / `imported_installed_static_library` / `imported_installed_shared_library`）或 **`asset_bundle`**（仅校验图，不参与链接）；解析不到或类型不对则 **configure 失败**。
 
 **生成行为（CMake 模式，当前实现）**：
 
-- **可执行目标**：除显式 `<dependency>` 外，会 **PRIVATE 链接本包内全部库 target**；再将各 `<dependency>` 解析出的库名并入链接列表（去重、排序）。
+- **可执行目标**：若 **没有任何** 显式 `<dependency>` 链接行，则 **PRIVATE 链接本包内全部库 target**；若存在显式 `<dependency>`，则使用其中解析出的库名及 **`visibility`** 生成 `target_link_libraries`（同名库若重复声明，以后写覆盖；并排序、去重）。
 - **库目标**：`<dependency>` 会参与依赖校验与「外包包内库」加入生成图；**当前不会**为静态库与静态库之间生成 `target_link_libraries` 链式链接。若甲库实现需调用乙库符号，需在工程层面自行保证链接顺序或合并目标（例如由最终可执行文件链接全部库）；详见 `test_projects` 中示例取舍。
 
 ---

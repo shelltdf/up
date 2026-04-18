@@ -59,7 +59,8 @@ struct ConfigureTargetModel {
   std::vector<std::string> include_dirs;
   /** CMake `NAME` or `NAME=value` items for target_compile_definitions / Ninja -D. */
   std::vector<std::string> compile_definitions;
-  std::vector<std::string> links;
+  /** CMake `target_link_libraries`: target name + visibility keyword (private|public|interface). */
+  std::vector<std::pair<std::string, std::string>> links;
   bool imported_prebuilt = false;
   // True: IMPORTED_* paths are ${CMAKE_INSTALL_PREFIX}/<rel> after ExternalProject install.
   bool imported_from_install_prefix = false;

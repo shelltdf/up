@@ -83,7 +83,8 @@
 
 - 文件名固定为 **`target.xml`**；**同一目录下不得出现多个** target 描述文件，多目标通过**不同子目录**各放一份 `target.xml` 解决。
 - 每个文件内**只包含一个根 `<target>` 元素**。`<sources>` 中的路径相对于**该 `target.xml` 所在目录**。
-- 承载：目标名、类型（`executable` / `static_library` / `shared_library`）、源文件列表、可选 **`<headers>`**（头文件来源与安装到 `include/` 的布局）；与父 `package.xml` 的归属关系由目录树表达（`target.xml` 须位于对应 `package.xml` 之下的子树中）。
+- 承载：目标名、类型（`executable` / `static_library` / `shared_library`）、源文件列表、可选 **`<headers>`**（头文件来源与安装到 `include/` 的布局）、可选 **`<dependency name="..." visibility="..."/>`**（`visibility` 可选，默认 **`private`**，取值 **`private` / `public` / `interface`**，对应 CMake `target_link_libraries` 的可见性；**可执行目标**不得对依赖使用 **`interface`**，否则 configure 失败）。库与库之间**当前不**生成链式 `target_link_libraries`（由最终可执行文件等消费方链接）。**`<sources>` / `<headers>`** 等条目上的 **`when`** 与变量合并细则见 **[doc/package-target-xml-spec.md](doc/package-target-xml-spec.md)**（与 **`up spec`** 输出一致者优先）。
+- 与父 `package.xml` 的归属关系由目录树表达（`target.xml` 须位于对应 `package.xml` 之下的子树中）。
 
 ### 3.3 最小示例与仓库布局
 

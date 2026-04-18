@@ -702,10 +702,10 @@ void write_packages_md(const std::filesystem::path& out_path,
     for (const auto& lt : all_targets) {
       if (lt.package_name != intra_package_target_graph_pkg)
         continue;
-      for (const auto& dep_ref : lt.desc.dependencies) {
+      for (const auto& dep : lt.desc.dependencies) {
         std::string dep_pkg;
         std::string dep_tgt;
-        if (!split_dep_ref(dep_ref, lt.package_name, dep_pkg, dep_tgt))
+        if (!split_dep_ref(dep.name, lt.package_name, dep_pkg, dep_tgt))
           continue;
         if (dep_pkg == intra_package_target_graph_pkg) {
           any_intra_target_dep = true;
@@ -727,10 +727,10 @@ void write_packages_md(const std::filesystem::path& out_path,
     for (const auto& lt : all_targets) {
       if (lt.package_name != intra_package_target_graph_pkg)
         continue;
-      for (const auto& dep_ref : lt.desc.dependencies) {
+      for (const auto& dep : lt.desc.dependencies) {
         std::string dep_pkg;
         std::string dep_tgt;
-        if (!split_dep_ref(dep_ref, lt.package_name, dep_pkg, dep_tgt))
+        if (!split_dep_ref(dep.name, lt.package_name, dep_pkg, dep_tgt))
           continue;
         if (dep_pkg != intra_package_target_graph_pkg)
           continue;
@@ -746,10 +746,10 @@ void write_packages_md(const std::filesystem::path& out_path,
       if (lt.package_name != intra_package_target_graph_pkg)
         continue;
       const auto src_id = mermaid_target_node_id(lt.package_name, lt.desc.name);
-      for (const auto& dep_ref : lt.desc.dependencies) {
+      for (const auto& dep : lt.desc.dependencies) {
         std::string dep_pkg;
         std::string dep_tgt;
-        if (!split_dep_ref(dep_ref, lt.package_name, dep_pkg, dep_tgt))
+        if (!split_dep_ref(dep.name, lt.package_name, dep_pkg, dep_tgt))
           continue;
         if (dep_pkg != intra_package_target_graph_pkg)
           continue;
@@ -776,11 +776,11 @@ void write_packages_md(const std::filesystem::path& out_path,
       if (lt.desc.type != "executable")
         continue;
       for (const auto& link : graph_model.targets[i].links) {
-        if (!primary_lib_names.count(link))
+        if (!primary_lib_names.count(link.first))
           continue;
-        if (link == lt.desc.name)
+        if (link.first == lt.desc.name)
           continue;
-        link_edges.push_back({lt.desc.name, link});
+        link_edges.push_back({lt.desc.name, link.first});
       }
     }
     if (!link_edges.empty()) {
@@ -1085,7 +1085,8 @@ int cmd_configure(const std::filesystem::path& cwd,
   PackageDesc primary_pkg;
   std::vector<LoadedTarget> pkg_targets;
   std::vector<LoadedTarget> extra_lib_targets;
-  std::map<std::string, std::vector<std::string>> exe_extra_links;  // primary target name -> lib target names
+  // primary target name -> (lib target name, link visibility: private|public|interface)
+  std::map<std::string, std::vector<std::pair<std::string, std::string>>> exe_extra_links;
   std::filesystem::path pkg_dir;
   if (!loaded_packages.empty()) {
     bool found_primary = false;
@@ -1141,11 +1142,11 @@ int cmd_configure(const std::filesystem::path& cwd,
   std::set<std::string> extra_target_keys;
   for (const auto& lt : pkg_targets) {
     const std::string self_key = lt.package_name + ":" + lt.desc.name;
-    for (const auto& dep_ref : lt.desc.dependencies) {
+    for (const auto& dep : lt.desc.dependencies) {
       std::string dep_pkg;
       std::string dep_tgt;
-      if (!split_dep_ref(dep_ref, primary_pkg.name, dep_pkg, dep_tgt)) {
-        std::cerr << "configure: invalid target dependency \"" << dep_ref << "\" in " << self_key << "\n";
+      if (!split_dep_ref(dep.name, primary_pkg.name, dep_pkg, dep_tgt)) {
+        std::cerr << "configure: invalid target dependency \"" << dep.name << "\" in " << self_key << "\n";
         return 3;
       }
       if (dep_pkg != primary_pkg.name && !declared_dep_pkgs.count(dep_pkg)) {
@@ -1170,11 +1171,26 @@ int cmd_configure(const std::filesystem::path& cwd,
         std::cerr << "configure: target dependency must reference a library or asset_bundle target: " << dep_key << "\n";
         return 3;
       }
+      if (lt.desc.type == "executable" && dep.visibility == "interface") {
+        std::cerr << "configure: <dependency visibility=\"interface\"> is not supported when the consumer is an "
+                     "executable (does not link the library): "
+                  << self_key << " -> " << dep_key << "\n";
+        return 3;
+      }
       if (dep_key != self_key && dep_is_link_lib)
-        exe_extra_links[lt.desc.name].push_back(dep_lt.desc.name);
+        exe_extra_links[lt.desc.name].emplace_back(dep_lt.desc.name, dep.visibility);
       if (dep_pkg != primary_pkg.name)
         extra_target_keys.insert(dep_key);
     }
+  }
+  for (auto& kv : exe_extra_links) {
+    std::map<std::string, std::string> vis_by_lib;
+    for (const auto& pr : kv.second)
+      vis_by_lib[pr.first] = pr.second;
+    kv.second.clear();
+    kv.second.reserve(vis_by_lib.size());
+    for (const auto& pr : vis_by_lib)
+      kv.second.emplace_back(pr.first, pr.second);
   }
   for (const auto& k : extra_target_keys) {
     const auto it = target_index.find(k);
@@ -1756,21 +1772,31 @@ int cmd_configure(const std::filesystem::path& cwd,
           if (link_mode == "static" &&
               (pl.desc.type == "static_library" || pl.desc.type == "imported_static_library" ||
                pl.desc.type == "imported_installed_static_library"))
-            tm.links.push_back(pl.desc.name);
+            tm.links.emplace_back(pl.desc.name, "private");
           else if (link_mode == "dynamic" &&
                    (pl.desc.type == "shared_library" || pl.desc.type == "imported_shared_library" ||
                     pl.desc.type == "imported_installed_shared_library"))
-            tm.links.push_back(pl.desc.name);
+            tm.links.emplace_back(pl.desc.name, "private");
         }
         if (tm.links.empty()) {
           for (const auto& pl : pkg_targets) {
             if (is_lib(pl.desc))
-              tm.links.push_back(pl.desc.name);
+              tm.links.emplace_back(pl.desc.name, "private");
           }
         }
       }
-      std::sort(tm.links.begin(), tm.links.end());
-      tm.links.erase(std::unique(tm.links.begin(), tm.links.end()), tm.links.end());
+      std::sort(tm.links.begin(), tm.links.end(), [](const std::pair<std::string, std::string>& a,
+                                                    const std::pair<std::string, std::string>& b) {
+        if (a.first != b.first)
+          return a.first < b.first;
+        return a.second < b.second;
+      });
+      tm.links.erase(std::unique(tm.links.begin(), tm.links.end(),
+                                 [](const std::pair<std::string, std::string>& a,
+                                    const std::pair<std::string, std::string>& b) {
+                                   return a.first == b.first && a.second == b.second;
+                                 }),
+                     tm.links.end());
     }
     graph_model.targets.push_back(std::move(tm));
   }

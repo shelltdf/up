@@ -199,7 +199,8 @@ void merge_cmake_source_overlay_into(ImportedPackage& base, ImportedPackage&& ov
       b = std::move(o);
     } else if (is_native_build(b) && is_native_build(o)) {
       for (const auto& d : o.dependencies) {
-        if (std::find(b.dependencies.begin(), b.dependencies.end(), d) == b.dependencies.end())
+        const auto same_name = [&](const TargetDesc::DependencyEntry& x) { return x.name == d.name; };
+        if (std::find_if(b.dependencies.begin(), b.dependencies.end(), same_name) == b.dependencies.end())
           b.dependencies.push_back(d);
       }
       for (const auto& inc : o.includes) {

@@ -136,6 +136,7 @@ up build --build-dir-name default
 - 纯库包（没有 executable）也支持 `configure/build`
 - Windows 下依赖库变量优先使用 `implib` / `.lib`，避免将 `.dll` 误传给链接器
 - 若 `install(TARGETS ...)` 解析不到可包装库，只会生成 `package.xml`，此时可手工补 `.targets/*/target.xml`，或改用 `--legacy-cmake-parse`
+- 在 **`target.xml`** 里写目标级依赖时，CMake 后端可选 **`visibility="private|public|interface"`**（默认 `private`，对应 `target_link_libraries` 的可见性）；**可执行目标**不得对依赖使用 **`interface`**。完整语法与 `when` 适用范围以 **`up spec`** 与 **`doc/package-target-xml-spec.md`** 为准。
 
 ## 工作目录约定（相对于执行 `up` 时的 cwd）
 

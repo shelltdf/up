@@ -89,7 +89,12 @@ struct TargetDesc {
   std::vector<SourceEntry> source_entries;
   std::optional<PrebuiltDesc> prebuilt;
   std::optional<InstalledWrapDesc> installed_wrap;
-  std::vector<std::string> dependencies;  // package:target or target(same package)
+  /** `<dependency name="..." visibility="private|public|interface"/>` — `name` is package:target or same-package target. */
+  struct DependencyEntry {
+    std::string name;
+    std::string visibility;  // private | public | interface
+  };
+  std::vector<DependencyEntry> dependencies;
   /** Public headers: XML element `<headers>` (parsed into this list). */
   std::vector<IncludeEntry> includes;
   std::vector<AssetEntry> assets;

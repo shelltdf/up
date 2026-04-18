@@ -130,6 +130,8 @@ In addition, when the primary package declares dependencies that expose `importe
 - Target-level dependency: `<dependency name="..."/>` in `target.xml`
   - Intra-package: `myLib`
   - Cross-package: `otherPkg:otherLib`
+  - **Visibility (CMake backend)**: optional **`visibility="private|public|interface"`** (default **`private`**, case-insensitive), mapping to **`PRIVATE` / `PUBLIC` / `INTERFACE`** in `target_link_libraries`. **Executable** targets must not use **`interface`** on a dependency (configure fails). Library-to-library chained `target_link_libraries` is not generated today; ensure consumers (for example the final exe) link all needed libraries.
+  - **`when`** is **not** evaluated on `<dependency/>` yet; which tags support conditions and the expression grammar are defined by **`up spec`** and **[doc/package-target-xml-spec.md](package-target-xml-spec.md)**.
 
 ### 3.3 `<headers>` block (`from/to`)
 

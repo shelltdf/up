@@ -7,7 +7,8 @@ namespace up {
 namespace {
 
 // English-only: embedded copy of rules aligned with doc/package-target-xml-spec.md for AI/tools without repo .md.
-constexpr const char* kXmlSpecEn = R"SPEC(UP_XML_SPEC_REVISION=8
+// Split into named chunks: MSVC ~16kB string literal limit; edit the slice you need.
+constexpr const char* kXmlSpecEnThroughSection3 = R"SPEC(UP_XML_SPEC_REVISION=8
 
 # up — package.xml and target.xml (machine-oriented summary)
 
@@ -90,9 +91,41 @@ Used for `@KEY@` substitution in `<config_files>` templates and for evaluating `
 
 **Template syntax:** only **`@NAME@`** is replaced (CMake-style); unknown names are left unchanged.
 
-**`when` semantics:** empty `when` means always. Otherwise: `true` / `false`; `KEY==token` or `KEY!=token` (ASCII
-case-insensitive for the comparison); or a bare variable name — must exist in the merged map, then truthiness applies
-(`0`, `false`, `off`, `no`, empty => false). Invalid bare expressions (unknown identifier) => **configure error**.
+### `when` attribute — where it is supported today
+
+- **Implemented:** optional `when="..."` on **`<sources>`** entries (`<file …/>`, `<glob …/>`, and paired opening tags with
+  `from=`) and on **`<headers>`** entries (`<dir/>`, `<file/>`, `<glob/>`).
+- **Not implemented (ignored if present; do not rely on it):** `<assets>`, `<define>`, `<dependency/>`, `<config_files>`,
+  `<var>`, package-level rows, `<prebuilt/>`, `<install/>`, preprocess/postprocess tags, and the `<target>` / `<package>`
+  roots themselves.
+
+Uniform `when` on every repeatable row is a reasonable **product direction**, but each construct needs a defined meaning
+(e.g. skipping a `<dependency>` vs failing resolution; skipping `<define>` vs compile flags) and extra configure work.
+
+### `when` expression grammar (matches `eval_when` in `src/engine/xml/var_subst.cpp`)
+
+The string is **trimmed** of leading/trailing ASCII whitespace, then evaluated as **exactly one** of the following forms
+(in this order):
+
+1. **Empty** after trim — treated as **true** (always include the item).
+2. **Boolean literal:** whole string is `true` or `false` (ASCII letters; compared case-insensitively) — **true** or
+   **false**.
+3. **Comparison:** must match the **entire** string (after trim), pattern  
+   `KEY == RHS` or `KEY != RHS` with optional spaces around `==` / `!=`, where:
+   - **`KEY`** is a single C-like identifier: `[A-Za-z_][A-Za-z0-9_]*` (matches keys in the merged map: builtins,
+     package `<vars>`, target `<vars>`, `--opt` / `up_cache.txt`).
+   - **`RHS`** is a **single token** `[A-Za-z0-9_.]+` only (no spaces, no quotes, no `/`, no `-` unless you encode them
+     outside this grammar — use another `KEY` or a different expression form).
+   - The variable’s value and `RHS` are compared as **ASCII lowercased** strings for `==` / `!=`.
+   - If `KEY` is missing from the map, its value is treated as **empty** for the comparison.
+4. **Bare identifier:** the whole string is **one** identifier `[A-Za-z_][A-Za-z0-9_]*` that **must exist** as a key in the
+   merged map; the result is **truthy** or **falsy** on the stored value:
+   - **Falsy:** empty, or (case-insensitive) `0`, `false`, `off`, `no`.
+   - **Truthy:** any other value.
+   - If the key is **not** in the map — **configure error** (unknown `when`).
+
+**Not supported:** logical combinators (`&&`, `||`), parentheses, function calls, substring match, or arbitrary text
+outside the forms above.
 
 ---
 
@@ -157,17 +190,24 @@ case-insensitive for the comparison); or a bare variable name — must exist in 
 - `<dependency name="LocalLib"/>` — depends on another **library** target in the **same** package (same `name`).
 - `<dependency name="OtherPkg:TheirLib"/>` — cross-package; `OtherPkg` must be in `package.xml` `<dependency/>` and
   `TheirLib` must exist in the scan set.
+- **Optional attribute:** `visibility="private|public|interface"` (default **`private`**, ASCII case-insensitive on
+  parse). Maps to CMake `target_link_libraries` link keywords for **executable** consumers when explicit `<dependency/>`
+  rows are used: **`PRIVATE`** / **`PUBLIC`** / **`INTERFACE`**. **`interface` is rejected** when the consumer target is
+  an **`executable`** (an executable must actually link the library; use `private` or `public`).
 - Valid dependency target types are library-like (`static_library`, `shared_library`, imported_* library types).
   Configure fails if the reference cannot be resolved or points to a non-library.
 
 CMake backend note (current behavior):
-- **Executable** targets also **PRIVATE-link all library targets in the same package** in addition to explicit
-  `<dependency/>` entries.
+- **Executable** targets also **PRIVATE-link all library targets in the same package** when no explicit `<dependency/>`
+  link rows exist; otherwise explicit rows (with their `visibility`) are used for `target_link_libraries`.
 - **Library** targets: `<dependency/>` participates in validation and external-package library wiring; static-to-static
   **transitive** `target_link_libraries` chaining may **not** be generated—ensure the final executable links all needed
   libs if symbols must be pulled from multiple static libs.
 
 ---
+)SPEC";
+
+constexpr const char* kXmlSpecEnSections4And5 = R"SPEC(
 
 ## 4. Encoding and paths
 
@@ -183,6 +223,9 @@ CMake backend note (current behavior):
   workflows when possible.
 
 ---
+)SPEC";
+
+constexpr const char* kXmlSpecEnSections6Through7 = R"SPEC(
 
 ## 6. Examples
 
@@ -238,7 +281,8 @@ blocks you do not need. Some combinations are **mutually exclusive by `type`** (
 **target.xml — native compile target** (`executable` | `static_library` | `shared_library`): `<vars>`, `<config_files>`,
 `<defines>`, `<sources>` (legacy `<file>text</file>`, wrapper block, self-closing `from=` / `when=`, paired tags with
 `<preprocess command="..."/>` / `<postprocess command="..."/>`), `<headers>` (`dir` / `file` / `glob`, optional `to`,
-optional `when`), `<assets>` (same `from` / `to` / preprocess / postprocess pattern, **no** `when`), `<dependency/>`:
+optional `when`), `<assets>` (same `from` / `to` / preprocess / postprocess pattern; **`when` not implemented**),
+`<dependency/>`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -271,7 +315,7 @@ optional `when`), `<assets>` (same `from` / `to` / preprocess / postprocess patt
     <file from="assets/readme.txt" to="share/demo"/>
     <glob from="assets/*.md" to="share/demo"/>
   </assets>
-  <dependency name="other_pkg:their_lib"/>
+  <dependency name="other_pkg:their_lib" visibility="public"/>
 </target>
 ```
 
@@ -314,7 +358,7 @@ End of embedded spec.
 
 int cmd_spec(const std::vector<std::string>& args) {
   (void)args;
-  std::cout << kXmlSpecEn;
+  std::cout << kXmlSpecEnThroughSection3 << kXmlSpecEnSections4And5 << kXmlSpecEnSections6Through7;
   return 0;
 }
 

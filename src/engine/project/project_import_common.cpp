@@ -218,9 +218,11 @@ std::string resolve_target_xml_bucket(const std::filesystem::path& write_root,
 void add_target_dependency(TargetDesc& td, const std::string& dep_name) {
   if (dep_name.empty())
     return;
-  if (std::find(td.dependencies.begin(), td.dependencies.end(), dep_name) != td.dependencies.end())
-    return;
-  td.dependencies.push_back(dep_name);
+  for (const auto& d : td.dependencies) {
+    if (d.name == dep_name)
+      return;
+  }
+  td.dependencies.push_back(TargetDesc::DependencyEntry{dep_name, "private"});
 }
 
 bool add_target_include_dir(TargetDesc& td, const std::filesystem::path& write_root, const std::string& subdir,

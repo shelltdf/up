@@ -72,6 +72,7 @@ flowchart LR
 3. 依赖引用
    - 包内：`<dependency name="myLib"/>`
    - 跨包：`<dependency name="otherPkg:otherLib"/>`
+   - CMake 后端可选 **`visibility="private|public|interface"`**（默认 `private`）；可执行目标不得使用 `interface`。细则见 **`up spec`** 与 `doc/package-target-xml-spec.md`。
 
 ---
 
