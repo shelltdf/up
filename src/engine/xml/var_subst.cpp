@@ -186,15 +186,46 @@ std::string apply_cmakedefine_directives(const std::string& text, const std::map
   return apply_cmakedefine_directives_impl(text, vars);
 }
 
+std::map<std::string, std::string> merge_config_template_placeholder_defaults(std::map<std::string, std::string> vars,
+                                                                              const std::string& text) {
+  static const std::regex key_ok(R"(^[A-Za-z_][A-Za-z0-9_]*$)");
+  for (size_t i = 0; i < text.size();) {
+    const size_t d = text.find("${", i);
+    if (d == std::string::npos)
+      break;
+    const size_t e = text.find('}', d + 2);
+    if (e == std::string::npos)
+      break;
+    const std::string key = trim_ws(text.substr(d + 2, e - d - 2));
+    if (!key.empty() && std::regex_match(key, key_ok) && vars.find(key) == vars.end())
+      vars.emplace(key, "");
+    i = e + 1;
+  }
+  for (size_t i = 0; i < text.size();) {
+    const size_t a = text.find('@', i);
+    if (a == std::string::npos)
+      break;
+    const size_t b = text.find('@', a + 1);
+    if (b == std::string::npos)
+      break;
+    const std::string key = trim_ws(text.substr(a + 1, b - a - 1));
+    if (!key.empty() && std::regex_match(key, key_ok) && vars.find(key) == vars.end())
+      vars.emplace(key, "");
+    i = b + 1;
+  }
+  return vars;
+}
+
 std::string finalize_config_template_text(const std::string& text, const std::map<std::string, std::string>& vars) {
+  const std::map<std::string, std::string> v = merge_config_template_placeholder_defaults(vars, text);
   std::string out = text;
   for (int iter = 0; iter < 64; ++iter) {
-    const std::string step = substitute_dollar_brace_vars(substitute_at_vars(out, vars), vars);
+    const std::string step = substitute_dollar_brace_vars(substitute_at_vars(out, v), v);
     if (step == out)
       break;
     out = step;
   }
-  return apply_cmakedefine_directives(out, vars);
+  return apply_cmakedefine_directives(out, v);
 }
 
 bool eval_when(const std::string& when, const std::map<std::string, std::string>& vars, std::string& error_out) {

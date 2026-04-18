@@ -29,7 +29,14 @@ std::string substitute_at_vars(const std::string& text, const std::map<std::stri
 // identifier. Does not interpret `$<...>` generator expressions.
 std::string substitute_dollar_brace_vars(const std::string& text, const std::map<std::string, std::string>& vars);
 
-// `<config_files>`: alternate `@KEY@` and `${KEY}` until fixed point (max 64 rounds), then `#cmakedefine` / `#cmakedefine01`.
+// `<config_files>`: scan `text` for `@KEY@` / `${KEY}` (C identifier `KEY`); any `KEY` not already in `vars` is inserted
+// with an empty value so substitution removes the placeholder (XML / `--opt` still override). Used by
+// `finalize_config_template_text` only.
+std::map<std::string, std::string> merge_config_template_placeholder_defaults(std::map<std::string, std::string> vars,
+                                                                              const std::string& text);
+
+// `<config_files>`: merge template placeholder defaults, then alternate `@KEY@` and `${KEY}` until fixed point (max 64
+// rounds), then `#cmakedefine` / `#cmakedefine01`.
 std::string finalize_config_template_text(const std::string& text, const std::map<std::string, std::string>& vars);
 
 // After `@` / `${}` substitution: expand CMake-style `#cmakedefine` / `#cmakedefine01` lines using the same `vars` map
