@@ -25,6 +25,10 @@ std::map<std::string, std::string> merge_var_layers(const std::map<std::string, 
 // Replace @KEY@ using map; unknown keys left unchanged.
 std::string substitute_at_vars(const std::string& text, const std::map<std::string, std::string>& vars);
 
+// After `@KEY@` substitution: expand CMake-style `#cmakedefine` / `#cmakedefine01` lines using the same `vars` map
+// (subset of CMake `configure_file`; unknown macros => false / #undef).
+std::string apply_cmakedefine_directives(const std::string& text, const std::map<std::string, std::string>& vars);
+
 // Empty or whitespace => true. Supports KEY==value, KEY!=value (ASCII case-insensitive for comparison), or true/false.
 bool eval_when(const std::string& when, const std::map<std::string, std::string>& vars, std::string& error_out);
 

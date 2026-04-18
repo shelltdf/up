@@ -9,7 +9,7 @@ namespace {
 // English-only: embedded copy of rules aligned with doc/package-target-xml-spec.md for AI/tools without repo .md.
 // Split into named chunks: MSVC ~16kB string literal limit; edit the slice you need.
 constexpr const char* kXmlSpecEnThroughSection3 =
-  R"SPEC(UP_XML_SPEC_REVISION=9
+  R"SPEC(UP_XML_SPEC_REVISION=10
 
 # up — package.xml and target.xml (machine-oriented summary)
 
@@ -205,6 +205,9 @@ outside the forms above.
   (§2b), writes the output under the generated directory, and adds that file to the target’s compile sources. The target’s
   generated directory is also added as an **include directory** for `executable` / `static_library` / `shared_library`
   targets.
+- After `@NAME@` replacement, lines **`#cmakedefine NAME ...`** and **`#cmakedefine01 NAME`** are expanded like CMake
+  `configure_file` (subset): unknown / empty / `0` / `false` / `off` / `no` treat as false; `#cmakedefine01` becomes
+  **`#define NAME 0|1`**. This helps zlib-style `zconf.h` templates; it is **not** a full CMake `configure_file` engine.
 
 )SPEC"
 #if !UP_DISABLE_PACKAGE_XML_CMAKE
@@ -409,7 +412,7 @@ optional `when`), `<assets>` (same `from` / `to` / preprocess / postprocess patt
 | Load/parse XML | src/engine/xml/simple_xml.cpp |
 | Types | src/engine/xml/simple_xml.hpp (`PackageDesc`, `TargetDesc`, `ConfigFileEntry`, `DefineEntry`) |
 | Configure validation / graph | src/engine/commands/configure.cpp |
-| Variable merge + `@KEY@` + `when` | src/engine/xml/var_subst.cpp |
+| Variable merge + `@KEY@` + `when` + `#cmakedefine` (config_files) | src/engine/xml/var_subst.cpp |
 
 End of embedded spec.
 )SPEC";

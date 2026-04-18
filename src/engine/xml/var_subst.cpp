@@ -34,6 +34,57 @@ bool truthy_value(const std::string& v) {
   return true;
 }
 
+bool cmake_macro_truthy(const std::map<std::string, std::string>& vars, const std::string& name) {
+  const auto it = vars.find(name);
+  if (it == vars.end())
+    return false;
+  return truthy_value(it->second);
+}
+
+std::string apply_cmakedefine_directives_impl(const std::string& text, const std::map<std::string, std::string>& vars) {
+  static const std::regex re01(R"(^(\s*)#cmakedefine01(\s+)([A-Za-z_][A-Za-z0-9_]*)\s*$)");
+  static const std::regex re(R"(^(\s*)#cmakedefine(\s+)([A-Za-z_][A-Za-z0-9_]*)(.*)$)");
+  std::string out;
+  out.reserve(text.size() + 32);
+  size_t cur = 0;
+  while (cur < text.size()) {
+    const size_t nl = text.find('\n', cur);
+    const bool has_nl = nl != std::string::npos;
+    std::string line = text.substr(cur, has_nl ? nl - cur : std::string::npos);
+    if (!line.empty() && line.back() == '\r')
+      line.pop_back();
+
+    std::smatch m;
+    if (std::regex_match(line, m, re01)) {
+      const std::string indent = m[1].str();
+      const std::string var = m[3].str();
+      out += indent + "#define " + var + " " + (cmake_macro_truthy(vars, var) ? "1" : "0");
+    } else if (std::regex_match(line, m, re)) {
+      const std::string indent = m[1].str();
+      const std::string var = m[3].str();
+      const std::string rest = trim_ws(m[4].str());
+      if (cmake_macro_truthy(vars, var)) {
+        if (rest.empty())
+          out += indent + "#define " + var;
+        else
+          out += indent + "#define " + var + " " + rest;
+      } else {
+        out += indent + "/* #undef " + var + " */";
+      }
+    } else {
+      out += line;
+    }
+
+    if (has_nl) {
+      out += '\n';
+      cur = nl + 1;
+    } else {
+      break;
+    }
+  }
+  return out;
+}
+
 }  // namespace
 
 std::string builtin_host_os() {
@@ -97,6 +148,10 @@ std::string substitute_at_vars(const std::string& text, const std::map<std::stri
     i = b + 1;
   }
   return out;
+}
+
+std::string apply_cmakedefine_directives(const std::string& text, const std::map<std::string, std::string>& vars) {
+  return apply_cmakedefine_directives_impl(text, vars);
 }
 
 bool eval_when(const std::string& when, const std::map<std::string, std::string>& vars, std::string& error_out) {

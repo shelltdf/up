@@ -214,6 +214,7 @@
 
 - **目标级**（`target.xml`）：块 **`<config_files>...</config_files>`**，内为 **`<file in="模板相对路径" to="输出相对路径"/>`**（`in`、`to` 均必填）。`in` 相对 **`target.xml` 所在目录**；`to` 相对 **`.intermediate/generated/<包名>/<目标名>/`**，且须为安全相对路径（**不得**含 `..` 段、不得为绝对路径）。**`@NAME@`** 使用 **§3.5 完整变量层**。生成文件加入**该目标**的编译源列表，并把 **`generated/<包名>/<目标名>/`** 加入该目标的 **编译期 include 路径**。
 - **包级**（`package.xml`）：形状相同；`in` 相对 **包根**；`to` 相对 **`.intermediate/generated/<包名>/_package/`**（保留名 **`_package`**）。**`@NAME@`** 不含目标 `<vars>`，**`UP_TARGET_NAME` 为空**。生成文件加入本包内**所有**原生编译目标的源列表，并把 **`generated/<包名>/_package/`** 加入这些目标的 **include 路径**。
+- **`#cmakedefine` / `#cmakedefine01`**：在 **`@NAME@` 替换之后**，按与 CMake **`configure_file`** 相近的**子集**处理（见 `src/engine/xml/var_subst.cpp` 中 `apply_cmakedefine_directives`）：未出现在合并变量表、或值为空 / `0` / `false` / `off` / `no` 视为假；`#cmakedefine01` 展开为 **`#define NAME 0`** 或 **`1`**；`#cmakedefine NAME` 为真则 **`#define NAME`**，否则 **`/* #undef NAME */`**；带尾部内容的 **`#cmakedefine NAME …`** 为真则输出 **`#define NAME …`**。用于 zlib 等 **`zconf.h.in`** 类模板；**不是**完整 CMake 生成器。
 
 **CMake 与 Ninja**：两后端均直接消费 **已由 up 写出的生成文件**（与普通源文件相同），当前实现**不**为此生成 CMake 的 `configure_file()`。若需要完整上游 CMake `configure_file` 语义，请使用 **`<cmake/>`** 子工程。
 
