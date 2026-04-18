@@ -1,0 +1,10 @@
+#pragma once
+
+#include <string>
+
+namespace hello_simple_lib {
+
+// Filled at configure from package.xml <config_files> (@TEST_TEMPLATE_TAG@ uses package <vars> only).
+inline std::string package_config_tag() { return std::string("@TEST_TEMPLATE_TAG@"); }
+
+}  // namespace hello_simple_lib

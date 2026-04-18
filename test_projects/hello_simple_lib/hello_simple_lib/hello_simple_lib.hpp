@@ -1,5 +1,7 @@
 ﻿#pragma once
 
+#include "pkg_gen.hpp"
+
 #include <string>
 #include <vector>
 

@@ -8,7 +8,7 @@
 
 | 文件 | 放置位置 | 作用 |
 |------|----------|------|
-| **`package.xml`** | 每个**独立包**的根目录（与包内 `target.xml` 树的上层一致） | 声明包名、版本、**包级**依赖（其他包名）；可选 **`<vars>`**、**`<defines>`** 等。 |
+| **`package.xml`** | 每个**独立包**的根目录（与包内 `target.xml` 树的上层一致） | 声明包名、版本、**包级**依赖（其他包名）；可选 **`<vars>`**、**`<defines>`**、**`<config_files>`** 等。 |
 | **`target.xml`** | 包内**每个构建目标独占一个子目录**，该目录下**恰好一个** `target.xml` | 声明目标名、类型、源文件、可选的头文件搜索路径、**目标级**依赖（其他 target，通常为库）。 |
 
 - **归属**：`target.xml` 必须位于某一 `package.xml` 所在目录的**子树内**；`configure` 会把 target 归到路径上**最近**的包根下（见 `configure.cpp` 中 `nearest_package_parent`）。
@@ -163,11 +163,19 @@
 - 与 **`target.xml` 中 `<defines>`** 同形：**`<defines>...</defines>`** 内若干 **`<define name="标识符" value="..."/>`**（`name`、`value` 规则与目标级一致，见 §3.4）。
 - **作用域**：作用于本包内所有 **`executable` / `static_library` / `shared_library`** 目标的编译命令；**先于**各目标自身的 `<defines>` 注入（目标级宏在命令行上靠后，一般由编译器后写覆盖同名宏）。
 
+### 2.6 包级配置模板 `<config_files>`（可选）
+
+- 与 **`target.xml` 中 `<config_files>`** 同形：**`<config_files>...</config_files>`** 内若干 **`<file in="相对路径" to="相对路径"/>`**（`in`、`to` 均必填）。
+- **`in`**：相对 **`package.xml` 所在目录**（包根）。
+- **`to`**：相对 **`.intermediate/generated/<包名>/_package/`**（实现保留目录名 **`_package`**；请勿在本包内再使用同名编译目标目录以免混淆）。
+- **`@NAME@` 替换**：仅使用 **内置变量 + `package.xml` 中 `<vars>` + `--opt` / `up_cache.txt`**（**不含**各 `target.xml` 的 `<vars>`）。内置中的 **`UP_TARGET_NAME` 在包级模板中为空串**。
+- **生成时机**：`configure` 对每个含条目的包生成一次；生成文件加入本包内**每一个** **`executable` / `static_library` / `shared_library`** 目标的编译源列表，并把 **`generated/<包名>/_package/`** 加入这些目标的编译期 **include 路径**。
+
 ### 3.5 变量合并、`@KEY@`、`config_files` 与 `when`
 
 #### 变量层（后者覆盖前者）
 
-用于 `<config_files>` 模板中的 **`@NAME@`** 替换，以及 `<sources>` / `<headers>` 条目的 **`when="..."`** 求值：
+用于 **目标级** `<config_files>` 模板中的 **`@NAME@`** 替换（完整合并栈），**包级** `<config_files>` 仅用 **§3.5 第 1～2 层 + 第 4 层**（无目标 `<vars>`，`UP_TARGET_NAME` 为空），以及 `<sources>` / `<headers>` 条目的 **`when="..."`** 求值：
 
 1. **内置**：`UP_OS`（`windows` | `linux` | `darwin`）、`UP_PACKAGE_NAME`、`UP_PACKAGE_VERSION`、`UP_TARGET_NAME`、`UP_TARGET_BUILD_SYSTEM`（`cmake` | `ninja`）、`UP_CONFIG`（`debug` | `release`）。
 2. **`package.xml` 中 `<vars>`**（包级默认值）。
@@ -204,9 +212,8 @@
 
 #### `<config_files>`（类 configure_file 的最小子集）
 
-- 块 **`<config_files>...</config_files>`**，内为 **`<file in="模板相对路径" to="输出相对路径"/>`**（`in`、`to` 均必填）。
-- `in` 相对 `target.xml` 所在目录；`to` 相对 **`.intermediate/generated/<包名>/<目标名>/`**，且必须为安全相对路径（**不得**含 `..` 段、不得为绝对路径）。
-- **`up configure`** 阶段读取模板、做 `@NAME@` 替换、写入生成目录，并将生成文件加入该目标的 **编译源列表**；同时对 `executable` / `static_library` / `shared_library` 把生成目录加入 **编译期 include 路径**。
+- **目标级**（`target.xml`）：块 **`<config_files>...</config_files>`**，内为 **`<file in="模板相对路径" to="输出相对路径"/>`**（`in`、`to` 均必填）。`in` 相对 **`target.xml` 所在目录**；`to` 相对 **`.intermediate/generated/<包名>/<目标名>/`**，且须为安全相对路径（**不得**含 `..` 段、不得为绝对路径）。**`@NAME@`** 使用 **§3.5 完整变量层**。生成文件加入**该目标**的编译源列表，并把 **`generated/<包名>/<目标名>/`** 加入该目标的 **编译期 include 路径**。
+- **包级**（`package.xml`）：形状相同；`in` 相对 **包根**；`to` 相对 **`.intermediate/generated/<包名>/_package/`**（保留名 **`_package`**）。**`@NAME@`** 不含目标 `<vars>`，**`UP_TARGET_NAME` 为空**。生成文件加入本包内**所有**原生编译目标的源列表，并把 **`generated/<包名>/_package/`** 加入这些目标的 **include 路径**。
 
 **CMake 与 Ninja**：两后端均直接消费 **已由 up 写出的生成文件**（与普通源文件相同），当前实现**不**为此生成 CMake 的 `configure_file()`。若需要完整上游 CMake `configure_file` 语义，请使用 **`<cmake/>`** 子工程。
 

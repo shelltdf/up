@@ -18,6 +18,7 @@ int main() {
   assert(std::string(gen::kTestBuildSystem) == "cmake");
   // TEST_TEMPLATE_TAG: package.xml 默认 -> target.xml 覆盖；还可由 --opt / up_cache 再覆盖。
   assert(std::string(gen::kTestTemplateTag) == "from_target_xml");
+  assert(package_config_tag() == "from_package_xml");
 
 #if !defined(HELLO_SIMPLE_LIB_FROM_PACKAGE) || (HELLO_SIMPLE_LIB_FROM_PACKAGE != 1)
 #error "expected package.xml <defines> HELLO_SIMPLE_LIB_FROM_PACKAGE=1"

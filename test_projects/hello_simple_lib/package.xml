@@ -9,4 +9,7 @@
   <defines>
     <define name="HELLO_SIMPLE_LIB_FROM_PACKAGE" value="1"/>
   </defines>
+  <config_files>
+    <file in="pkg_gen.hpp.in" to="pkg_gen.hpp"/>
+  </config_files>
 </package>

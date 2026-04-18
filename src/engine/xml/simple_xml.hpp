@@ -21,6 +21,12 @@ struct PackageExternalCmake {
   std::string source_dir;
 };
 
+/** Template processed at `up configure` into `.intermediate/generated/` (package or target subtree; see docs). */
+struct ConfigFileEntry {
+  std::string in;  // relative to package.xml parent (package) or target.xml directory (target)
+  std::string to;  // relative under generated/<package>/_package/ (package) or generated/<package>/<target>/ (target)
+};
+
 struct PackageDesc {
   std::string name;
   std::string version;
@@ -30,6 +36,7 @@ struct PackageDesc {
   std::vector<std::pair<std::string, std::string>> vars;
   /** `<defines>`; applied to every native compile target in this package (before each target's own `<defines>`). */
   std::vector<DefineEntry> defines;
+  std::vector<ConfigFileEntry> config_files;
 };
 
 struct TargetDesc {
@@ -49,12 +56,6 @@ struct TargetDesc {
     std::string preprocess_command;
     std::string postprocess_command;
     std::string when;
-  };
-
-  /** Template processed at `up configure` into `.intermediate/generated/...` (see docs). */
-  struct ConfigFileEntry {
-    std::string in;   // relative to target.xml directory
-    std::string to;   // relative path under generated/<package>/<target>/
   };
 
   struct AssetEntry {

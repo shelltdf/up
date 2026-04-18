@@ -1323,6 +1323,21 @@ int cmd_configure(const std::filesystem::path& cwd,
                             pkg_vars, lt.desc.vars);
   };
 
+  // Package.xml `<config_files>`: builtins + package `<vars>` + workspace only (`UP_TARGET_NAME` is empty).
+  auto merged_vars_for_package_config_files = [&](const std::string& package_name) {
+    std::string pkg_ver = "0.0.0";
+    std::vector<std::pair<std::string, std::string>> pkg_vars;
+    const auto pd_it = package_name_to_desc.find(package_name);
+    if (pd_it != package_name_to_desc.end()) {
+      pkg_vars = pd_it->second.vars;
+      if (!pd_it->second.version.empty())
+        pkg_ver = pd_it->second.version;
+    }
+    static const std::vector<std::pair<std::string, std::string>> k_empty_target_vars;
+    return merge_var_layers(make_builtin_var_map(package_name, pkg_ver, "", build_system, config_mode), opts, pkg_vars,
+                            k_empty_target_vars);
+  };
+
   // 1 = include entry, 0 = skip (false), -1 = invalid when= (configure error).
   auto when_tri = [](const std::string& when, const std::map<std::string, std::string>& vars, std::string& err_out) -> int {
     if (when.empty())
@@ -1573,6 +1588,62 @@ int cmd_configure(const std::filesystem::path& cwd,
     return c;
   };
 
+  std::map<std::string, std::vector<std::string>> package_config_generated_abs;
+  {
+    std::set<std::string> pkg_cf_done;
+    for (const auto& lt : build_targets) {
+      if (!pkg_cf_done.insert(lt.package_name).second)
+        continue;
+      const auto pd_it = package_name_to_desc.find(lt.package_name);
+      if (pd_it == package_name_to_desc.end() || pd_it->second.config_files.empty())
+        continue;
+      const auto dir_it = package_name_to_dir.find(lt.package_name);
+      if (dir_it == package_name_to_dir.end())
+        continue;
+      const std::filesystem::path pkg_root = dir_it->second;
+      const auto src_vars = merged_vars_for_package_config_files(lt.package_name);
+      const std::filesystem::path gen_pkg_root =
+          std::filesystem::absolute(cwd / ".intermediate" / "generated" / lt.package_name / "_package");
+      std::vector<std::string>& out_list = package_config_generated_abs[lt.package_name];
+      for (const auto& cf : pd_it->second.config_files) {
+        const std::filesystem::path rel_out(cf.to);
+        if (!is_safe_relative_config_output(rel_out)) {
+          std::cerr << "configure: package.xml config_files to=\"" << cf.to
+                    << "\" must be a relative path without '..' segments (package \"" << lt.package_name << "\")\n";
+          return 5;
+        }
+        const auto tmpl_path = pkg_root / cf.in;
+        std::ifstream tin(tmpl_path, std::ios::binary);
+        if (!tin) {
+          std::cerr << "configure: cannot open package config template " << to_posix_path_string(tmpl_path)
+                    << " (package \"" << lt.package_name << "\")\n";
+          return 5;
+        }
+        std::ostringstream tbuf;
+        tbuf << tin.rdbuf();
+        const std::string rendered = substitute_at_vars(tbuf.str(), src_vars);
+        const auto out_path = (gen_pkg_root / rel_out).lexically_normal();
+        std::error_code mk_ec;
+        std::filesystem::create_directories(out_path.parent_path(), mk_ec);
+        if (mk_ec) {
+          std::cerr << "configure: cannot create directory for package generated config: " << mk_ec.message() << "\n";
+          return 5;
+        }
+        std::ofstream tout(out_path, std::ios::binary | std::ios::trunc);
+        if (!tout) {
+          std::cerr << "configure: cannot write package generated config " << to_posix_path_string(out_path) << "\n";
+          return 5;
+        }
+        tout << rendered;
+        if (!tout) {
+          std::cerr << "configure: write failed for package generated config " << to_posix_path_string(out_path) << "\n";
+          return 5;
+        }
+        out_list.push_back(std::filesystem::absolute(out_path).generic_string());
+      }
+    }
+  }
+
   for (const auto& lt : build_targets) {
     ConfigureTargetModel tm;
     tm.name = lt.desc.name;
@@ -1639,6 +1710,13 @@ int cmd_configure(const std::filesystem::path& cwd,
       const auto src_vars = merged_vars_for_target(lt);
       const std::filesystem::path gen_root =
           std::filesystem::absolute(cwd / ".intermediate" / "generated" / lt.package_name / lt.desc.name);
+      const auto pkg_cfg_it = package_config_generated_abs.find(lt.package_name);
+      if (pkg_cfg_it != package_config_generated_abs.end()) {
+        for (const std::string& abs_out : pkg_cfg_it->second) {
+          tm.source_paths.push_back(abs_out);
+          tm.source_rules.push_back({abs_out, "", ""});
+        }
+      }
       for (const auto& cf : lt.desc.config_files) {
         const std::filesystem::path rel_out(cf.to);
         if (!is_safe_relative_config_output(rel_out)) {
@@ -1736,11 +1814,20 @@ int cmd_configure(const std::filesystem::path& cwd,
       if (!inc.empty())
         inc_dirs.insert(std::filesystem::absolute(inc).generic_string());
     }
-    if (!lt.desc.config_files.empty() &&
-        (lt.desc.type == "executable" || lt.desc.type == "static_library" || lt.desc.type == "shared_library")) {
-      const std::filesystem::path gen_inc =
-          std::filesystem::absolute(cwd / ".intermediate" / "generated" / lt.package_name / lt.desc.name);
-      inc_dirs.insert(gen_inc.generic_string());
+    const auto pd_cf_it = package_name_to_desc.find(lt.package_name);
+    const bool pkg_has_config_files =
+        pd_cf_it != package_name_to_desc.end() && !pd_cf_it->second.config_files.empty();
+    if ((lt.desc.type == "executable" || lt.desc.type == "static_library" || lt.desc.type == "shared_library")) {
+      if (!lt.desc.config_files.empty()) {
+        const std::filesystem::path gen_inc =
+            std::filesystem::absolute(cwd / ".intermediate" / "generated" / lt.package_name / lt.desc.name);
+        inc_dirs.insert(gen_inc.generic_string());
+      }
+      if (pkg_has_config_files) {
+        const std::filesystem::path gen_pkg_inc =
+            std::filesystem::absolute(cwd / ".intermediate" / "generated" / lt.package_name / "_package");
+        inc_dirs.insert(gen_pkg_inc.generic_string());
+      }
     }
     tm.include_dirs.assign(inc_dirs.begin(), inc_dirs.end());
     if (!tm.imported_prebuilt && (tm.type == "executable" || tm.type == "static_library" || tm.type == "shared_library")) {

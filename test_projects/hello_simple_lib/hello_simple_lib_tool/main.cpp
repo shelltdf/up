@@ -10,6 +10,7 @@ int main() {
   std::cout << "gen: TEST_TARGET_NAME=" << gen::kTestTargetName << "\n";
   std::cout << "gen: TEST_BUILD_SYSTEM=" << gen::kTestBuildSystem << "\n";
   std::cout << "gen: TEST_TEMPLATE_TAG=" << gen::kTestTemplateTag << "\n";
+  std::cout << "pkg: package_config_tag=" << package_config_tag() << "\n";
 
   Counter counter(5);
   counter.increment();

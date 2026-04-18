@@ -141,10 +141,10 @@ bool parse_defines_body(const std::string& body, std::vector<DefineEntry>& out, 
   return true;
 }
 
-bool parse_config_files_body(const std::string& body, std::vector<TargetDesc::ConfigFileEntry>& out, std::string& error) {
+bool parse_config_files_body(const std::string& body, std::vector<ConfigFileEntry>& out, std::string& error) {
   std::regex cf_re(R"rx(<\s*file\s+([^>]+)/\s*>)rx");
   for (std::sregex_iterator it(body.begin(), body.end(), cf_re), end; it != end; ++it) {
-    TargetDesc::ConfigFileEntry e;
+    ConfigFileEntry e;
     const std::string attrs = (*it)[1].str();
     if (!attr_string(attrs, "in", e.in)) {
       error = "<config_files> <file> requires in=\"...\"";
@@ -152,7 +152,8 @@ bool parse_config_files_body(const std::string& body, std::vector<TargetDesc::Co
     }
     e.in = trim_copy(e.in);
     if (!attr_string(attrs, "to", e.to)) {
-      error = "<config_files> <file> requires to=\"...\" (output path under generated/<pkg>/<target>/)";
+      error = "<config_files> <file> requires to=\"...\" (safe relative path under generated/<pkg>/_package/ or "
+              "generated/<pkg>/<target>/)";
       return false;
     }
     e.to = trim_copy(e.to);
@@ -249,6 +250,19 @@ bool load_package_xml(const std::filesystem::path& path, PackageDesc& out, std::
     }
     const std::string body = raw.substr(pkg_defines_gt + 1, pkg_defines_close - pkg_defines_gt - 1);
     if (!parse_defines_body(body, out.defines, error, "package.xml"))
+      return false;
+  }
+
+  const size_t pkg_cf_open = raw.find("<config_files");
+  if (pkg_cf_open != std::string::npos) {
+    const size_t pkg_cf_gt = raw.find('>', pkg_cf_open);
+    const size_t pkg_cf_close = raw.find("</config_files>", pkg_cf_gt + 1);
+    if (pkg_cf_gt == std::string::npos || pkg_cf_close == std::string::npos) {
+      error = "invalid <config_files> block in package.xml (expected </config_files>)";
+      return false;
+    }
+    const std::string body = raw.substr(pkg_cf_gt + 1, pkg_cf_close - pkg_cf_gt - 1);
+    if (!parse_config_files_body(body, out.config_files, error))
       return false;
   }
 
@@ -560,6 +574,12 @@ bool write_package_xml(std::ostream& out, const PackageDesc& pkg) {
       out << "/>\n";
     }
     out << "  </defines>\n";
+  }
+  if (!pkg.config_files.empty()) {
+    out << "  <config_files>\n";
+    for (const auto& cf : pkg.config_files)
+      out << "    <file in=\"" << xml_escape_text(cf.in) << "\" to=\"" << xml_escape_text(cf.to) << "\"/>\n";
+    out << "  </config_files>\n";
   }
   out << "</package>\n";
   return static_cast<bool>(out);

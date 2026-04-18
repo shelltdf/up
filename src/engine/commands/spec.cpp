@@ -8,7 +8,7 @@ namespace {
 
 // English-only: embedded copy of rules aligned with doc/package-target-xml-spec.md for AI/tools without repo .md.
 // Split into named chunks: MSVC ~16kB string literal limit; edit the slice you need.
-constexpr const char* kXmlSpecEnThroughSection3 = R"SPEC(UP_XML_SPEC_REVISION=8
+constexpr const char* kXmlSpecEnThroughSection3 = R"SPEC(UP_XML_SPEC_REVISION=9
 
 # up — package.xml and target.xml (machine-oriented summary)
 
@@ -73,11 +73,26 @@ Rules:
 - Applied to **every** `executable` / `static_library` / `shared_library` target in this package **before** that target’s
   own `<defines>` entries (so target-level definitions follow and may override at the toolchain level).
 
+### Optional package config files `<config_files>`
+- Same block shape as target **`<config_files>`**: `<config_files>...</config_files>` with **`<file in="rel" to="out"/>`**
+  (both required).
+- `in` is relative to the **`package.xml` parent directory** (package root).
+- `to` is relative to **`.intermediate/generated/<package>/_package/`** (reserved directory name **`_package`**; avoid
+  naming a compile target `_package` in the same package). Same safe-path rules as target config: no `..`, not absolute.
+- **`@NAME@` substitution map:** builtins + package `<vars>` + workspace options **only** (target `<vars>` are **not**
+  applied). **`UP_TARGET_NAME` is empty** for these templates.
+- Generated files are written **once per configure** per package and appended to **every** native compile target in that
+  package as extra sources. **`.intermediate/generated/<package>/_package/`** is added to compile **include directories**
+  for every `executable` / `static_library` / `shared_library` in the package whenever any package-level `<config_files>`
+  entry exists.
+
 ---
 
 ## 2b. Variable merge order (builtin / package / target / workspace)
 
-Used for `@KEY@` substitution in `<config_files>` templates and for evaluating `when="..."` on sources and headers.
+Used for `@KEY@` substitution in **target-level** `<config_files>` templates (full stack below), **package-level**
+`<config_files>` (builtins + package `<vars>` + workspace only; `UP_TARGET_NAME` empty), and for evaluating `when="..."`
+on sources and headers.
 
 **Layers (later overrides earlier):**
 
@@ -158,14 +173,15 @@ outside the forms above.
 - Optional **`<vars>...</vars>`** (same shape as package vars): **defaults** for that target; same key overrides the
   package default, and may still be overridden last by `--opt` / `up_cache.txt`.
 
-### Config files (`<config_files>`) — configure-time templates
+### Config files (`<config_files>`) — target-level configure-time templates
 
 - Block: `<config_files>...</config_files>` with **`<file in="template.rel" to="out.rel"/>`** (both required).
-- `in` is relative to `target.xml` directory; `to` is relative to **`.intermediate/generated/<package>/<target>/`** and
+- `in` is relative to **`target.xml` directory**; `to` is relative to **`.intermediate/generated/<package>/<target>/`** and
   must be a safe relative path (no `..` segments, not absolute).
-- During **configure**, `up` reads each template, applies **`@NAME@`** substitution using the merged variable map, writes
-  the output under the generated directory, and adds that file to the target’s compile sources. The generated directory
-  is also added as an **include directory** for `executable` / `static_library` / `shared_library` targets.
+- During **configure**, `up` reads each template, applies **`@NAME@`** substitution using the **full** merged variable map
+  (§2b), writes the output under the generated directory, and adds that file to the target’s compile sources. The target’s
+  generated directory is also added as an **include directory** for `executable` / `static_library` / `shared_library`
+  targets.
 
 **Backends (CMake vs Ninja):** both backends consume the **already generated** file as a normal source path. `up` does
 **not** emit CMake `configure_file()` for these entries; both backends treat the output like any other source file. For
@@ -275,6 +291,9 @@ blocks you do not need. Some combinations are **mutually exclusive by `type`** (
     <define name="DEMO_PKG_MACRO" value="1"/>
     <define name="DEMO_PKG_ONLY"/>
   </defines>
+  <config_files>
+    <file in="templates/pkg_header.hpp.in" to="generated/pkg_header.hpp"/>
+  </config_files>
 </package>
 ```
 
@@ -347,7 +366,7 @@ optional `when`), `<assets>` (same `from` / `to` / preprocess / postprocess patt
 | Topic | Source |
 |-------|--------|
 | Load/parse XML | src/engine/xml/simple_xml.cpp |
-| Types | src/engine/xml/simple_xml.hpp (`PackageDesc`, `TargetDesc`, `DefineEntry`) |
+| Types | src/engine/xml/simple_xml.hpp (`PackageDesc`, `TargetDesc`, `ConfigFileEntry`, `DefineEntry`) |
 | Configure validation / graph | src/engine/commands/configure.cpp |
 | Variable merge + `@KEY@` + `when` | src/engine/xml/var_subst.cpp |
 
