@@ -9,6 +9,9 @@ if(MSVC)
 endif()
 
 option(UP_ENABLE_PROJECT "Build the up project subcommand and CMake/qmake/… importers" OFF)
+# When ON (default): strip package.xml `<cmake/>` parsing, configure ExternalProject wiring, and `up spec` documentation
+# for that tag (macro **UP_DISABLE_PACKAGE_XML_CMAKE**). Set OFF to restore full package-native-CMake support.
+option(UP_DISABLE_PACKAGE_XML_CMAKE "Ignore package.xml <cmake/> at compile time (strip related logic)" ON)
 
 set(UP_CORE_SOURCES
   src/cli/main.cpp
@@ -83,6 +86,11 @@ if(UP_ENABLE_PROJECT)
   target_compile_definitions(up PRIVATE UP_ENABLE_PROJECT=1)
 else()
   target_compile_definitions(up PRIVATE UP_ENABLE_PROJECT=0)
+endif()
+if(UP_DISABLE_PACKAGE_XML_CMAKE)
+  target_compile_definitions(up PRIVATE UP_DISABLE_PACKAGE_XML_CMAKE=1)
+else()
+  target_compile_definitions(up PRIVATE UP_DISABLE_PACKAGE_XML_CMAKE=0)
 endif()
 
 # up-gui: thin shell around up.exe — MUST NOT compile, include, or link any file under src/.

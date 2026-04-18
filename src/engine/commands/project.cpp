@@ -269,7 +269,8 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
       std::cerr << "project: unknown option: " << a << "\n"
                 << "  --dry-run       print probe result and XML; do not write files\n"
                 << "  --force         overwrite existing package.xml / target.xml\n"
-                << "  --legacy-cmake-parse  for CMake projects: skip <cmake/> scaffold; old import_from_probe (CMake text scan).\n"
+                << "  --legacy-cmake-parse  for CMake projects: skip <cmake/> scaffold when enabled; old import_from_probe "
+                   "(CMake text scan).\n"
                 << "  --cmake-query   CMake only: use File API only (fail if cmake/configure or codemodel yields no libs).\n"
                 << "                         Default already tries install scan, then File API, then source scan.\n"
                 << "  --cmake-no-file-api  CMake scaffold: skip the File API step (no `cmake` configure subprocess).\n"
@@ -510,7 +511,12 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
     if (!cmake_query && imported.targets.empty()) {
       std::cout << "project: warning: CMake scaffold found no target stubs after install scan, File API, and source scan.\n";
       std::cout << "project: hint: add install(TARGETS ...) for shipped libs where applicable, or use --legacy-cmake-parse "
-                   "for the old non-<cmake/> import path.\n";
+                   "for the old import path"
+#if UP_DISABLE_PACKAGE_XML_CMAKE
+                   " (this build omits <cmake/> in package.xml).\n";
+#else
+                   ".\n";
+#endif
     }
   } else if (!import_from_probe(scan_root, write_root, probe, imported, err)) {
     std::cerr << "project: " << err << "\n";
@@ -528,9 +534,11 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
   pkg.name = package_name_opt.value_or(imported.package_name);
   pkg.version = "0.1.0";
   if (cmake_scaffold) {
+#if !UP_DISABLE_PACKAGE_XML_CMAKE
     PackageExternalCmake ec;
     ec.source_dir = cmake_rel_dir;
     pkg.external_cmake = std::move(ec);
+#endif
     std::vector<std::pair<std::string, bool>> deps;
     std::string dep_err;
     if (import_cmake_dependencies_from_probe(probe.anchor, deps, dep_err)) {
@@ -544,6 +552,10 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
     } else if (!dep_err.empty()) {
       std::cout << "project: warning: failed to parse CMake find_package deps: " << dep_err << "\n";
     }
+#if UP_DISABLE_PACKAGE_XML_CMAKE
+    std::cout << "project: note: built with UP_DISABLE_PACKAGE_XML_CMAKE: package.xml will not contain <cmake/> "
+                 "(target stubs only).\n";
+#endif
   }
   cli_verbose_phase("project", "package_desc_ready");
 

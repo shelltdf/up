@@ -8,7 +8,8 @@ namespace {
 
 // English-only: embedded copy of rules aligned with doc/package-target-xml-spec.md for AI/tools without repo .md.
 // Split into named chunks: MSVC ~16kB string literal limit; edit the slice you need.
-constexpr const char* kXmlSpecEnThroughSection3 = R"SPEC(UP_XML_SPEC_REVISION=9
+constexpr const char* kXmlSpecEnThroughSection3 =
+  R"SPEC(UP_XML_SPEC_REVISION=9
 
 # up — package.xml and target.xml (machine-oriented summary)
 
@@ -28,8 +29,15 @@ After authoring XML, always validate with:
 
 | File | Location | Role |
 |------|----------|------|
-| package.xml | One per **package root** (same tree as targets below) | Package `name`, optional `version`, **package-level** `<dependency/>`, optional `<cmake/>`, optional `<vars>` / `<defines>`. |
-| target.xml | **Exactly one** per **target directory** (each target lives in its own subdirectory) | Target `name`, `type`, sources, optional `<headers>`/assets, **target-level** `<dependency/>`. |
+)SPEC"
+#if !UP_DISABLE_PACKAGE_XML_CMAKE
+  R"SPEC(| package.xml | One per **package root** (same tree as targets below) | Package `name`, optional `version`, **package-level** `<dependency/>`, optional `<cmake/>`, optional `<vars>` / `<defines>`. |
+)SPEC"
+#else
+  R"SPEC(| package.xml | One per **package root** (same tree as targets below) | Package `name`, optional `version`, **package-level** `<dependency/>`, optional `<vars>` / `<defines>`. (Package `<cmake/>` is **disabled** in this `up.exe` — **UP_DISABLE_PACKAGE_XML_CMAKE**.) |
+)SPEC"
+#endif
+  R"SPEC(| target.xml | **Exactly one** per **target directory** (each target lives in its own subdirectory) | Target `name`, `type`, sources, optional `<headers>`/assets, **target-level** `<dependency/>`. |
 
 Rules:
 - Every `target.xml` must sit **under** some `package.xml` directory tree. `configure` assigns each target to the
@@ -50,11 +58,26 @@ Rules:
 - `name` is another **package** name that must appear in the same scan (unless `optional` is true / 1 / yes).
 - If a `target.xml` uses `OtherPkg:SomeLib`, that `OtherPkg` **must** be listed here (non-optional), or configure fails.
 
+)SPEC"
+#if !UP_DISABLE_PACKAGE_XML_CMAKE
+  R"SPEC(
+
 ### Optional native CMake subtree
 - `<cmake source_dir="relative/path"/>` — directory (relative to **package.xml parent**) containing upstream
   `CMakeLists.txt`. Used by the CMake backend when generating the aggregate project.
 
-### Optional package variables `<vars>`
+)SPEC"
+#else
+  R"SPEC(
+
+### Package.xml `<cmake/>` (compile-time disabled in this binary)
+
+- **UP_DISABLE_PACKAGE_XML_CMAKE** is **ON**: `package.xml` **`<cmake/>` is not parsed**; configure does **not** wire
+  ExternalProject / upstream CMake from that tag. Rebuild `up` with **`-DUP_DISABLE_PACKAGE_XML_CMAKE=OFF`** to enable.
+
+)SPEC"
+#endif
+  R"SPEC(### Optional package variables `<vars>`
 - Block: `<vars>...</vars>` with self-closing entries `<var name="KEY" value="VAL"/>` (`value` may be omitted for empty).
 - Each pair is a **default** for `KEY` for all targets in the package (for `@KEY@` / `when=`); the same key may be
   **overridden** at configure time (see merge order below).
@@ -183,11 +206,20 @@ outside the forms above.
   generated directory is also added as an **include directory** for `executable` / `static_library` / `shared_library`
   targets.
 
-**Backends (CMake vs Ninja):** both backends consume the **already generated** file as a normal source path. `up` does
+)SPEC"
+#if !UP_DISABLE_PACKAGE_XML_CMAKE
+  R"SPEC(**Backends (CMake vs Ninja):** both backends consume the **already generated** file as a normal source path. `up` does
 **not** emit CMake `configure_file()` for these entries; both backends treat the output like any other source file. For
   full upstream CMake `configure_file` semantics, keep using a native `<cmake/>` subtree.
 
-### Headers block (`<headers>`) — compile + install layout
+)SPEC"
+#else
+  R"SPEC(**Backends (CMake vs Ninja):** both backends consume the **already generated** file as a normal source path. `up` does
+**not** emit CMake `configure_file()` for these entries; both backends treat the output like any other source file.
+
+)SPEC"
+#endif
+  R"SPEC(### Headers block (`<headers>`) — compile + install layout
 - Self-closing entries under `<headers>` (`<includes>` is not supported):
   - `<dir from="rel/path" to="optional_include_subdir"/>`
   - `<file from="rel/path.hpp" to="optional_subdir"/>`
@@ -241,7 +273,8 @@ constexpr const char* kXmlSpecEnSections4And5 = R"SPEC(
 ---
 )SPEC";
 
-constexpr const char* kXmlSpecEnSections6Through7 = R"SPEC(
+constexpr const char* kXmlSpecEnSections6Through7 =
+  R"SPEC(
 
 ## 6. Examples
 
@@ -252,8 +285,12 @@ package.xml:
 <?xml version="1.0" encoding="UTF-8"?>
 <package name="my_app" version="0.1.0">
   <dependency name="my_sdk" optional="false"/>
-  <cmake source_dir="."/>
-</package>
+)SPEC"
+#if !UP_DISABLE_PACKAGE_XML_CMAKE
+  R"SPEC(  <cmake source_dir="."/>
+)SPEC"
+#endif
+  R"SPEC(</package>
 ```
 
 target.xml (executable next to sources):
@@ -282,8 +319,12 @@ blocks you do not need. Some combinations are **mutually exclusive by `type`** (
 <package name="demo_pkg" version="1.0.0">
   <dependency name="other_pkg" optional="false"/>
   <dependency name="maybe_pkg" optional="true"/>
-  <cmake source_dir="vendor/upstream_cmake"/>
-  <vars>
+)SPEC"
+#if !UP_DISABLE_PACKAGE_XML_CMAKE
+  R"SPEC(  <cmake source_dir="vendor/upstream_cmake"/>
+)SPEC"
+#endif
+  R"SPEC(  <vars>
     <var name="MY_DEFAULT" value="from_package_xml"/>
     <var name="FLAG_ONLY"/>
   </vars>

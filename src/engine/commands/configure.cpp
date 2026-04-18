@@ -241,8 +241,13 @@ bool configure_installed_import_target_model(const LoadedTarget& lt,
                                              bool imported_installed_shared,
                                              ConfigureTargetModel& tm) {
   if (!has_primary_external_cmake) {
-    std::cerr << "configure: target \"" << lt.desc.name << "\" (" << lt.desc.type
-              << ") requires package.xml <cmake> so the upstream project installs into the same prefix first.\n";
+    std::cerr << "configure: target \"" << lt.desc.name << "\" (" << lt.desc.type << ") ";
+#if UP_DISABLE_PACKAGE_XML_CMAKE
+    std::cerr << "uses imported_installed_* which needs an upstream install prefix; package.xml `<cmake/>` is "
+                 "**disabled in this build** (UP_DISABLE_PACKAGE_XML_CMAKE).\n";
+#else
+    std::cerr << "requires package.xml <cmake> so the upstream project installs into the same prefix first.\n";
+#endif
     return false;
   }
   if (!lt.desc.installed_wrap.has_value()) {
@@ -1124,10 +1129,12 @@ int cmd_configure(const std::filesystem::path& cwd,
     }
   }
 
+#if !UP_DISABLE_PACKAGE_XML_CMAKE
   if (primary_pkg.external_cmake.has_value() && equals_ci(build_system, "ninja")) {
     std::cerr << "configure: package.xml <cmake> is not supported with UP_TARGET_BUILD_SYSTEM=ninja (use cmake).\n";
     return 7;
   }
+#endif
 
   std::set<std::string> declared_dep_pkgs;
   for (const auto& d : primary_pkg.dependencies) {
@@ -1504,6 +1511,7 @@ int cmd_configure(const std::filesystem::path& cwd,
   graph_model.cmake_prefix_path =
       merge_cmake_prefix_path_value(std::filesystem::absolute(graph_model.install_root), dep_install_prefixes, opts, cwd);
 
+#if !UP_DISABLE_PACKAGE_XML_CMAKE
   if (primary_pkg.external_cmake.has_value()) {
     const std::string& sd = primary_pkg.external_cmake->source_dir;
     std::filesystem::path src_abs;
@@ -1564,6 +1572,7 @@ int cmd_configure(const std::filesystem::path& cwd,
     append_upstream_opts_from_map(ec, opts);
     graph_model.external_cmake.push_back(std::move(ec));
   }
+#endif
 
   auto resolve_existing_file = [&](const std::filesystem::path& target_dir, const std::string& rel_or_abs,
                                    const char* what) -> std::optional<std::filesystem::path> {
@@ -1655,7 +1664,14 @@ int cmd_configure(const std::filesystem::path& cwd,
     const bool imported_installed_shared = (lt.desc.type == "imported_installed_shared_library");
 
     if (imported_installed_static || imported_installed_shared) {
-      if (!configure_installed_import_target_model(lt, primary_pkg.external_cmake.has_value(), imported_installed_shared, tm))
+      if (!configure_installed_import_target_model(
+              lt,
+#if UP_DISABLE_PACKAGE_XML_CMAKE
+              false,
+#else
+              primary_pkg.external_cmake.has_value(),
+#endif
+              imported_installed_shared, tm))
         return 5;
     } else if (imported_static || imported_shared) {
       if (!lt.desc.prebuilt.has_value()) {

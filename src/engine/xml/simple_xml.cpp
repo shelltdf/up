@@ -212,6 +212,7 @@ bool load_package_xml(const std::filesystem::path& path, PackageDesc& out, std::
     out.dependencies.emplace_back(dep_name, optional);
   }
 
+#if !UP_DISABLE_PACKAGE_XML_CMAKE
   std::regex cmake_re(R"rx(<cmake\s+([^>]+?)/\s*>)rx");
   for (std::sregex_iterator it(raw.begin(), raw.end(), cmake_re), end; it != end; ++it) {
     const std::string attrs = (*it)[1].str();
@@ -226,6 +227,7 @@ bool load_package_xml(const std::filesystem::path& path, PackageDesc& out, std::
     out.external_cmake = std::move(c);
     break;
   }
+#endif
 
   const size_t vars_open = raw.find("<vars");
   if (vars_open != std::string::npos) {
@@ -552,9 +554,11 @@ bool write_package_xml(std::ostream& out, const PackageDesc& pkg) {
     out << "  <dependency name=\"" << xml_escape_text(d.first) << "\" optional=\""
         << (d.second ? "true" : "false") << "\"/>\n";
   }
+#if !UP_DISABLE_PACKAGE_XML_CMAKE
   if (pkg.external_cmake.has_value()) {
     out << "  <cmake source_dir=\"" << xml_escape_text(pkg.external_cmake->source_dir) << "\"/>\n";
   }
+#endif
   if (!pkg.vars.empty()) {
     out << "  <vars>\n";
     for (const auto& v : pkg.vars) {
