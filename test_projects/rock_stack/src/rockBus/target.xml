@@ -3,7 +3,7 @@
   <sources>
     <file>rock_bus.cpp</file>
   </sources>
-  <includes>
+  <headers>
     <glob from="../../include/rockBus/*.hpp" to="rockBus"/>
-  </includes>
+  </headers>
 </target>

@@ -1349,7 +1349,7 @@ int cmd_configure(const std::filesystem::path& cwd,
       if (inc_entry.kind == "dir") {
         const auto inc = (lt.target_dir / inc_entry.from).lexically_normal();
         if (!install_staging_root.empty() && path_is_under_tree(install_staging_root, inc)) {
-          std::cerr << "configure: warning: skipping include <dir> under .intermediate/install (would nest installs): "
+          std::cerr << "configure: warning: skipping headers <dir> under .intermediate/install (would nest installs): "
                     << to_posix_path_string(inc) << "\n";
           continue;
         }
@@ -1364,7 +1364,7 @@ int cmd_configure(const std::filesystem::path& cwd,
       } else if (inc_entry.kind == "glob") {
         const auto files = glob_matches(lt.target_dir, inc_entry.from);
         if (files.empty()) {
-          std::cerr << "configure: warning: include glob matched no files: " << inc_entry.from
+          std::cerr << "configure: warning: headers glob matched no files: " << inc_entry.from
                     << " in target " << lt.desc.name << "\n";
           continue;
         }
@@ -1597,7 +1597,7 @@ int cmd_configure(const std::filesystem::path& cwd,
         return 5;
       }
       if (asset_only && tm.source_paths.empty() && lt.desc.assets.empty() && lt.desc.includes.empty()) {
-        std::cerr << "configure: asset_bundle \"" << lt.desc.name << "\" has no sources, assets, or includes\n";
+        std::cerr << "configure: asset_bundle \"" << lt.desc.name << "\" has no sources, assets, or <headers>\n";
         return 5;
       }
     }
@@ -1609,6 +1609,13 @@ int cmd_configure(const std::filesystem::path& cwd,
         inc_dirs.insert(std::filesystem::absolute(inc).generic_string());
     }
     tm.include_dirs.assign(inc_dirs.begin(), inc_dirs.end());
+    if (!tm.imported_prebuilt && (tm.type == "executable" || tm.type == "static_library" || tm.type == "shared_library")) {
+      for (const auto& de : lt.desc.defines) {
+        if (de.name.empty())
+          continue;
+        tm.compile_definitions.push_back(de.value.empty() ? de.name : (de.name + "=" + de.value));
+      }
+    }
     if (lt.desc.type == "executable") {
       auto eit = exe_extra_links.find(lt.desc.name);
       if (eit != exe_extra_links.end() && !eit->second.empty()) {

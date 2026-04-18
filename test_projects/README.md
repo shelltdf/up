@@ -10,7 +10,7 @@
 |--------|--------|
 | [hello_simple_lib/](hello_simple_lib/) | 最简单独立静态库包：`hello_simple_lib`、`hello_simple_lib_tool`、`hello_simple_lib_test`。 |
 | [hello_demo/](hello_demo/) | 演示本包 `hello_foo` + 跨包 `hello_simple_lib`、`rock_stack`、`hello_parent_child` 的联合调用与测试。 |
-| [rock_stack/](rock_stack/) | 演示 `include/src/app/test` 布局及 `includes` 的 `dir/file/glob` 三种 `from/to` 写法。 |
+| [rock_stack/](rock_stack/) | 演示 `include/src/app/test` 布局及 `<headers>` 的 `dir/file/glob` 三种 `from/to` 写法。 |
 | [hello_parent_child/](hello_parent_child/) | 演示父子嵌套包（父包依赖子包）与跨包目标引用 `pkg:target`。 |
 | [hello_data_files/](hello_data_files/) | 演示 `xml/json/svg` 数据文件随安装产物落盘并由可执行程序启动加载。 |
 | [meta_codegen/](meta_codegen/) | 演示 `moc/uic/rc` 风格代码生成工具：`.h -> .meta.cpp`、`.ui -> .h+.cpp`、`.rc -> .h+.cpp`。 |
@@ -68,7 +68,7 @@ flowchart LR
    - 预编译库：使用 `imported_static_library` / `imported_shared_library` + `<prebuilt .../>`
    - 上游安装产物包装：使用 `imported_installed_static_library` / `imported_installed_shared_library` + `<install artifact="..."/>`
    - Windows 的 `imported_installed_shared_library` 需要额外声明 `implib="..."`
-   - 头文件目录通过 `<interface_include dir="..."/>`（安装相对路径）或 `includes` 显式声明
+   - 头文件目录通过 `<interface_include dir="..."/>`（安装相对路径）或 `<headers>` 显式声明
 3. 依赖引用
    - 包内：`<dependency name="myLib"/>`
    - 跨包：`<dependency name="otherPkg:otherLib"/>`
@@ -111,7 +111,7 @@ flowchart LR
 - 可执行：`rock_app_one`、`rock_app_two`
 - 测试：`rockBase_test`、`rockNet_test`、`rockBus_test`
 
-`includes` 新语法示例（相对 `target.xml`）：
+`<headers>` 新语法示例（相对 `target.xml`）：
 
 - `dir`：`<dir from="../../include/rockBase" to="rockBase"/>`
 - `file`：`<file from="../../include/rockNet/rock_net.hpp" to="rockNet"/>`

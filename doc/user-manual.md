@@ -150,9 +150,9 @@ $ARCH = .\_build\Release\up.exe print-build-dir-name
   - 同包引用：`<dependency name="myLib"/>`
   - 跨包引用：`<dependency name="otherPkg:otherLib"/>`
 
-### 3.3 includes 新语法（from/to）
+### 3.3 `<headers>` 头文件块（from/to）
 
-`<includes>` 里统一使用自闭合条目：
+`<headers>` 里统一使用自闭合条目：
 
 - `<dir from="..." to="..."/>`
 - `<file from="..." to="..."/>`
@@ -270,7 +270,7 @@ up run --install-dir-name $ARCH rock_app_one
 2. 在 `target.xml` 用 `otherPkg:otherTarget` 引用
 3. 确保 configure 扫描范围包含两个包
 
-#### 模板 C：调试 includes 安装布局
+#### 模板 C：调试 `<headers>` 安装布局
 
 1. 用 `from/to` 声明 `dir/file/glob`
 2. `up configure`，再 `up build --build-dir-name default`（或与 configure 一致的叶子名）
@@ -330,22 +330,22 @@ up run --install-dir-name $ARCH rock_app_one
 - 确认目标确实是 `executable`
 - 在正确的包/扫描范围下运行
 
-### Q5：includes 旧写法报错
+### Q5：`<headers>` 嵌套 `<dir>` 旧写法报错
 
-如果你还在用：
+如果你还在用嵌套目录旧写法：
 
 ```xml
-<includes>
+<headers>
   <dir>../../include/xxx</dir>
-</includes>
+</headers>
 ```
 
-请改为新写法：
+请改为 `from/to` 自闭合：
 
 ```xml
-<includes>
+<headers>
   <dir from="../../include/xxx" to="xxx"/>
-</includes>
+</headers>
 ```
 
 `file`、`glob` 同理都用 `from/to`。

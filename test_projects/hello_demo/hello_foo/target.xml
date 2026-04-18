@@ -3,7 +3,7 @@
   <sources>
     <file>foo.cpp</file>
   </sources>
-  <includes>
+  <headers>
     <dir from="."/>
-  </includes>
+  </headers>
 </target>

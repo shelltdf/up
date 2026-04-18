@@ -193,35 +193,79 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
   for (std::sregex_iterator it(raw.begin(), raw.end(), dep_re), end; it != end; ++it)
     out.dependencies.push_back((*it)[1].str());
 
-  const size_t includes_open = raw.find("<includes");
-  if (includes_open != std::string::npos) {
-    const size_t includes_open_gt = raw.find('>', includes_open);
-    if (includes_open_gt == std::string::npos) {
-      error = "invalid <includes> tag";
+  const size_t defines_open = raw.find("<defines");
+  if (defines_open != std::string::npos) {
+    const size_t defines_open_gt = raw.find('>', defines_open);
+    const size_t defines_close = raw.find("</defines>", defines_open_gt + 1);
+    if (defines_open_gt == std::string::npos || defines_close == std::string::npos) {
+      error = "invalid <defines> block (expected </defines>)";
       return false;
     }
-    const size_t includes_close = raw.find("</includes>", includes_open_gt + 1);
-    if (includes_close == std::string::npos) {
-      error = "missing </includes> closing tag";
+    const std::string body = raw.substr(defines_open_gt + 1, defines_close - defines_open_gt - 1);
+    static const std::regex define_name_ok(R"rx(^[A-Za-z_][A-Za-z0-9_]*$)rx");
+    static const std::regex define_value_ok(R"rx(^[A-Za-z0-9_.+\-/]*$)rx");
+    std::regex def_re(R"rx(<\s*define\s+([^>]+)/\s*>)rx");
+    for (std::sregex_iterator it(body.begin(), body.end(), def_re), end; it != end; ++it) {
+      TargetDesc::DefineEntry de;
+      const std::string attrs = (*it)[1].str();
+      if (!attr_string(attrs, "name", de.name)) {
+        error = "<define> requires name=\"...\" attribute";
+        return false;
+      }
+      de.name = trim_copy(de.name);
+      if (!attr_string(attrs, "value", de.value))
+        de.value.clear();
+      else
+        de.value = trim_copy(de.value);
+      if (de.name.empty()) {
+        error = "<define> name cannot be empty";
+        return false;
+      }
+      if (!std::regex_match(de.name, define_name_ok)) {
+        error = "<define> name must be a C identifier: " + de.name;
+        return false;
+      }
+      if (!de.value.empty() && !std::regex_match(de.value, define_value_ok)) {
+        error = "<define> value may only use letters, digits, and ._+-/ (no spaces): " + de.name;
+        return false;
+      }
+      out.defines.push_back(std::move(de));
+    }
+  }
+
+  if (raw.find("<includes") != std::string::npos) {
+    error = "target.xml no longer supports <includes>; use <headers>...</headers>";
+    return false;
+  }
+  const size_t headers_open = raw.find("<headers");
+  if (headers_open != std::string::npos) {
+    const size_t headers_open_gt = raw.find('>', headers_open);
+    if (headers_open_gt == std::string::npos) {
+      error = "invalid <headers> tag";
       return false;
     }
-    const std::string body = raw.substr(includes_open_gt + 1, includes_close - includes_open_gt - 1);
+    const size_t headers_close = raw.find("</headers>", headers_open_gt + 1);
+    if (headers_close == std::string::npos) {
+      error = "missing </headers> closing tag";
+      return false;
+    }
+    const std::string body = raw.substr(headers_open_gt + 1, headers_close - headers_open_gt - 1);
     std::regex item_re(R"rx(<\s*([A-Za-z_][A-Za-z0-9_]*)\s*([^>]*?)(?:/>|>([\s\S]*?)</\s*\1\s*>))rx");
     for (std::sregex_iterator it(body.begin(), body.end(), item_re), end; it != end; ++it) {
       TargetDesc::IncludeEntry inc;
       inc.kind = trim_copy((*it)[1].str());
       if (!(inc.kind == "dir" || inc.kind == "file" || inc.kind == "glob")) {
-        error = "unsupported includes entry: " + inc.kind + " (expected dir/file/glob)";
+        error = "unsupported <headers> entry: " + inc.kind + " (expected dir/file/glob)";
         return false;
       }
       const std::string attrs = (*it)[2].str();
       if (!attr_string(attrs, "from", inc.from)) {
-        error = "includes entry requires from attribute";
+        error = "<headers> entry requires from attribute";
         return false;
       }
       inc.from = trim_copy(inc.from);
       if (inc.from.empty()) {
-        error = "includes entry from attribute cannot be empty";
+        error = "<headers> entry from attribute cannot be empty";
         return false;
       }
       if (!attr_string(attrs, "to", inc.to))
@@ -235,7 +279,7 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
     // old style is intentionally not supported anymore
     std::regex old_style_re(R"rx(<\s*dir\s*>\s*[^<]+\s*</\s*dir\s*>)rx");
     if (std::regex_search(body, old_style_re)) {
-      error = "old <includes><dir>path</dir></includes> syntax is not supported; use <dir from=\"...\" to=\"...\"/>";
+      error = "old nested <dir>path</dir> syntax under <headers> is not supported; use <dir from=\"...\" to=\"...\"/>";
       return false;
     }
   }
@@ -379,19 +423,29 @@ bool write_target_xml(std::ostream& out, const TargetDesc& desc) {
     for (const auto& d : desc.dependencies)
       out << "  <dependency name=\"" << xml_escape_text(d) << "\"/>\n";
   }
+  if (!desc.defines.empty()) {
+    out << "  <defines>\n";
+    for (const auto& d : desc.defines) {
+      out << "    <define name=\"" << xml_escape_text(d.name) << "\"";
+      if (!d.value.empty())
+        out << " value=\"" << xml_escape_text(d.value) << "\"";
+      out << "/>\n";
+    }
+    out << "  </defines>\n";
+  }
   if (!desc.includes.empty()) {
-    out << "  <includes>\n";
+    out << "  <headers>\n";
     for (const auto& inc : desc.includes) {
       out << "    <" << inc.kind << " from=\"" << xml_escape_text(inc.from) << "\"";
       if (!inc.to.empty())
         out << " to=\"" << xml_escape_text(inc.to) << "\"";
       out << "/>\n";
     }
-    out << "  </includes>\n";
+    out << "  </headers>\n";
   } else if (desc.type == "executable" || desc.type == "static_library" || desc.type == "shared_library") {
-    out << "  <includes>\n";
+    out << "  <headers>\n";
     out << "    <dir from=\".\"/>\n";
-    out << "  </includes>\n";
+    out << "  </headers>\n";
   }
   if (!desc.assets.empty()) {
     out << "  <assets>\n";

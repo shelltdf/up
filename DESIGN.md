@@ -83,7 +83,7 @@
 
 - 文件名固定为 **`target.xml`**；**同一目录下不得出现多个** target 描述文件，多目标通过**不同子目录**各放一份 `target.xml` 解决。
 - 每个文件内**只包含一个根 `<target>` 元素**。`<sources>` 中的路径相对于**该 `target.xml` 所在目录**。
-- 承载：目标名、类型（`executable` / `static_library` / `shared_library`）、源文件列表；与父 `package.xml` 的归属关系由目录树表达（`target.xml` 须位于对应 `package.xml` 之下的子树中）。
+- 承载：目标名、类型（`executable` / `static_library` / `shared_library`）、源文件列表、可选 **`<headers>`**（头文件来源与安装到 `include/` 的布局）；与父 `package.xml` 的归属关系由目录树表达（`target.xml` 须位于对应 `package.xml` 之下的子树中）。
 
 ### 3.3 最小示例与仓库布局
 

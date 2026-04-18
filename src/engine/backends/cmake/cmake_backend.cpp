@@ -229,6 +229,12 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
       cm << "target_include_directories(" << t.name << " PUBLIC \""
           << to_posix_path_string(std::filesystem::absolute(*pkg_src_root)) << "\")\n";
     }
+    if (!t.compile_definitions.empty()) {
+      cm << "target_compile_definitions(" << t.name << " PRIVATE";
+      for (const auto& d : t.compile_definitions)
+        cm << " \"" << cmake_escape_string_value(d) << "\"";
+      cm << ")\n";
+    }
     for (const auto& s : t.source_rules) {
       if (!s.preprocess_command.empty()) {
         const std::string stamp = "pre_stamp_" + std::to_string(command_idx++);
@@ -262,6 +268,12 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
       cm << "target_include_directories(" << t.name << " PRIVATE";
       for (const auto& inc : t.include_dirs)
         cm << " \"" << inc << "\"";
+      cm << ")\n";
+    }
+    if (!t.compile_definitions.empty()) {
+      cm << "target_compile_definitions(" << t.name << " PRIVATE";
+      for (const auto& d : t.compile_definitions)
+        cm << " \"" << cmake_escape_string_value(d) << "\"";
       cm << ")\n";
     }
     if (!model.external_cmake.empty())

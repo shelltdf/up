@@ -74,7 +74,7 @@
 | type | `<sources>` | `<prebuilt/>` | `<install .../>` | 备注 |
 |------|-------------|---------------|------------------|------|
 | `executable` / `static_library` / `shared_library` | 需要（至少解析到一个源文件） | 否 | 否 | 常规编译目标 |
-| `asset_bundle` | 可空 | 否 | 否 | 需至少有 `sources` / `assets` / `includes` 之一 |
+| `asset_bundle` | 可空 | 否 | 否 | 需至少有 `sources` / `assets` / `<headers>` 之一 |
 | `imported_static_library` | 不需要 | 需要 | 否 | 路径相对 `target.xml`（或绝对路径） |
 | `imported_shared_library` | 不需要 | 需要 | 否 | Windows 需可解析 dll + import lib |
 | `imported_installed_static_library` | 不需要 | 否 | 需要 | `artifact` 相对 `CMAKE_INSTALL_PREFIX` |
@@ -94,9 +94,9 @@
 
 说明：**当前解析器不依赖 `<sources>` 父节点**，只要文件中存在符合模式的 `<file>...</file>` 即会收录；使用 `<sources>` 仅为可读性与与 DESIGN 叙述一致。
 
-### 3.3 头文件输入与安装输出 `<includes>`
+### 3.3 头文件输入与安装输出 `<headers>`
 
-`<includes>` 统一使用 **`from/to`** 自闭合条目，支持三种类型：
+`<headers>` 统一使用 **`from/to`** 自闭合条目，支持三种类型：
 
 - **`<dir from="..." to="..."/>`**
 - **`<file from="..." to="..."/>`**
@@ -110,11 +110,11 @@
 示例：
 
 ```xml
-<includes>
+<headers>
   <dir from="../../include/rockBase" to="rockBase"/>
   <file from="../../include/common/version.hpp" to="common"/>
   <glob from="../../include/rockBase/*.hpp" to="rockBase"/>
-</includes>
+</headers>
 ```
 
 编译期（CMake 生成）：
@@ -129,9 +129,30 @@
 - `file` 生成文件安装规则：`install(FILES ... DESTINATION include/<to>)`。
 - `glob` 在 configure 阶段解析匹配文件并按文件安装到 `include/<to>`（无匹配会给 warning）。
 
-> 兼容性说明：旧写法 `<includes><dir>path</dir></includes>` 已不再支持；若仍使用会在 configure 阶段报错。
+> **命名**：使用 **`<headers>`** 表示「头文件来源与安装到 `include/` 下的布局」，避免与编译器 **`-I` / `include_directories`** 等泛泛的 “includes” 混淆。**不再支持** `<includes>`，须使用 `<headers>...</headers>`。嵌套旧写法 `<headers><dir>path</dir></headers>` 不支持，须改为 `<dir from="..." to="..."/>`。
 
-### 3.4 目标依赖 `<dependency name="..."/>`
+### 3.4 编译宏 `<defines>`
+
+- 可选块：**`<defines>`** … **`</defines>`**，内为若干自闭合 **`<define name="..." value="..."/>`**。
+- **`name`**：必填，须为 **C 标识符**（`[A-Za-z_][A-Za-z0-9_]*`），对应预处理器宏名。
+- **`value`**：可选。省略时仅定义宏名（等价于 `#ifdef NAME` 为真、未赋替换文本）；给出时生成 **`NAME=value`**。
+- **`value` 字符集**（当前实现）：仅允许字母、数字及 **`._+-/`**（不允许空格，以便 Ninja/MSVC 命令行稳定传递）。
+
+**生成行为**：
+
+- **CMake**：对 `executable` / `static_library` / `shared_library` 生成 **`target_compile_definitions(<target> PRIVATE ...)`**（导入库 / `asset_bundle` 等不参与编译的目标忽略本块）。
+- **Ninja**：在同一目标的各 `cxx` 编译命令上追加 **`/D...`**（Windows `cl`）或 **`-D...`**（类 Unix）。
+
+示例：
+
+```xml
+<defines>
+  <define name="USE_ROCK"/>
+  <define name="APP_VERSION" value="1.0.0"/>
+</defines>
+```
+
+### 3.5 目标依赖 `<dependency name="..."/>`
 
 - 自闭合 **` <dependency name="..."/> `**，可多次出现。
 - **`name`** 支持两种形式：
@@ -171,9 +192,9 @@
 
 | 话题 | 源码位置 |
 |------|----------|
-| 解析 `package.xml` / `target.xml` | `src/simple_xml.cpp`（`load_package_xml` / `load_target_xml`） |
-| 依赖校验、生成 CMake | `src/configure.cpp` |
-| 数据结构 | `src/simple_xml.hpp`（`PackageDesc` / `TargetDesc`） |
+| 解析 `package.xml` / `target.xml` | `src/engine/xml/simple_xml.cpp`（`load_package_xml` / `load_target_xml`） |
+| 依赖校验、生成后端 | `src/engine/commands/configure.cpp` |
+| 数据结构 | `src/engine/xml/simple_xml.hpp`（`PackageDesc` / `TargetDesc`） |
 
 后续若引入 XSD/JSON Schema，可在本文件顶部增加版本号与变更记录。
 

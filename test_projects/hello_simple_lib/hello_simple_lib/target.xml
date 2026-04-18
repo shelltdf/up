@@ -3,7 +3,7 @@
   <sources>
     <file>hello_simple_lib.cpp</file>
   </sources>
-  <includes>
+  <headers>
     <dir from="."/>
-  </includes>
+  </headers>
 </target>

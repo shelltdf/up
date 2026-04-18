@@ -2,7 +2,7 @@
 
 Demonstrates **`imported_static_library`** with a **vendor-shipped `.lib`** (Windows / MSVC) checked in under `third_party/stub/lib/stub.lib`, plus headers under `third_party/stub/`.
 
-- `import_stub_lib/target.xml` declares the imported target and installs public headers via `<includes>`.
+- `import_stub_lib/target.xml` declares the imported target and installs public headers via `<headers>`.
 - `app/target.xml` links the imported library and calls `prebuilt_stub_value()`.
 
 ## Regenerating `stub.lib` (maintainers)

@@ -7,7 +7,7 @@ namespace up {
 namespace {
 
 // English-only: embedded copy of rules aligned with doc/package-target-xml-spec.md for AI/tools without repo .md.
-constexpr const char* kXmlSpecEn = R"SPEC(UP_XML_SPEC_REVISION=1
+constexpr const char* kXmlSpecEn = R"SPEC(UP_XML_SPEC_REVISION=4
 
 # up — package.xml and target.xml (machine-oriented summary)
 
@@ -28,7 +28,7 @@ After authoring XML, always validate with:
 | File | Location | Role |
 |------|----------|------|
 | package.xml | One per **package root** (same tree as targets below) | Package `name`, optional `version`, **package-level** `<dependency/>`, optional `<cmake/>`. |
-| target.xml | **Exactly one** per **target directory** (each target lives in its own subdirectory) | Target `name`, `type`, sources, optional includes/assets, **target-level** `<dependency/>`. |
+| target.xml | **Exactly one** per **target directory** (each target lives in its own subdirectory) | Target `name`, `type`, sources, optional `<headers>`/assets, **target-level** `<dependency/>`. |
 
 Rules:
 - Every `target.xml` must sit **under** some `package.xml` directory tree. `configure` assigns each target to the
@@ -69,7 +69,7 @@ Rules:
 | executable | required (>=1 source) | no | no | Normal compile target. |
 | static_library | required | no | no | |
 | shared_library | required | no | no | |
-| asset_bundle | may be empty | no | no | Need at least one of sources / assets / includes. |
+| asset_bundle | may be empty | no | no | Need at least one of sources / assets / `<headers>`. |
 | imported_static_library | not required | **required** | no | Paths relative to `target.xml` dir unless absolute. |
 | imported_shared_library | not required | **required** | no | On Windows, dll + import `.lib` must be resolvable. |
 | imported_installed_static_library | not required | no | **required** | `artifact` relative to `CMAKE_INSTALL_PREFIX` after upstream install. |
@@ -79,12 +79,19 @@ Rules:
 - Repeat: `<file>relative/path.cpp</file>` — path is **relative to the directory that contains this target.xml**.
 - Optional wrapper: `<sources>…</sources>` is for readability only; the parser matches `<file>…</file>` anywhere.
 
-### Includes (compile + install headers)
-- Self-closing entries under `<includes>`:
+### Headers block (`<headers>`) — compile + install layout
+- Self-closing entries under `<headers>` (`<includes>` is not supported):
   - `<dir from="rel/path" to="optional_include_subdir"/>`
   - `<file from="rel/path.hpp" to="optional_subdir"/>`
   - `<glob from="rel/*.hpp" to="optional_subdir"/>`
 - `from` is required, relative to `target.xml` directory. `to` is optional (under install prefix `include/`).
+
+### Compile definitions (`<defines>`)
+- Optional block: `<defines>...</defines>` containing self-closing `<define name="IDENT" value="..."/>`.
+- `name` is required (C identifier: `[A-Za-z_][A-Za-z0-9_]*`). `value` is optional; omitted means define the macro name only.
+- `value` (if present) may only contain letters, digits, and `._+-/` (no spaces).
+- Applied to native compile targets (`executable`, `static_library`, `shared_library`): CMake uses
+  `target_compile_definitions(... PRIVATE ...)`, Ninja appends `/D` or `-D` flags to compile commands.
 
 ### Target dependencies
 - `<dependency name="LocalLib"/>` — depends on another **library** target in the **same** package (same `name`).
@@ -135,9 +142,9 @@ target.xml (executable next to sources):
   <sources>
     <file>main.cpp</file>
   </sources>
-  <includes>
+  <headers>
     <dir from="."/>
-  </includes>
+  </headers>
   <dependency name="my_sdk:my_sdk_static"/>
 </target>
 ```
@@ -149,7 +156,7 @@ target.xml (executable next to sources):
 | Topic | Source |
 |-------|--------|
 | Load/parse XML | src/engine/xml/simple_xml.cpp |
-| Types | src/engine/xml/simple_xml.hpp (`PackageDesc`, `TargetDesc`) |
+| Types | src/engine/xml/simple_xml.hpp (`PackageDesc`, `TargetDesc`; `TargetDesc::defines`) |
 | Configure validation / graph | src/engine/commands/configure.cpp |
 
 End of embedded spec.

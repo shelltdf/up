@@ -46,6 +46,12 @@ struct TargetDesc {
     std::string postprocess_command;
   };
 
+  // Compiler macro definitions for native targets (CMake: target_compile_definitions; Ninja: -D /D).
+  struct DefineEntry {
+    std::string name;
+    std::string value;  // optional; empty => define name only (#ifdef NAME)
+  };
+
   // Prebuilt SDK / binary-only library (paths relative to target.xml directory unless absolute).
   struct PrebuiltDesc {
     // STATIC IMPORTED: path to .lib / .a. SHARED (Windows): implib .lib if dll is set.
@@ -71,8 +77,10 @@ struct TargetDesc {
   std::optional<PrebuiltDesc> prebuilt;
   std::optional<InstalledWrapDesc> installed_wrap;
   std::vector<std::string> dependencies;  // package:target or target(same package)
+  /** Public headers: XML element `<headers>` (parsed into this list). */
   std::vector<IncludeEntry> includes;
   std::vector<AssetEntry> assets;
+  std::vector<DefineEntry> defines;
 };
 
 // Minimal attribute scanner for root elements (no full XML parser dependency).

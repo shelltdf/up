@@ -3,7 +3,7 @@
   <sources>
     <file>rock_base.cpp</file>
   </sources>
-  <includes>
+  <headers>
     <dir from="../../include/rockBase" to="rockBase"/>
-  </includes>
+  </headers>
 </target>

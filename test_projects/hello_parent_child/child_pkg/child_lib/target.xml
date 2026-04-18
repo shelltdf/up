@@ -3,7 +3,7 @@
   <sources>
     <file>hello_parent_child_child_lib.cpp</file>
   </sources>
-  <includes>
+  <headers>
     <dir from="." to="hello_parent_child_child"/>
-  </includes>
+  </headers>
 </target>

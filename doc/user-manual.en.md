@@ -131,9 +131,9 @@ In addition, when the primary package declares dependencies that expose `importe
   - Intra-package: `myLib`
   - Cross-package: `otherPkg:otherLib`
 
-### 3.3 Includes syntax (`from/to`)
+### 3.3 `<headers>` block (`from/to`)
 
-Use self-closing entries inside `<includes>`:
+Use self-closing entries inside `<headers>`:
 
 - `<dir from="..." to="..."/>`
 - `<file from="..." to="..."/>`
@@ -247,9 +247,9 @@ The GUI passes selected settings to `up.exe` via `--opt`.
 2. Reference with `otherPkg:otherTarget` in `target.xml`
 3. Ensure both packages are included in configure scan roots
 
-#### Template C: Verify includes install layout
+#### Template C: Verify `<headers>` install layout
 
-1. Use `from/to` entries in `<includes>` (`dir/file/glob`)
+1. Use `from/to` entries in `<headers>` (`dir/file/glob`)
 2. Run `up configure`, then `up build --build-dir-name default` (or the same leaf you used for configure)
 3. Check `.intermediate/install/<arch>/include/` (**`<arch>`** from `up print-build-dir-name` or `up_cache.txt`)
 
@@ -307,32 +307,32 @@ Make sure:
 - target type is `executable`
 - command is executed from the correct package/scan scope
 
-### Q5: old includes syntax fails
+### Q5: old nested `<dir>` under `<headers>` fails
 
 Old:
 
 ```xml
-<includes>
+<headers>
   <dir>../../include/xxx</dir>
-</includes>
+</headers>
 ```
+
+New:
+
+```xml
+<headers>
+  <dir from="../../include/xxx" to="xxx"/>
+</headers>
+```
+
+`file` and `glob` follow the same `from/to` style.
 
 ### Q6: Can a library-only package (no executable) run configure/build?
 
 Yes. Library-only packages are supported, including pure `imported_installed_*` wrappers.  
 `configure` requires at least one `target.xml` under the primary package, but no longer requires an executable target.
 
-New:
-
-```xml
-<includes>
-  <dir from="../../include/xxx" to="xxx"/>
-</includes>
-```
-
-`file` and `glob` follow the same `from/to` style.
-
-### Q6: single-package configure fails but repo-level scan works
+### Q7: single-package configure fails but repo-level scan works
 
 Cross-package dependencies are usually invisible in single-package scan scope. Run from a higher-level directory and include all required packages via `--scan`.
 

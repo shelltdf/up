@@ -4,7 +4,7 @@
 
 - 发现 `add_library` / `add_executable` 与源文件
 - 从 `target_link_libraries` 推断同包内目标依赖（`cg_bar` → `cg_foo`）
-- 从 `target_include_directories` 与 `${CMAKE_CURRENT_SOURCE_DIR}` 推断 `<includes>`（`cg_foo`）
+- 从 `target_include_directories` 与 `${CMAKE_CURRENT_SOURCE_DIR}` 推断 `<headers>`（`cg_foo`）
 
 在包根目录执行（需已构建仓库内的 `up.exe`）：
 

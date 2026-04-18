@@ -36,6 +36,35 @@ std::string quote_ninja_path(const std::filesystem::path& p) {
   return out;
 }
 
+// Ninja expands `$` in variables; double for literal `$` in /DNAME=value.
+std::string ninja_escape_compile_def_token(std::string s) {
+  std::string out;
+  out.reserve(s.size() + 4);
+  for (char c : s) {
+    if (c == '$')
+      out += "$$";
+    else
+      out.push_back(c);
+  }
+  return out;
+}
+
+std::string ninja_compile_def_flags(const std::vector<std::string>& defs) {
+  std::string s;
+  for (const auto& d : defs) {
+#if defined(_WIN32)
+    s += "/D";
+#else
+    s += "-D";
+#endif
+    s += ninja_escape_compile_def_token(d);
+    s += ' ';
+  }
+  while (!s.empty() && s.back() == ' ')
+    s.pop_back();
+  return s;
+}
+
 }  // namespace
 
 std::string build_ninja_install_command(const BuildBackendContext& ctx) {
@@ -68,7 +97,7 @@ int write_ninja_file(const ConfigureGraphModel& model) {
   nf << "cflags = /nologo /EHsc /std:c++17 " << (debug ? "/Zi /Od" : "/O2") << "\n";
   nf << "ldflags = /nologo\n\n";
   nf << "rule cxx\n";
-  nf << "  command = $cxx /c $cflags /Fo$out $in\n";
+  nf << "  command = $cxx /c $cflags $defs /Fo$out $in\n";
   nf << "  description = CXX $out\n\n";
   nf << "rule link_exe\n";
   nf << "  command = link $ldflags /OUT:$out $in $libs\n";
@@ -89,7 +118,7 @@ int write_ninja_file(const ConfigureGraphModel& model) {
   nf << "cxx = c++\n";
   nf << "cflags = -std=c++17 " << (debug ? "-g -O0" : "-O2") << "\n\n";
   nf << "rule cxx\n";
-  nf << "  command = $cxx -MMD -MF $out.d -c $cflags -o $out $in\n";
+  nf << "  command = $cxx -MMD -MF $out.d -c $cflags $defs -o $out $in\n";
   nf << "  depfile = $out.d\n";
   nf << "  description = CXX $out\n\n";
   nf << "rule link_exe\n";
@@ -143,6 +172,8 @@ int write_ninja_file(const ConfigureGraphModel& model) {
       if (!implicit_dep.empty())
         nf << " | " << implicit_dep;
       nf << "\n";
+      if (!t.compile_definitions.empty())
+        nf << "  defs =" << ninja_compile_def_flags(t.compile_definitions) << "\n";
       objs.push_back(obj_n);
       all_outputs.push_back(obj_n);
     }
