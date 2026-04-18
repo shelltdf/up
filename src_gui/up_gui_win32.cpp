@@ -11,6 +11,11 @@
 #include <commctrl.h>
 #include <shobjidl.h>
 
+// Vista+ thread right for CancelSynchronousIo; not declared when targeting older _WIN32_WINNT.
+#ifndef THREAD_CANCEL_SYNCHRONOUS_IO
+#define THREAD_CANCEL_SYNCHRONOUS_IO (0x0040L)
+#endif
+
 #include <atomic>
 #include <array>
 #include <algorithm>  // std::max
@@ -19,6 +24,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -83,6 +89,7 @@ constexpr int IDC_SCAN_REMOVE = 127;
 constexpr int IDC_SCAN_UP = 128;
 constexpr int IDC_SCAN_DOWN = 129;
 constexpr int IDC_ENV_SETTINGS = 131;
+constexpr int IDC_STOP = 140;
 constexpr int IDC_LOG_SPLITTER = 132;
 constexpr int IDC_LOG_COPY = 133;
 constexpr int IDC_LOG_CLEAR = 134;
@@ -95,6 +102,7 @@ constexpr int IDM_ABOUT = 1001;
 constexpr int IDM_UP_HELP = 1002;
 constexpr int IDM_LANG_ZH = 1005;
 constexpr int IDM_LANG_EN = 1006;
+constexpr int IDM_STOP_RUN = 1007;
 
 constexpr int IDC_ENV_TAB = 3001;
 constexpr int IDC_ENV_AUTO = 3002;
@@ -169,6 +177,15 @@ HWND g_configure_option_dialog_hwnd{};
 
 std::atomic<bool> g_running{};
 std::atomic<unsigned long> g_active_run_seq{0};
+std::mutex g_run_child_mutex;
+HANDLE g_run_child_process = nullptr;
+// When non-null, TerminateJobObject kills the whole tree (up -> cmake, etc.) so stdout pipe write ends close.
+HANDLE g_run_kill_job = nullptr;
+// Real handle to the detached run worker thread (CancelSynchronousIo unblocks ReadFile when build grandchildren
+// keep the stdout pipe write end open after TerminateProcess on the direct child).
+std::mutex g_run_worker_thread_mutex;
+HANDLE g_run_worker_thread_dup = nullptr;
+std::atomic<unsigned long> g_abort_run_no{0};
 std::wstring g_last_ui_log_text;
 std::chrono::steady_clock::time_point g_last_ui_log_tp{};
 constexpr auto kUiLogDedupWindow = std::chrono::milliseconds(1200);
@@ -190,6 +207,7 @@ RECT g_log_splitter_rect{};
 struct DonePack {
   std::wstring output;
   DWORD exit_code{};
+  bool user_stopped = false;
 };
 struct RunLogPack {
   unsigned long run_no{};
@@ -793,8 +811,11 @@ bool PathInHits(const std::wstring& p, const std::vector<std::wstring>& hits) {
 
 std::wstring QuoteWinArg(const std::wstring& s);
 bool RunProcessCapture(const std::wstring& app, const std::wstring& cmdline, const std::wstring& cwd, std::wstring& out_w,
-                       DWORD& exit_code, const std::function<void(const std::wstring&)>& on_chunk = nullptr);
+                       DWORD& exit_code, const std::function<void(const std::wstring&)>& on_chunk = nullptr,
+                       const std::function<void(HANDLE)>& on_process_created = nullptr,
+                       const std::function<void(HANDLE)>& on_process_closing = nullptr);
 void SetUiRunning(bool running);
+void RequestTerminateRunningChild();
 bool FinishConfigureArgsForRun(std::wstring& args_no_exe, std::wstring& err_out);
 
 std::wstring PickPreferredPath(const std::wstring& current, const std::vector<std::wstring>& hits) {
@@ -2427,9 +2448,68 @@ void DispatchTailChunk(std::string& pending, const std::function<void(const std:
   pending.clear();
 }
 
+void RegisterRunChildProcess(HANDLE h) {
+  std::lock_guard<std::mutex> lock(g_run_child_mutex);
+  g_run_child_process = h;
+}
+
+void ClearRunChildProcessIfMatches(HANDLE h) {
+  std::lock_guard<std::mutex> lock(g_run_child_mutex);
+  if (g_run_child_process == h)
+    g_run_child_process = nullptr;
+}
+
+void ClearRunKillJobIfMatches(HANDLE job) {
+  if (!job)
+    return;
+  std::lock_guard<std::mutex> lock(g_run_child_mutex);
+  if (g_run_kill_job == job)
+    g_run_kill_job = nullptr;
+}
+
+void RequestTerminateRunningChild() {
+  if (!g_running.load())
+    return;
+  HANDLE h = nullptr;
+  HANDLE job = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_run_child_mutex);
+    h = g_run_child_process;
+    job = g_run_kill_job;
+    if (h)
+      g_abort_run_no.store(g_active_run_seq.load());
+  }
+  if (job)
+    TerminateJobObject(job, 1);
+  else if (h)
+    TerminateProcess(h, 1);
+  HANDLE worker_dup = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_run_worker_thread_mutex);
+    worker_dup = g_run_worker_thread_dup;
+  }
+  if (worker_dup)
+    CancelSynchronousIo(worker_dup);
+}
+
 bool RunProcessCapture(const std::wstring& app, const std::wstring& cmdline, const std::wstring& cwd, std::wstring& out_w,
-                       DWORD& exit_code, const std::function<void(const std::wstring&)>& on_chunk) {
+                       DWORD& exit_code, const std::function<void(const std::wstring&)>& on_chunk,
+                       const std::function<void(HANDLE)>& on_process_created,
+                       const std::function<void(HANDLE)>& on_process_closing) {
   exit_code = static_cast<DWORD>(-1);
+  HANDLE kill_job = nullptr;
+  if (on_process_created) {
+    kill_job = CreateJobObjectW(nullptr, nullptr);
+    if (kill_job) {
+      JOBOBJECT_EXTENDED_LIMIT_INFORMATION jeli{};
+      jeli.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+      if (!SetInformationJobObject(kill_job, JobObjectExtendedLimitInformation, &jeli, sizeof(jeli))) {
+        CloseHandle(kill_job);
+        kill_job = nullptr;
+      }
+    }
+  }
+
   SECURITY_ATTRIBUTES sa{};
   sa.nLength = sizeof(sa);
   sa.lpSecurityDescriptor = nullptr;
@@ -2466,7 +2546,27 @@ bool RunProcessCapture(const std::wstring& app, const std::wstring& cmdline, con
   CloseHandle(in_wr);
   if (!ok) {
     CloseHandle(out_rd);
+    if (kill_job)
+      CloseHandle(kill_job);
     return false;
+  }
+
+  bool job_assigned = false;
+  if (kill_job) {
+    if (AssignProcessToJobObject(kill_job, pi.hProcess))
+      job_assigned = true;
+    else {
+      CloseHandle(kill_job);
+      kill_job = nullptr;
+    }
+  }
+
+  if (on_process_created) {
+    if (kill_job && job_assigned) {
+      std::lock_guard<std::mutex> lock(g_run_child_mutex);
+      g_run_kill_job = kill_job;
+    }
+    on_process_created(pi.hProcess);
   }
 
   std::string acc;
@@ -2486,6 +2586,12 @@ bool RunProcessCapture(const std::wstring& app, const std::wstring& cmdline, con
   CloseHandle(out_rd);
   WaitForSingleObject(pi.hProcess, INFINITE);
   GetExitCodeProcess(pi.hProcess, &exit_code);
+  if (on_process_closing)
+    on_process_closing(pi.hProcess);
+  if (kill_job) {
+    ClearRunKillJobIfMatches(kill_job);
+    CloseHandle(kill_job);
+  }
   CloseHandle(pi.hThread);
   CloseHandle(pi.hProcess);
   out_w = Utf8ToWide(acc);
@@ -2542,19 +2648,29 @@ bool QueryConfigureBuildDirNameFromUpExe(const std::wstring& up_exe, const std::
 void HandleProcessDone(const DonePack& pack) {
   if (!pack.output.empty())
     AppendLogRaw(pack.output);
-  wchar_t tail[160]{};
-  if (g_ui_lang_zh)
-    swprintf_s(tail, L"\r\n[退出码 %lu]\r\n", static_cast<unsigned long>(pack.exit_code));
-  else
-    swprintf_s(tail, L"\r\n[exit code %lu]\r\n", static_cast<unsigned long>(pack.exit_code));
-  AppendLogRaw(tail);
-  wchar_t st[96]{};
-  if (g_ui_lang_zh)
-    swprintf_s(st, L"完成（退出码 %lu）", static_cast<unsigned long>(pack.exit_code));
-  else
-    swprintf_s(st, L"Done (exit code %lu)", static_cast<unsigned long>(pack.exit_code));
-  SetStatus(st);
-  if (pack.exit_code == 0 && g_last_up_args.rfind(L"configure", 0) == 0) {
+  if (pack.user_stopped) {
+    AppendLogRaw(T(L"\r\n[已停止]\r\n", L"\r\n[Stopped by user]\r\n"));
+    wchar_t st[112]{};
+    if (g_ui_lang_zh)
+      swprintf_s(st, L"已中止（退出码 %lu）", static_cast<unsigned long>(pack.exit_code));
+    else
+      swprintf_s(st, L"Aborted (exit code %lu)", static_cast<unsigned long>(pack.exit_code));
+    SetStatus(st);
+  } else {
+    wchar_t tail[160]{};
+    if (g_ui_lang_zh)
+      swprintf_s(tail, L"\r\n[退出码 %lu]\r\n", static_cast<unsigned long>(pack.exit_code));
+    else
+      swprintf_s(tail, L"\r\n[exit code %lu]\r\n", static_cast<unsigned long>(pack.exit_code));
+    AppendLogRaw(tail);
+    wchar_t st[96]{};
+    if (g_ui_lang_zh)
+      swprintf_s(st, L"完成（退出码 %lu）", static_cast<unsigned long>(pack.exit_code));
+    else
+      swprintf_s(st, L"Done (exit code %lu)", static_cast<unsigned long>(pack.exit_code));
+    SetStatus(st);
+  }
+  if (!pack.user_stopped && pack.exit_code == 0 && g_last_up_args.rfind(L"configure", 0) == 0) {
     RefreshRunTargetListFromPath();
     std::wstring cwd;
     GetEditText(g_path, cwd);
@@ -2592,17 +2708,39 @@ void HandleProcessDoneMessage(LPARAM lParam) {
 void StartRunWorker(const std::wstring& run_app, const std::wstring& cmd, const std::wstring& cwd, HWND hwnd,
                     unsigned long run_no) {
   std::thread([run_app, cmd, cwd, hwnd, run_no]() {
+    struct RunWorkerThreadDupGuard {
+      HANDLE h = nullptr;
+      RunWorkerThreadDupGuard() {
+        constexpr DWORD kDesired = SYNCHRONIZE | THREAD_CANCEL_SYNCHRONOUS_IO;
+        if (!DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &h, kDesired, FALSE, 0))
+          h = nullptr;
+        if (h) {
+          std::lock_guard<std::mutex> lk(g_run_worker_thread_mutex);
+          g_run_worker_thread_dup = h;
+        }
+      }
+      ~RunWorkerThreadDupGuard() {
+        std::lock_guard<std::mutex> lk(g_run_worker_thread_mutex);
+        if (g_run_worker_thread_dup == h)
+          g_run_worker_thread_dup = nullptr;
+        if (h)
+          CloseHandle(h);
+      }
+    } worker_thread_dup;
+
     std::wstring output;
     DWORD code = 0;
-    const bool ok =
-        RunProcessCapture(run_app, cmd, cwd, output, code,
-                          [hwnd, run_no](const std::wstring& chunk) { PostRunLogChunk(hwnd, run_no, chunk); });
+    const bool ok = RunProcessCapture(
+        run_app, cmd, cwd, output, code, [hwnd, run_no](const std::wstring& chunk) { PostRunLogChunk(hwnd, run_no, chunk); },
+        [](HANDLE h) { RegisterRunChildProcess(h); }, [](HANDLE h) { ClearRunChildProcessIfMatches(h); });
+    const unsigned long arn = g_abort_run_no.exchange(0);
     auto* pack = new DonePack;
     if (ok)
       pack->output.clear();
     else
       pack->output = MakeTaggedLogLine(L"[错误] ", L"[Error] ", L"CreateProcess 失败。", L"CreateProcess failed.");
     pack->exit_code = code;
+    pack->user_stopped = ok && (arn == run_no);
     PostMessageW(hwnd, WM_PROCESS_DONE, ok ? 1 : 0, reinterpret_cast<LPARAM>(pack));
   }).detach();
 }
@@ -2622,6 +2760,7 @@ up::gui::core::UpLaunchPlan ResolveLaunchPlan(const std::wstring& up_exe, const 
 
 unsigned long BeginRunUiState(const up::gui::core::UpLaunchPlan& plan, const std::wstring& vcvars,
                               const std::wstring& args_no_exe) {
+  g_abort_run_no.store(0);
   g_last_up_args = args_no_exe;
   const unsigned long run_no = ++g_run_seq;
   AppendLog(L"\r\n==== Run #" + std::to_wstring(run_no) + L" @ " + NowTimeStamp() + L" ====\r\n");
@@ -2658,7 +2797,18 @@ bool ResolveConfigureRunArgs(std::wstring& args_no_exe) {
 void SetUiRunning(bool running) {
   g_running = running;
   const BOOL en = running ? FALSE : TRUE;
-  EnableWindow(g_toolbar, en);
+  if (g_toolbar) {
+#if UP_ENABLE_PROJECT
+    SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_PROJECT, static_cast<LPARAM>(!running));
+#endif
+    SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_CONFIGURE, static_cast<LPARAM>(!running));
+    SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_BUILD, static_cast<LPARAM>(!running));
+    SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_RUN, static_cast<LPARAM>(!running));
+    SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_TEST, static_cast<LPARAM>(!running));
+    SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_PACK, static_cast<LPARAM>(!running));
+    SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_ENV_SETTINGS, static_cast<LPARAM>(!running));
+    SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_STOP, static_cast<LPARAM>(running));
+  }
   EnableWindow(g_browse, en);
   EnableWindow(g_path, en);
   EnableWindow(g_scan_list, en);
@@ -2694,6 +2844,7 @@ void SetUiRunning(bool running) {
     EnableMenuItem(menu, IDC_TEST, running ? gray : ena);
     EnableMenuItem(menu, IDC_PACK, running ? gray : ena);
     EnableMenuItem(menu, IDC_RUN, running ? gray : ena);
+    EnableMenuItem(menu, IDM_STOP_RUN, running ? ena : gray);
     EnableMenuItem(menu, IDC_ENV_SETTINGS, running ? gray : ena);
     EnableMenuItem(menu, IDM_LANG_ZH, ena);
     EnableMenuItem(menu, IDM_LANG_EN, ena);
@@ -3129,6 +3280,7 @@ void CreateMainMenu(HWND hwnd) {
   AppendMenuW(tools, MF_STRING, IDC_TEST, T(L"测试(&T)", L"&test"));
   AppendMenuW(tools, MF_STRING, IDC_PACK, T(L"打包(&P)", L"&pack"));
   AppendMenuW(tools, MF_STRING, IDC_RUN, T(L"运行(&R)…", L"&run…"));
+  AppendMenuW(tools, MF_STRING, IDM_STOP_RUN, T(L"停止(&S)", L"&Stop run"));
   AppendMenuW(tools, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(tools, MF_STRING, IDC_ENV_SETTINGS, T(L"编译环境设置…", L"Build &environment…"));
   AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(tools), T(L"操作(&O)", L"&Actions"));
@@ -3631,6 +3783,7 @@ void CreateToolbarButtons(HWND tb) {
       {IDC_RUN, STD_FILENEW, T(L"运行", L"run")},
       {IDC_TEST, STD_FIND, T(L"测试", L"test")},
       {IDC_PACK, STD_PRINT, T(L"打包", L"pack")},
+      {IDC_STOP, STD_DELETE, T(L"停止", L"stop")},
       {IDC_ENV_SETTINGS, STD_HELP, T(L"环境", L"env")},
   };
 
@@ -3916,6 +4069,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       AppendLogRaw(InitialWelcomeLogText());
       // CWD 默认留空，等待用户明确选择/输入。
       LayoutChildren(hwnd);
+      SetUiRunning(false);
       return 0;
 
     case WM_SIZE:
@@ -4006,6 +4160,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
     case WM_COMMAND: {
       const int id = GET_WM_COMMAND_ID(wParam, lParam);
+      if (id == IDM_STOP_RUN || id == IDC_STOP) {
+        RequestTerminateRunningChild();
+        return 0;
+      }
       if (g_running && id != IDM_EXIT)
         return 0;
 
