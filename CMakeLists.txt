@@ -27,6 +27,7 @@ set(UP_CORE_SOURCES
   src/infra/i18n/lang.cpp
   src/infra/platform/path_check.cpp
   src/engine/xml/simple_xml.cpp
+  src/engine/xml/var_subst.cpp
   src/infra/platform/paths.cpp
   src/engine/commands/build.hpp
   src/engine/commands/configure.hpp
@@ -43,6 +44,7 @@ set(UP_CORE_SOURCES
   src/engine/backends/core/backend_dispatch.hpp
   src/infra/platform/paths.hpp
   src/engine/xml/simple_xml.hpp
+  src/engine/xml/var_subst.hpp
 )
 if(UP_ENABLE_PROJECT)
   list(APPEND UP_CORE_SOURCES

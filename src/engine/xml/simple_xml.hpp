@@ -9,6 +9,12 @@
 
 namespace up {
 
+// Compiler macro definitions (package.xml / target.xml `<defines>`; CMake: target_compile_definitions; Ninja: -D /D).
+struct DefineEntry {
+  std::string name;
+  std::string value;  // optional; empty => define name only (#ifdef NAME)
+};
+
 // Optional native CMake subtree (see package.xml <cmake/>).
 struct PackageExternalCmake {
   // Directory containing upstream CMakeLists.txt, relative to package.xml parent directory.
@@ -20,6 +26,10 @@ struct PackageDesc {
   std::string version;
   std::vector<std::pair<std::string, bool>> dependencies;  // name, optional
   std::optional<PackageExternalCmake> external_cmake;
+  /** `<vars><var name="KEY" value="VAL"/></vars>` — default for KEY; overridable via `up configure --opt` / up_cache (see merge order). */
+  std::vector<std::pair<std::string, std::string>> vars;
+  /** `<defines>`; applied to every native compile target in this package (before each target's own `<defines>`). */
+  std::vector<DefineEntry> defines;
 };
 
 struct TargetDesc {
@@ -28,6 +38,8 @@ struct TargetDesc {
     std::string from;  // relative to target.xml directory
     std::string preprocess_command;
     std::string postprocess_command;
+    /** Optional: `when="UP_OS==windows"` etc.; empty means always. */
+    std::string when;
   };
 
   struct IncludeEntry {
@@ -36,6 +48,13 @@ struct TargetDesc {
     std::string to;    // relative to install include/
     std::string preprocess_command;
     std::string postprocess_command;
+    std::string when;
+  };
+
+  /** Template processed at `up configure` into `.intermediate/generated/...` (see docs). */
+  struct ConfigFileEntry {
+    std::string in;   // relative to target.xml directory
+    std::string to;   // relative path under generated/<package>/<target>/
   };
 
   struct AssetEntry {
@@ -44,12 +63,6 @@ struct TargetDesc {
     std::string to;    // relative to install root
     std::string preprocess_command;
     std::string postprocess_command;
-  };
-
-  // Compiler macro definitions for native targets (CMake: target_compile_definitions; Ninja: -D /D).
-  struct DefineEntry {
-    std::string name;
-    std::string value;  // optional; empty => define name only (#ifdef NAME)
   };
 
   // Prebuilt SDK / binary-only library (paths relative to target.xml directory unless absolute).
@@ -81,6 +94,9 @@ struct TargetDesc {
   std::vector<IncludeEntry> includes;
   std::vector<AssetEntry> assets;
   std::vector<DefineEntry> defines;
+  /** Target-level `<vars>` defaults (override package / builtins for same KEY; `--opt` / cache still wins last). */
+  std::vector<std::pair<std::string, std::string>> vars;
+  std::vector<ConfigFileEntry> config_files;
 };
 
 // Minimal attribute scanner for root elements (no full XML parser dependency).

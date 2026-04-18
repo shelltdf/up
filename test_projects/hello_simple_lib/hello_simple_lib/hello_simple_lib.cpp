@@ -1,4 +1,5 @@
 ﻿#include "hello_simple_lib.hpp"
+#include "hello_simple_lib_gen.hpp"
 
 #include <algorithm>
 #include <cctype>

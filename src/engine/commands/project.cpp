@@ -214,7 +214,7 @@ void merge_cmake_source_overlay_into(ImportedPackage& base, ImportedPackage&& ov
           b.includes.push_back(inc);
       }
       for (const auto& def : o.defines) {
-        const auto same = [&](const TargetDesc::DefineEntry& x) {
+        const auto same = [&](const DefineEntry& x) {
           return x.name == def.name && x.value == def.value;
         };
         if (std::find_if(b.defines.begin(), b.defines.end(), same) == b.defines.end())

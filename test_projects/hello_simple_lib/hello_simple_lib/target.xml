@@ -1,5 +1,12 @@
 ﻿<?xml version="1.0" encoding="UTF-8"?>
 <target name="hello_simple_lib" type="static_library">
+  <vars>
+    <var name="TEST_TARGET_NAME" value="hello_simple_lib"/>
+    <var name="TEST_TEMPLATE_TAG" value="from_target_xml"/>
+  </vars>
+  <config_files>
+    <file in="hello_simple_lib_gen.hpp.in" to="hello_simple_lib_gen.hpp"/>
+  </config_files>
   <sources>
     <file>hello_simple_lib.cpp</file>
   </sources>

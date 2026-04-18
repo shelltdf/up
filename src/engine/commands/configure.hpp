@@ -8,7 +8,7 @@
 namespace up {
 
 // Writes backend files under .intermediate/build/<name> (default name: default) and prints a package/target tree.
-// opt_kvs format: KEY=VALUE (typically UP_* options).
+// opt_kvs format: KEY=VALUE (`UP_*` / `UPSTREAM_*`, or any C-style identifier for `<vars>` overrides; see `up spec`).
 // build_dir_name_override: single path segment under .intermediate/build (not a full path).
 int cmd_configure(const std::filesystem::path& cwd,
                   const std::vector<std::string>& scan_roots,

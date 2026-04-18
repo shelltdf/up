@@ -1,11 +1,13 @@
 ﻿#include "configure.hpp"
 
+#include "commands_common.hpp"
 #include "cli_verbose.hpp"
 #include "core/backend_dispatch.hpp"
 #include "lang.hpp"
 #include "path_check.hpp"
 #include "paths.hpp"
 #include "simple_xml.hpp"
+#include "var_subst.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -119,43 +121,6 @@ bool path_is_under_tree(const std::filesystem::path& root, const std::filesystem
       return false;
   }
   return true;
-}
-
-std::string arch_from_target_cpu(std::string v) {
-  return normalize_cpu_arch_tag(v);
-}
-
-std::string option_or_compat(const std::map<std::string, std::string>& opts,
-                             const std::string& preferred,
-                             const std::string& legacy,
-                             const std::string& defv) {
-  const auto it = opts.find(preferred);
-  if (it != opts.end())
-    return it->second;
-  const auto it2 = opts.find(legacy);
-  if (it2 != opts.end())
-    return it2->second;
-  return defv;
-}
-
-std::string lower_ascii(std::string v) {
-  for (char& c : v) {
-    if (c >= 'A' && c <= 'Z')
-      c = static_cast<char>(c - 'A' + 'a');
-  }
-  return v;
-}
-
-bool equals_ci(std::string a, std::string b) {
-  if (a.size() != b.size())
-    return false;
-  for (size_t i = 0; i < a.size(); ++i) {
-    if (a[i] >= 'A' && a[i] <= 'Z')
-      a[i] = static_cast<char>(a[i] - 'A' + 'a');
-    if (b[i] >= 'A' && b[i] <= 'Z')
-      b[i] = static_cast<char>(b[i] - 'A' + 'a');
-  }
-  return a == b;
 }
 
 std::string trim_ascii_ws(std::string s) {
@@ -580,7 +545,8 @@ void write_packages_md(const std::filesystem::path& out_path,
                        const std::vector<LoadedTarget>& all_targets,
                        const std::string& intra_package_target_graph_pkg,
                        const ConfigureGraphModel& graph_model,
-                       const std::vector<LoadedTarget>& build_targets) {
+                       const std::vector<LoadedTarget>& build_targets,
+                       const std::map<std::string, std::string>& configure_opts) {
   std::ofstream f(out_path);
   if (!f) {
     std::cerr << "configure: warning: could not write " << to_posix_path_string(out_path) << "\n";
@@ -677,6 +643,58 @@ void write_packages_md(const std::filesystem::path& out_path,
     const std::string xml_text =
         (it_xml != pkg_xml_paths.end()) ? ("`" + it_xml->second.generic_string() + "`") : "`(not in current scan set)`";
     f << "| `" << pkg_name << "` | " << dir_text << " | " << xml_text << " |\n";
+  }
+
+  auto md_table_cell = [](std::string s) {
+    for (char& c : s) {
+      if (c == '|' || c == '`' || c == '\n' || c == '\r')
+        c = ' ';
+    }
+    return s;
+  };
+
+  f << "\n## Declared template variables (`<vars>`)\n\n";
+  f << "Each **name** / **value** pair is a **default** for `@NAME@` substitution and `when=` (after built-ins). "
+       "At configure, **package** `<vars>` apply, then **target** `<vars>`, then **`--opt` / `up_cache.txt`** for the "
+       "same key (last wins). Allowed override keys include every `UP_*` / `UPSTREAM_*` option plus any **C-style "
+       "identifier** except reserved cache lines (`cwd`, `arch`, `package`, …); see `up spec`.\n\n";
+  bool any_vars = false;
+  for (const auto& pp : loaded_packages) {
+    if (!pp.second.vars.empty())
+      any_vars = true;
+  }
+  if (!any_vars) {
+    for (const auto& lt : all_targets) {
+      if (!lt.desc.vars.empty()) {
+        any_vars = true;
+        break;
+      }
+    }
+  }
+  if (!any_vars) {
+    f << "_No `<vars>` in this scan._\n";
+  } else {
+    f << "### Package `<vars>`\n\n";
+    f << "| Package | Name | Default (XML) | Key also in configure opts map |\n";
+    f << "|---|---|---|---|\n";
+    for (const auto& pp : loaded_packages) {
+      for (const auto& v : pp.second.vars) {
+        const bool in_opts = configure_opts.find(v.first) != configure_opts.end();
+        f << "| `" << md_table_cell(pp.second.name) << "` | `" << md_table_cell(v.first) << "` | `"
+          << md_table_cell(v.second) << "` | " << (in_opts ? "yes" : "no") << " |\n";
+      }
+    }
+    f << "\n### Target `<vars>`\n\n";
+    f << "| Package | Target | Name | Default (XML) | Key also in configure opts map |\n";
+    f << "|---|---|---|---|---|\n";
+    for (const auto& lt : all_targets) {
+      for (const auto& v : lt.desc.vars) {
+        const bool in_opts = configure_opts.find(v.first) != configure_opts.end();
+        f << "| `" << md_table_cell(lt.package_name) << "` | `" << md_table_cell(lt.desc.name) << "` | `"
+          << md_table_cell(v.first) << "` | `" << md_table_cell(v.second) << "` | " << (in_opts ? "yes" : "no")
+          << " |\n";
+      }
+    }
   }
 
   bool any_intra_target_dep = false;
@@ -855,7 +873,7 @@ std::map<std::string, std::string> load_cached_up_options(const std::filesystem:
       continue;
     const std::string k = line.substr(0, pos);
     const std::string v = line.substr(pos + 1);
-    if (k.rfind("UP_", 0) == 0 || k.rfind("UPSTREAM_", 0) == 0)
+    if (up_mergeable_option_key(k))
       out[k] = v;
   }
   return out;
@@ -870,7 +888,7 @@ std::map<std::string, std::string> merge_up_options(const std::map<std::string, 
       continue;
     const std::string k = kv.substr(0, pos);
     const std::string v = kv.substr(pos + 1);
-    if (k.rfind("UP_", 0) == 0 || k.rfind("UPSTREAM_", 0) == 0)
+    if (up_mergeable_option_key(k))
       out[k] = v;
   }
   return out;
@@ -1042,7 +1060,7 @@ int cmd_configure(const std::filesystem::path& cwd,
 
   auto opts = merge_up_options(load_cached_up_options(build_root / "up_cache.txt"), opt_kvs);
   ensure_default_build_parallel_options(opts);
-  const std::string cpu = arch_from_target_cpu(option_or_compat(opts, "UP_TARGET_CPU_ARCH", "UP_CPU_ARCH", host_arch));
+  const std::string cpu = up::arch_from_target_cpu(option_or_compat(opts, "UP_TARGET_CPU_ARCH", "UP_CPU_ARCH", host_arch));
   const std::string system = lower_ascii(option_or_compat(opts, "UP_TARGET_SYSTEM", "UP_SYSTEM", detect_host_system_tag()));
   const std::string dyn = lower_ascii(option_or_compat(opts, "UP_TARGET_DYNAMIC_LIBRARY", "UP_DYNAMIC_LIBRARY", "OFF"));
   const std::string link_mode = (dyn == "on" || dyn == "1" || dyn == "true") ? "dynamic" : "static";
@@ -1276,6 +1294,30 @@ int cmd_configure(const std::filesystem::path& cwd,
     return re;
   };
 
+  auto merged_vars_for_target = [&](const LoadedTarget& lt) {
+    std::string pkg_ver = "0.0.0";
+    std::vector<std::pair<std::string, std::string>> pkg_vars;
+    const auto pd_it = package_name_to_desc.find(lt.package_name);
+    if (pd_it != package_name_to_desc.end()) {
+      pkg_vars = pd_it->second.vars;
+      if (!pd_it->second.version.empty())
+        pkg_ver = pd_it->second.version;
+    }
+    return merge_var_layers(make_builtin_var_map(lt.package_name, pkg_ver, lt.desc.name, build_system, config_mode), opts,
+                            pkg_vars, lt.desc.vars);
+  };
+
+  // 1 = include entry, 0 = skip (false), -1 = invalid when= (configure error).
+  auto when_tri = [](const std::string& when, const std::map<std::string, std::string>& vars, std::string& err_out) -> int {
+    if (when.empty())
+      return 1;
+    err_out.clear();
+    const bool ok = eval_when(when, vars, err_out);
+    if (!err_out.empty())
+      return -1;
+    return ok ? 1 : 0;
+  };
+
   const auto glob_matches = [&](const std::filesystem::path& target_dir, const std::string& wildcard_expr) {
     std::vector<std::filesystem::path> files;
     std::filesystem::path expr = (target_dir / wildcard_expr).lexically_normal();
@@ -1345,7 +1387,17 @@ int cmd_configure(const std::filesystem::path& cwd,
   const std::filesystem::path install_staging_root =
       std::filesystem::weakly_canonical(std::filesystem::absolute(default_install_root(cwd)), ec_skip);
   for (const auto& lt : build_targets) {
+    const auto header_vars = merged_vars_for_target(lt);
     for (const auto& inc_entry : lt.desc.includes) {
+      std::string when_err;
+      const int w = when_tri(inc_entry.when, header_vars, when_err);
+      if (w < 0) {
+        std::cerr << "configure: invalid when=\"" << inc_entry.when << "\" under <headers> for target \"" << lt.desc.name
+                  << "\": " << when_err << "\n";
+        return 5;
+      }
+      if (w == 0)
+        continue;
       if (inc_entry.kind == "dir") {
         const auto inc = (lt.target_dir / inc_entry.from).lexically_normal();
         if (!install_staging_root.empty() && path_is_under_tree(install_staging_root, inc)) {
@@ -1568,7 +1620,57 @@ int cmd_configure(const std::filesystem::path& cwd,
 #endif
       }
     } else {
+      const auto src_vars = merged_vars_for_target(lt);
+      const std::filesystem::path gen_root =
+          std::filesystem::absolute(cwd / ".intermediate" / "generated" / lt.package_name / lt.desc.name);
+      for (const auto& cf : lt.desc.config_files) {
+        const std::filesystem::path rel_out(cf.to);
+        if (!is_safe_relative_config_output(rel_out)) {
+          std::cerr << "configure: config_files to=\"" << cf.to
+                    << "\" must be a relative path without '..' segments (target \"" << lt.desc.name << "\")\n";
+          return 5;
+        }
+        const auto tmpl_path = lt.target_dir / cf.in;
+        std::ifstream tin(tmpl_path, std::ios::binary);
+        if (!tin) {
+          std::cerr << "configure: cannot open config template " << to_posix_path_string(tmpl_path) << " (target \""
+                    << lt.desc.name << "\")\n";
+          return 5;
+        }
+        std::ostringstream tbuf;
+        tbuf << tin.rdbuf();
+        const std::string rendered = substitute_at_vars(tbuf.str(), src_vars);
+        const auto out_path = (gen_root / rel_out).lexically_normal();
+        std::error_code mk_ec;
+        std::filesystem::create_directories(out_path.parent_path(), mk_ec);
+        if (mk_ec) {
+          std::cerr << "configure: cannot create directory for generated config: " << mk_ec.message() << "\n";
+          return 5;
+        }
+        std::ofstream tout(out_path, std::ios::binary | std::ios::trunc);
+        if (!tout) {
+          std::cerr << "configure: cannot write generated config " << to_posix_path_string(out_path) << "\n";
+          return 5;
+        }
+        tout << rendered;
+        if (!tout) {
+          std::cerr << "configure: write failed for generated config " << to_posix_path_string(out_path) << "\n";
+          return 5;
+        }
+        const std::string abs_out = std::filesystem::absolute(out_path).generic_string();
+        tm.source_paths.push_back(abs_out);
+        tm.source_rules.push_back({abs_out, "", ""});
+      }
       for (const auto& s : lt.desc.source_entries) {
+        std::string when_err;
+        const int w = when_tri(s.when, src_vars, when_err);
+        if (w < 0) {
+          std::cerr << "configure: invalid when=\"" << s.when << "\" in <sources> for target \"" << lt.desc.name
+                    << "\": " << when_err << "\n";
+          return 5;
+        }
+        if (w == 0)
+          continue;
         if (s.kind == "glob") {
           const auto files = glob_matches(lt.target_dir, s.from);
           for (const auto& sf : files) {
@@ -1603,13 +1705,37 @@ int cmd_configure(const std::filesystem::path& cwd,
     }
 
     std::set<std::string> inc_dirs;
+    const auto inc_vars = merged_vars_for_target(lt);
     for (const auto& inc_entry : lt.desc.includes) {
+      std::string when_err;
+      const int w = when_tri(inc_entry.when, inc_vars, when_err);
+      if (w < 0) {
+        std::cerr << "configure: invalid when=\"" << inc_entry.when << "\" under <headers> for target \"" << lt.desc.name
+                  << "\": " << when_err << "\n";
+        return 5;
+      }
+      if (w == 0)
+        continue;
       const auto inc = include_base_dir(lt.target_dir, inc_entry);
       if (!inc.empty())
         inc_dirs.insert(std::filesystem::absolute(inc).generic_string());
     }
+    if (!lt.desc.config_files.empty() &&
+        (lt.desc.type == "executable" || lt.desc.type == "static_library" || lt.desc.type == "shared_library")) {
+      const std::filesystem::path gen_inc =
+          std::filesystem::absolute(cwd / ".intermediate" / "generated" / lt.package_name / lt.desc.name);
+      inc_dirs.insert(gen_inc.generic_string());
+    }
     tm.include_dirs.assign(inc_dirs.begin(), inc_dirs.end());
     if (!tm.imported_prebuilt && (tm.type == "executable" || tm.type == "static_library" || tm.type == "shared_library")) {
+      const auto pd_it = package_name_to_desc.find(lt.package_name);
+      if (pd_it != package_name_to_desc.end()) {
+        for (const auto& de : pd_it->second.defines) {
+          if (de.name.empty())
+            continue;
+          tm.compile_definitions.push_back(de.value.empty() ? de.name : (de.name + "=" + de.value));
+        }
+      }
       for (const auto& de : lt.desc.defines) {
         if (de.name.empty())
           continue;
@@ -1682,7 +1808,7 @@ int cmd_configure(const std::filesystem::path& cwd,
   cli_verbose_phase("configure", "write_cache");
   write_up_cache(cache_path, cwd, arch, primary_pkg.name, generated_file, roots_cached, cache_opts);
   write_packages_md(cache_path.parent_path() / "packages.md", loaded_packages, roots_cached, all_targets,
-                    primary_pkg.name, graph_model, build_targets);
+                    primary_pkg.name, graph_model, build_targets, cache_opts);
   if (equals_ci(build_system, "ninja")) {
     cli_verbose_phase("configure", "done_ninja");
     return 0;

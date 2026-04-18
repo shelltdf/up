@@ -6,6 +6,9 @@
 
 namespace up {
 
+/** True for keys allowed in the configure/build options map from `up_cache.txt` / `--opt` (excludes structural lines). */
+bool up_mergeable_option_key(const std::string& k);
+
 std::map<std::string, std::string> load_up_options_from_build_dir(const std::filesystem::path& build_dir);
 std::map<std::string, std::string> load_up_options(const std::filesystem::path& root, const std::string& arch);
 std::string read_plain_cache_value(const std::filesystem::path& cache_file, const std::string& key);

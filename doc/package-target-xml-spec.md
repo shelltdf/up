@@ -8,7 +8,7 @@
 
 | 文件 | 放置位置 | 作用 |
 |------|----------|------|
-| **`package.xml`** | 每个**独立包**的根目录（与包内 `target.xml` 树的上层一致） | 声明包名、版本、**包级**依赖（其他包名）。 |
+| **`package.xml`** | 每个**独立包**的根目录（与包内 `target.xml` 树的上层一致） | 声明包名、版本、**包级**依赖（其他包名）；可选 **`<vars>`**、**`<defines>`** 等。 |
 | **`target.xml`** | 包内**每个构建目标独占一个子目录**，该目录下**恰好一个** `target.xml` | 声明目标名、类型、源文件、可选的头文件搜索路径、**目标级**依赖（其他 target，通常为库）。 |
 
 - **归属**：`target.xml` 必须位于某一 `package.xml` 所在目录的**子树内**；`configure` 会把 target 归到路径上**最近**的包根下（见 `configure.cpp` 中 `nearest_package_parent`）。
@@ -106,6 +106,7 @@
 
 - **`from`**：必填，路径相对 `target.xml` 所在目录。
 - **`to`**：可选，安装目标目录，相对安装前缀下的 `include/`；空值或省略表示安装到 `include/` 根。
+- **`when`**：可选；为假时该条目不参与编译期 include 推导，也不参与安装规则（语义见 §3.5）。
 
 示例：
 
@@ -152,7 +153,53 @@
 </defines>
 ```
 
-### 3.5 目标依赖 `<dependency name="..."/>`
+### 2.4 包级变量 `<vars>`（可选）
+
+- 块 **`<vars>...</vars>`**，内为自闭合 **`<var name="KEY" value="VAL"/>`**（`value` 可省略表示空字符串）。
+- 每个 **KEY** 表示**默认值**，供本包下所有 `target.xml` 在 **`@KEY@` 替换**与 **`when`** 中使用；同一 KEY 还可在 **`up configure --opt KEY=...`** 或 **`up_cache.txt`** 中写入（键须符合实现允许的格式：所有 `UP_*` / `UPSTREAM_*`，以及除保留键外的 C 风格标识符），**configure 阶段最后应用，覆盖 XML 默认值**（见 §3.5 合并顺序）。
+
+### 2.5 包级编译宏 `<defines>`（可选）
+
+- 与 **`target.xml` 中 `<defines>`** 同形：**`<defines>...</defines>`** 内若干 **`<define name="标识符" value="..."/>`**（`name`、`value` 规则与目标级一致，见 §3.4）。
+- **作用域**：作用于本包内所有 **`executable` / `static_library` / `shared_library`** 目标的编译命令；**先于**各目标自身的 `<defines>` 注入（目标级宏在命令行上靠后，一般由编译器后写覆盖同名宏）。
+
+### 3.5 变量合并、`@KEY@`、`config_files` 与 `when`
+
+#### 变量层（后者覆盖前者）
+
+用于 `<config_files>` 模板中的 **`@NAME@`** 替换，以及 `<sources>` / `<headers>` 条目的 **`when="..."`** 求值：
+
+1. **内置**：`UP_OS`（`windows` | `linux` | `darwin`）、`UP_PACKAGE_NAME`、`UP_PACKAGE_VERSION`、`UP_TARGET_NAME`、`UP_TARGET_BUILD_SYSTEM`（`cmake` | `ninja`）、`UP_CONFIG`（`debug` | `release`）。
+2. **`package.xml` 中 `<vars>`**（包级默认值）。
+3. **`target.xml` 中 `<vars>`**（目标级默认值；与包级同名时覆盖包级）。
+4. **工作区**：`--opt` 与 `up_cache.txt` 中与上述规则一致的 **KEY=VALUE**（与 `UP_*` 等选项共用一张表；**最后应用**，覆盖 XML 中的同名 `<vars>` 默认值）。
+
+仅支持 **`@NAME@`** 占位符（类 CMake 子集）；未定义的 `NAME` 保持原文不替换。`up configure` 生成的 **`packages.md`** 中会列出各包/目标的 `<vars>` 默认值，并标出该 KEY 是否也出现在本次 configure 的选项映射中（便于核对是否被 `--opt` / 缓存覆盖）。
+
+#### `when` 语义（configure 报错或跳过）
+
+- 省略或空白：恒为真。
+- **`true` / `false`**（大小写不敏感）。
+- **`KEY==token`** 或 **`KEY!=token`**：对合并变量表中 `KEY` 的值与 `token` 做 **ASCII 大小写不敏感**比较。
+- **单独一个标识符**：必须在合并表中有定义，再按「真值」判断（`0`、`false`、`off`、`no`、空串为假，其余为真）。
+- 无法解析的裸表达式：**configure 失败**并给出错误信息。
+- 为假时：该条目不参与编译源列表 / 不参与头文件 `include` 与安装规则收集。
+
+#### `<config_files>`（类 configure_file 的最小子集）
+
+- 块 **`<config_files>...</config_files>`**，内为 **`<file in="模板相对路径" to="输出相对路径"/>`**（`in`、`to` 均必填）。
+- `in` 相对 `target.xml` 所在目录；`to` 相对 **`.intermediate/generated/<包名>/<目标名>/`**，且必须为安全相对路径（**不得**含 `..` 段、不得为绝对路径）。
+- **`up configure`** 阶段读取模板、做 `@NAME@` 替换、写入生成目录，并将生成文件加入该目标的 **编译源列表**；同时对 `executable` / `static_library` / `shared_library` 把生成目录加入 **编译期 include 路径**。
+
+**CMake 与 Ninja**：两后端均直接消费 **已由 up 写出的生成文件**（与普通源文件相同），当前实现**不**为此生成 CMake 的 `configure_file()`。若需要完整上游 CMake `configure_file` 语义，请使用 **`<cmake/>`** 子工程。
+
+#### `<sources>` 上的 `when`
+
+- 自闭合 **`<file from="..." when="..."/>`**、**`<glob from="..." when="..."/>`**（须带 `from`）。
+- 或配对标签开标签上的 **`when`**。
+- 为假时该源条目被跳过（glob 不展开）。
+
+### 3.6 目标依赖 `<dependency name="..."/>`
 
 - 自闭合 **` <dependency name="..."/> `**，可多次出现。
 - **`name`** 支持两种形式：
@@ -194,6 +241,7 @@
 |------|----------|
 | 解析 `package.xml` / `target.xml` | `src/engine/xml/simple_xml.cpp`（`load_package_xml` / `load_target_xml`） |
 | 依赖校验、生成后端 | `src/engine/commands/configure.cpp` |
+| 变量合并、`@KEY@`、`when` | `src/engine/xml/var_subst.cpp` |
 | 数据结构 | `src/engine/xml/simple_xml.hpp`（`PackageDesc` / `TargetDesc`） |
 
 后续若引入 XSD/JSON Schema，可在本文件顶部增加版本号与变更记录。

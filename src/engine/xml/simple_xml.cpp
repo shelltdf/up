@@ -2,6 +2,7 @@
 
 #include "paths.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <ostream>
@@ -67,6 +68,87 @@ std::string xml_escape_text(const std::string& s) {
   return o;
 }
 
+bool parse_vars_body(const std::string& body, std::vector<std::pair<std::string, std::string>>& out, std::string& error) {
+  std::regex var_re(R"rx(<\s*var\s+([^>]+)/\s*>)rx");
+  for (std::sregex_iterator it(body.begin(), body.end(), var_re), end; it != end; ++it) {
+    const std::string attrs = (*it)[1].str();
+    std::string n;
+    if (!attr_string(attrs, "name", n)) {
+      error = "<var> requires name=\"...\"";
+      return false;
+    }
+    n = trim_copy(n);
+    std::string v;
+    if (!attr_string(attrs, "value", v))
+      v.clear();
+    else
+      v = trim_copy(v);
+    if (n.empty()) {
+      error = "<var> name cannot be empty";
+      return false;
+    }
+    out.emplace_back(std::move(n), std::move(v));
+  }
+  return true;
+}
+
+bool parse_defines_body(const std::string& body, std::vector<DefineEntry>& out, std::string& error, const char* ctx) {
+  static const std::regex define_name_ok(R"rx(^[A-Za-z_][A-Za-z0-9_]*$)rx");
+  static const std::regex define_value_ok(R"rx(^[A-Za-z0-9_.+\-/]*$)rx");
+  std::regex def_re(R"rx(<\s*define\s+([^>]+)/\s*>)rx");
+  for (std::sregex_iterator it(body.begin(), body.end(), def_re), end; it != end; ++it) {
+    DefineEntry de;
+    const std::string attrs = (*it)[1].str();
+    if (!attr_string(attrs, "name", de.name)) {
+      error = std::string(ctx) + ": <define> requires name=\"...\" attribute";
+      return false;
+    }
+    de.name = trim_copy(de.name);
+    if (!attr_string(attrs, "value", de.value))
+      de.value.clear();
+    else
+      de.value = trim_copy(de.value);
+    if (de.name.empty()) {
+      error = std::string(ctx) + ": <define> name cannot be empty";
+      return false;
+    }
+    if (!std::regex_match(de.name, define_name_ok)) {
+      error = std::string(ctx) + ": <define> name must be a C identifier: " + de.name;
+      return false;
+    }
+    if (!de.value.empty() && !std::regex_match(de.value, define_value_ok)) {
+      error = std::string(ctx) + ": <define> value may only use letters, digits, and ._+-/ (no spaces): " + de.name;
+      return false;
+    }
+    out.push_back(std::move(de));
+  }
+  return true;
+}
+
+bool parse_config_files_body(const std::string& body, std::vector<TargetDesc::ConfigFileEntry>& out, std::string& error) {
+  std::regex cf_re(R"rx(<\s*file\s+([^>]+)/\s*>)rx");
+  for (std::sregex_iterator it(body.begin(), body.end(), cf_re), end; it != end; ++it) {
+    TargetDesc::ConfigFileEntry e;
+    const std::string attrs = (*it)[1].str();
+    if (!attr_string(attrs, "in", e.in)) {
+      error = "<config_files> <file> requires in=\"...\"";
+      return false;
+    }
+    e.in = trim_copy(e.in);
+    if (!attr_string(attrs, "to", e.to)) {
+      error = "<config_files> <file> requires to=\"...\" (output path under generated/<pkg>/<target>/)";
+      return false;
+    }
+    e.to = trim_copy(e.to);
+    if (e.in.empty() || e.to.empty()) {
+      error = "<config_files> in= and to= cannot be empty";
+      return false;
+    }
+    out.push_back(std::move(e));
+  }
+  return true;
+}
+
 void parse_stage_commands(const std::string& body, std::string& pre, std::string& post) {
   std::smatch m;
   if (std::regex_search(body, m, std::regex(R"rx(<\s*preprocess\s+[^>]*command\s*=\s*"([^"]+)"[^>]*/>)rx")))
@@ -128,6 +210,32 @@ bool load_package_xml(const std::filesystem::path& path, PackageDesc& out, std::
     break;
   }
 
+  const size_t vars_open = raw.find("<vars");
+  if (vars_open != std::string::npos) {
+    const size_t vars_gt = raw.find('>', vars_open);
+    const size_t vars_close = raw.find("</vars>", vars_gt + 1);
+    if (vars_gt == std::string::npos || vars_close == std::string::npos) {
+      error = "invalid <vars> block in package.xml (expected </vars>)";
+      return false;
+    }
+    const std::string body = raw.substr(vars_gt + 1, vars_close - vars_gt - 1);
+    if (!parse_vars_body(body, out.vars, error))
+      return false;
+  }
+
+  const size_t pkg_defines_open = raw.find("<defines");
+  if (pkg_defines_open != std::string::npos) {
+    const size_t pkg_defines_gt = raw.find('>', pkg_defines_open);
+    const size_t pkg_defines_close = raw.find("</defines>", pkg_defines_gt + 1);
+    if (pkg_defines_gt == std::string::npos || pkg_defines_close == std::string::npos) {
+      error = "invalid <defines> block in package.xml (expected </defines>)";
+      return false;
+    }
+    const std::string body = raw.substr(pkg_defines_gt + 1, pkg_defines_close - pkg_defines_gt - 1);
+    if (!parse_defines_body(body, out.defines, error, "package.xml"))
+      return false;
+  }
+
   error.clear();
   return true;
 }
@@ -160,6 +268,32 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
       return false;
     }
     const std::string body = raw.substr(sources_open_gt + 1, sources_close - sources_open_gt - 1);
+    struct SourcePending {
+      size_t pos;
+      TargetDesc::SourceEntry se;
+    };
+    std::vector<SourcePending> ordered;
+    ordered.reserve(8);
+    std::regex src_void_re(R"rx(<\s*(file|glob)\s+([^>]+)/\s*>)rx");
+    for (std::sregex_iterator it(body.begin(), body.end(), src_void_re), end; it != end; ++it) {
+      TargetDesc::SourceEntry se;
+      se.kind = trim_copy((*it)[1].str());
+      const std::string attrs = (*it)[2].str();
+      if (!attr_string(attrs, "from", se.from)) {
+        error = "sources <" + se.kind + " .../> requires from=\"...\"";
+        return false;
+      }
+      se.from = trim_copy(se.from);
+      if (!attr_string(attrs, "when", se.when))
+        se.when.clear();
+      else
+        se.when = trim_copy(se.when);
+      if (se.from.empty()) {
+        error = "sources entry from cannot be empty";
+        return false;
+      }
+      ordered.push_back({static_cast<size_t>(std::distance(body.begin(), (*it)[0].first)), std::move(se)});
+    }
     std::regex src_re(R"rx(<\s*(file|glob)\s*([^>]*)>([\s\S]*?)</\s*\1\s*>)rx");
     for (std::sregex_iterator it(body.begin(), body.end(), src_re), end; it != end; ++it) {
       TargetDesc::SourceEntry se;
@@ -173,19 +307,27 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
       if (!attr_string(attrs, "from", se.from))
         se.from = inner;
       se.from = trim_copy(se.from);
+      if (!attr_string(attrs, "when", se.when))
+        se.when.clear();
+      else
+        se.when = trim_copy(se.when);
       if (se.from.empty()) {
         error = "sources entry requires file path or from attribute";
         return false;
       }
-      out.source_entries.push_back(se);
-      if (se.kind == "file")
-        out.sources.push_back(se.from);
+      ordered.push_back({static_cast<size_t>(std::distance(body.begin(), (*it)[0].first)), std::move(se)});
+    }
+    std::sort(ordered.begin(), ordered.end(), [](const SourcePending& a, const SourcePending& b) { return a.pos < b.pos; });
+    for (auto& sp : ordered) {
+      out.source_entries.push_back(std::move(sp.se));
+      if (out.source_entries.back().kind == "file")
+        out.sources.push_back(out.source_entries.back().from);
     }
   } else {
     std::regex file_re(R"rx(<file\s*>\s*([^<]+)\s*</file\s*>)rx");
     for (std::sregex_iterator it(raw.begin(), raw.end(), file_re), end; it != end; ++it) {
       out.sources.push_back((*it)[1].str());
-      out.source_entries.push_back({"file", trim_copy((*it)[1].str()), "", ""});
+      out.source_entries.push_back({"file", trim_copy((*it)[1].str()), "", "", ""});
     }
   }
 
@@ -202,35 +344,34 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
       return false;
     }
     const std::string body = raw.substr(defines_open_gt + 1, defines_close - defines_open_gt - 1);
-    static const std::regex define_name_ok(R"rx(^[A-Za-z_][A-Za-z0-9_]*$)rx");
-    static const std::regex define_value_ok(R"rx(^[A-Za-z0-9_.+\-/]*$)rx");
-    std::regex def_re(R"rx(<\s*define\s+([^>]+)/\s*>)rx");
-    for (std::sregex_iterator it(body.begin(), body.end(), def_re), end; it != end; ++it) {
-      TargetDesc::DefineEntry de;
-      const std::string attrs = (*it)[1].str();
-      if (!attr_string(attrs, "name", de.name)) {
-        error = "<define> requires name=\"...\" attribute";
-        return false;
-      }
-      de.name = trim_copy(de.name);
-      if (!attr_string(attrs, "value", de.value))
-        de.value.clear();
-      else
-        de.value = trim_copy(de.value);
-      if (de.name.empty()) {
-        error = "<define> name cannot be empty";
-        return false;
-      }
-      if (!std::regex_match(de.name, define_name_ok)) {
-        error = "<define> name must be a C identifier: " + de.name;
-        return false;
-      }
-      if (!de.value.empty() && !std::regex_match(de.value, define_value_ok)) {
-        error = "<define> value may only use letters, digits, and ._+-/ (no spaces): " + de.name;
-        return false;
-      }
-      out.defines.push_back(std::move(de));
+    if (!parse_defines_body(body, out.defines, error, "target.xml"))
+      return false;
+  }
+
+  const size_t tgt_vars_open = raw.find("<vars");
+  if (tgt_vars_open != std::string::npos) {
+    const size_t tgt_vars_gt = raw.find('>', tgt_vars_open);
+    const size_t tgt_vars_close = raw.find("</vars>", tgt_vars_gt + 1);
+    if (tgt_vars_gt == std::string::npos || tgt_vars_close == std::string::npos) {
+      error = "invalid <vars> block in target.xml (expected </vars>)";
+      return false;
     }
+    const std::string body = raw.substr(tgt_vars_gt + 1, tgt_vars_close - tgt_vars_gt - 1);
+    if (!parse_vars_body(body, out.vars, error))
+      return false;
+  }
+
+  const size_t cf_open = raw.find("<config_files");
+  if (cf_open != std::string::npos) {
+    const size_t cf_gt = raw.find('>', cf_open);
+    const size_t cf_close = raw.find("</config_files>", cf_gt + 1);
+    if (cf_gt == std::string::npos || cf_close == std::string::npos) {
+      error = "invalid <config_files> block (expected </config_files>)";
+      return false;
+    }
+    const std::string body = raw.substr(cf_gt + 1, cf_close - cf_gt - 1);
+    if (!parse_config_files_body(body, out.config_files, error))
+      return false;
   }
 
   if (raw.find("<includes") != std::string::npos) {
@@ -273,6 +414,10 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
       else
         inc.to = trim_copy(inc.to);
       parse_stage_commands((*it)[3].str(), inc.preprocess_command, inc.postprocess_command);
+      if (!attr_string(attrs, "when", inc.when))
+        inc.when.clear();
+      else
+        inc.when = trim_copy(inc.when);
       out.includes.push_back(std::move(inc));
     }
 
@@ -373,6 +518,26 @@ bool write_package_xml(std::ostream& out, const PackageDesc& pkg) {
   if (pkg.external_cmake.has_value()) {
     out << "  <cmake source_dir=\"" << xml_escape_text(pkg.external_cmake->source_dir) << "\"/>\n";
   }
+  if (!pkg.vars.empty()) {
+    out << "  <vars>\n";
+    for (const auto& v : pkg.vars) {
+      out << "    <var name=\"" << xml_escape_text(v.first) << "\"";
+      if (!v.second.empty())
+        out << " value=\"" << xml_escape_text(v.second) << "\"";
+      out << "/>\n";
+    }
+    out << "  </vars>\n";
+  }
+  if (!pkg.defines.empty()) {
+    out << "  <defines>\n";
+    for (const auto& d : pkg.defines) {
+      out << "    <define name=\"" << xml_escape_text(d.name) << "\"";
+      if (!d.value.empty())
+        out << " value=\"" << xml_escape_text(d.value) << "\"";
+      out << "/>\n";
+    }
+    out << "  </defines>\n";
+  }
   out << "</package>\n";
   return static_cast<bool>(out);
 }
@@ -383,12 +548,56 @@ bool write_target_xml(std::ostream& out, const TargetDesc& desc) {
   const bool skip_sources =
       desc.type == "asset_bundle" || desc.type == "imported_static_library" || desc.type == "imported_shared_library" ||
       desc.type == "imported_installed_static_library" || desc.type == "imported_installed_shared_library";
+  if (!desc.vars.empty()) {
+    out << "  <vars>\n";
+    for (const auto& v : desc.vars) {
+      out << "    <var name=\"" << xml_escape_text(v.first) << "\"";
+      if (!v.second.empty())
+        out << " value=\"" << xml_escape_text(v.second) << "\"";
+      out << "/>\n";
+    }
+    out << "  </vars>\n";
+  }
+  if (!desc.config_files.empty()) {
+    out << "  <config_files>\n";
+    for (const auto& cf : desc.config_files)
+      out << "    <file in=\"" << xml_escape_text(cf.in) << "\" to=\"" << xml_escape_text(cf.to) << "\"/>\n";
+    out << "  </config_files>\n";
+  }
   if (!skip_sources || !desc.source_entries.empty() || !desc.sources.empty()) {
     out << "  <sources>\n";
     if (!desc.source_entries.empty()) {
       for (const auto& se : desc.source_entries) {
+        const bool has_stage = !se.preprocess_command.empty() || !se.postprocess_command.empty();
         if (se.kind == "glob") {
-          out << "    <glob from=\"" << xml_escape_text(se.from) << "\"/>\n";
+          if (has_stage) {
+            out << "    <glob from=\"" << xml_escape_text(se.from) << "\"";
+            if (!se.when.empty())
+              out << " when=\"" << xml_escape_text(se.when) << "\"";
+            out << ">\n";
+            if (!se.preprocess_command.empty())
+              out << "      <preprocess command=\"" << xml_escape_text(se.preprocess_command) << "\"/>\n";
+            if (!se.postprocess_command.empty())
+              out << "      <postprocess command=\"" << xml_escape_text(se.postprocess_command) << "\"/>\n";
+            out << "    </glob>\n";
+          } else {
+            out << "    <glob from=\"" << xml_escape_text(se.from) << "\"";
+            if (!se.when.empty())
+              out << " when=\"" << xml_escape_text(se.when) << "\"";
+            out << "/>\n";
+          }
+        } else if (has_stage) {
+          out << "    <file from=\"" << xml_escape_text(se.from) << "\"";
+          if (!se.when.empty())
+            out << " when=\"" << xml_escape_text(se.when) << "\"";
+          out << ">\n";
+          if (!se.preprocess_command.empty())
+            out << "      <preprocess command=\"" << xml_escape_text(se.preprocess_command) << "\"/>\n";
+          if (!se.postprocess_command.empty())
+            out << "      <postprocess command=\"" << xml_escape_text(se.postprocess_command) << "\"/>\n";
+          out << "    </file>\n";
+        } else if (!se.when.empty()) {
+          out << "    <file from=\"" << xml_escape_text(se.from) << "\" when=\"" << xml_escape_text(se.when) << "\"/>\n";
         } else {
           out << "    <file>" << xml_escape_text(se.from.empty() ? "" : se.from) << "</file>\n";
         }
@@ -439,6 +648,8 @@ bool write_target_xml(std::ostream& out, const TargetDesc& desc) {
       out << "    <" << inc.kind << " from=\"" << xml_escape_text(inc.from) << "\"";
       if (!inc.to.empty())
         out << " to=\"" << xml_escape_text(inc.to) << "\"";
+      if (!inc.when.empty())
+        out << " when=\"" << xml_escape_text(inc.when) << "\"";
       out << "/>\n";
     }
     out << "  </headers>\n";

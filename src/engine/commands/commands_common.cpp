@@ -7,6 +7,8 @@
 #include <cctype>
 #include <fstream>
 #include <iostream>
+#include <regex>
+#include <set>
 #include <thread>
 
 #if defined(_WIN32)
@@ -28,6 +30,20 @@ namespace up {
 namespace {
 bool g_cli_verbose = false;
 }  // namespace
+
+bool up_mergeable_option_key(const std::string& k) {
+  if (k.empty())
+    return false;
+  static const std::set<std::string> meta = {
+      "up.cache.version", "cwd", "arch", "package", "generated_file", "scan_roots",
+  };
+  if (meta.count(k) != 0)
+    return false;
+  if (k.rfind("UP_", 0) == 0 || k.rfind("UPSTREAM_", 0) == 0)
+    return true;
+  static const std::regex id(R"rx(^[A-Za-z_][A-Za-z0-9_]*$)rx");
+  return std::regex_match(k, id);
+}
 
 void set_cli_verbose(bool on) { g_cli_verbose = on; }
 
@@ -52,7 +68,7 @@ std::map<std::string, std::string> load_up_options_from_build_dir(const std::fil
       continue;
     const std::string k = line.substr(0, pos);
     const std::string v = line.substr(pos + 1);
-    if (k.rfind("UP_", 0) == 0 || k.rfind("UPSTREAM_", 0) == 0)
+    if (up_mergeable_option_key(k))
       out[k] = v;
   }
   return out;

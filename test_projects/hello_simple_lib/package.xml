@@ -1,4 +1,12 @@
 ﻿<?xml version="1.0" encoding="UTF-8"?>
 <package name="hello_simple_lib" version="0.1.0">
   <!-- 独立 C++ 库包：提供库、工具可执行程序与单元测试 -->
+  <vars>
+    <var name="TEST_PACKAGE_NAME" value="hello_simple_lib"/>
+    <var name="TEST_BUILD_SYSTEM" value="cmake"/>
+    <var name="TEST_TEMPLATE_TAG" value="from_package_xml"/>
+  </vars>
+  <defines>
+    <define name="HELLO_SIMPLE_LIB_FROM_PACKAGE" value="1"/>
+  </defines>
 </package>

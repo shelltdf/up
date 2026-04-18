@@ -1,9 +1,15 @@
 ﻿#include "../hello_simple_lib/hello_simple_lib.hpp"
+#include "hello_simple_lib_gen.hpp"
 
 #include <iostream>
 
 int main() {
   using namespace hello_simple_lib;
+
+  std::cout << "gen: TEST_PACKAGE_NAME=" << gen::kTestPackageName << "\n";
+  std::cout << "gen: TEST_TARGET_NAME=" << gen::kTestTargetName << "\n";
+  std::cout << "gen: TEST_BUILD_SYSTEM=" << gen::kTestBuildSystem << "\n";
+  std::cout << "gen: TEST_TEMPLATE_TAG=" << gen::kTestTemplateTag << "\n";
 
   Counter counter(5);
   counter.increment();

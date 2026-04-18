@@ -19,12 +19,15 @@
 #include <atomic>
 #include <array>
 #include <algorithm>  // std::max
+#include <cctype>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <mutex>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -642,6 +645,26 @@ std::wstring NowTimeStamp() {
              static_cast<unsigned>(st.wDay), static_cast<unsigned>(st.wHour), static_cast<unsigned>(st.wMinute),
              static_cast<unsigned>(st.wSecond));
   return buf;
+}
+
+// 单次 up 运行的「Run # / vcvars / 命令行」必须与当次 stdout 成组显示：
+// - 不走 AppendLog 的去重（否则连续多次相同 [vcvars] 行会在 1200ms 内被静默丢弃）；
+// - 用 SendMessage 同步写入，避免与 worker 的 WM_APPEND_RUN_LOG 在队列里交错导致顺序错乱。
+void AppendRunBookkeepingToLog(const up::gui::core::UpLaunchPlan& plan, const std::wstring& vcvars,
+                               unsigned long run_no) {
+  if (!IsWindow(g_hwnd))
+    return;
+  const auto now = std::chrono::steady_clock::now();
+  auto push_sync = [&](const std::wstring& text) {
+    g_last_ui_log_text = text;
+    g_last_ui_log_tp = now;
+    auto* s = new std::wstring(text);
+    SendMessageW(g_hwnd, WM_APPEND_LOG, 0, reinterpret_cast<LPARAM>(s));
+  };
+  push_sync(L"\r\n==== Run #" + std::to_wstring(run_no) + L" @ " + NowTimeStamp() + L" ====\r\n");
+  if (plan.use_vcvars)
+    push_sync(L"\r\n> [vcvars] " + vcvars + L"\r\n");
+  push_sync(L"\r\n> " + plan.display_command + L"\r\n");
 }
 
 std::wstring DirOfModule() {
@@ -2238,19 +2261,137 @@ void RefreshInstallDirDisplay(const std::filesystem::path& cache_path, const std
   SetWindowTextW(g_install_dir, install_dir.c_str());
 }
 
+// 与 src/engine/commands/commands_common.cpp 中 up_mergeable_option_key 语义对齐（up-gui 不链接引擎）。
+bool GuiMergeableCacheKeyUtf8(const std::string& k) {
+  if (k.empty())
+    return false;
+  static const std::set<std::string> meta = {
+      "up.cache.version", "cwd", "arch", "package", "generated_file", "scan_roots",
+  };
+  if (meta.count(k) != 0)
+    return false;
+  if (k.rfind("UP_", 0) == 0 || k.rfind("UPSTREAM_", 0) == 0)
+    return true;
+  for (size_t i = 0; i < k.size(); ++i) {
+    const unsigned char c = static_cast<unsigned char>(k[i]);
+    if (i == 0) {
+      if (!std::isalpha(c) && k[i] != '_')
+        return false;
+    } else {
+      if (!std::isalnum(c) && k[i] != '_')
+        return false;
+    }
+  }
+  return true;
+}
+
+bool PathHasIntermediateComponent(const std::filesystem::path& p) {
+  for (const auto& part : p) {
+    if (part == ".intermediate")
+      return true;
+  }
+  return false;
+}
+
+void MergeCacheKeyIntoGOptionsUtf8(const std::string& k, const std::string& v) {
+  if (!GuiMergeableCacheKeyUtf8(k))
+    return;
+  const std::wstring wk = Utf8ToWide(k);
+  const std::wstring wv = Utf8ToWide(v);
+  for (auto& o : g_options) {
+    if (o.name == wk) {
+      o.value = wv;
+      return;
+    }
+  }
+  g_options.push_back({wk, wv, L""});
+}
+
+// 从工作区 package.xml / 各 target.xml 的 <vars> 预填 configure 列表（不解析引擎，仅正则提取自闭合 <var .../>）。
+void AppendDeclaredVarsFromPackageXml(const std::filesystem::path& root) {
+  std::error_code ec;
+  if (root.empty() || !std::filesystem::is_directory(root, ec) || ec)
+    return;
+
+  std::vector<std::pair<std::string, std::string>> declared;
+  auto record = [&](std::string name, std::string value) {
+    if (!GuiMergeableCacheKeyUtf8(name))
+      return;
+    declared.emplace_back(std::move(name), std::move(value));
+  };
+
+  auto parse_vars_file = [&](const std::filesystem::path& file) {
+    std::ifstream in(file, std::ios::binary);
+    if (!in)
+      return;
+    const std::string u8((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    static const std::regex var_tag(
+        R"re(<\s*var\b[^>]*\bname\s*=\s*"([^"]+)"([^>]*)/\s*>)re");
+    static const std::regex val_attr(R"re(\bvalue\s*=\s*"([^"]*)")re");
+    for (std::sregex_iterator it(u8.begin(), u8.end(), var_tag), end; it != end; ++it) {
+      const std::string name = (*it)[1].str();
+      std::string value;
+      const std::string mid = (*it)[2].str();
+      std::smatch vm;
+      if (std::regex_search(mid, vm, val_attr))
+        value = vm[1].str();
+      record(name, value);
+    }
+  };
+
+  const auto pkg = root / "package.xml";
+  if (std::filesystem::exists(pkg, ec) && !ec)
+    parse_vars_file(pkg);
+
+  std::vector<std::filesystem::path> target_xmls;
+  for (std::filesystem::recursive_directory_iterator it(
+           root, std::filesystem::directory_options::skip_permission_denied, ec);
+       !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
+    if (ec)
+      break;
+    if (PathHasIntermediateComponent(it->path()))
+      continue;
+    std::error_code fe;
+    if (!it->is_regular_file(fe) || fe)
+      continue;
+    if (it->path().filename() == "target.xml")
+      target_xmls.push_back(it->path());
+  }
+  std::sort(target_xmls.begin(), target_xmls.end());
+  for (const auto& tx : target_xmls)
+    parse_vars_file(tx);
+
+  for (const auto& pr : declared) {
+    const std::wstring wk = Utf8ToWide(pr.first);
+    const std::wstring wv = Utf8ToWide(pr.second);
+    bool found = false;
+    for (auto& o : g_options) {
+      if (o.name == wk) {
+        o.value = wv;
+        found = true;
+        break;
+      }
+    }
+    if (!found)
+      g_options.push_back({wk, wv, L""});
+  }
+}
+
 void LoadOptionsFromCache(const std::wstring& cwd, bool restore_scan_roots = true) {
   const auto cache = ResolveUpCachePath(cwd);
   RefreshBuildDirDisplay(cache);
   RefreshInstallDirDisplay(cache, cwd);
+
+  g_options = g_default_options;
+  AppendDeclaredVarsFromPackageXml(std::filesystem::path(cwd));
+
   if (cache.empty()) {
-    g_options = g_default_options;
     g_selected_option_idx = g_options.empty() ? -1 : 0;
     RebuildOptionsListView();
     return;
   }
   std::ifstream f(cache);
   if (!f) {
-    g_options = g_default_options;
     g_selected_option_idx = g_options.empty() ? -1 : 0;
     RebuildOptionsListView();
     return;
@@ -2277,16 +2418,7 @@ void LoadOptionsFromCache(const std::wstring& cwd, bool restore_scan_roots = tru
       }
       continue;
     }
-    if (k.rfind("UP_", 0) != 0)
-      continue;
-    const std::wstring wk = Utf8ToWide(k);
-    const std::wstring wv = Utf8ToWide(v);
-    for (auto& o : g_options) {
-      if (o.name == wk) {
-        o.value = wv;
-        break;
-      }
-    }
+    MergeCacheKeyIntoGOptionsUtf8(k, v);
   }
   if (restore_scan_roots && g_scan_list) {
     SendMessageW(g_scan_list, LB_RESETCONTENT, 0, 0);
@@ -2763,10 +2895,7 @@ unsigned long BeginRunUiState(const up::gui::core::UpLaunchPlan& plan, const std
   g_abort_run_no.store(0);
   g_last_up_args = args_no_exe;
   const unsigned long run_no = ++g_run_seq;
-  AppendLog(L"\r\n==== Run #" + std::to_wstring(run_no) + L" @ " + NowTimeStamp() + L" ====\r\n");
-  if (plan.use_vcvars)
-    AppendLog(L"\r\n> [vcvars] " + vcvars + L"\r\n");
-  AppendLog(L"\r\n> " + plan.display_command + L"\r\n");
+  AppendRunBookkeepingToLog(plan, vcvars, run_no);
   SetUiRunning(true);
   g_active_run_seq = run_no;
   return run_no;
@@ -3443,7 +3572,12 @@ void ShowUpHelpInfo(HWND hwnd) {
 bool IsConfigureOptionName(const std::wstring& name) {
   if (name.rfind(L"UP_TARGET_", 0) == 0)
     return true;
-  return _wcsicmp(name.c_str(), L"UP_CMAKE_GENERATOR") == 0;
+  if (_wcsicmp(name.c_str(), L"UP_CMAKE_GENERATOR") == 0)
+    return true;
+  // 与 package.xml / target.xml 中项目自定义 <vars>（示例工程用 TEST_ 前缀）一致，便于复制到「附加 --opt」。
+  if (name.rfind(L"TEST_", 0) == 0)
+    return true;
+  return false;
 }
 
 std::wstring BuildConfigureOptionText() {
