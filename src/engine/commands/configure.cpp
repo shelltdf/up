@@ -1330,21 +1330,6 @@ int cmd_configure(const std::filesystem::path& cwd,
                             pkg_vars, lt.desc.vars);
   };
 
-  // Package.xml `<config_files>`: builtins + package `<vars>` + workspace only (`UP_TARGET_NAME` is empty).
-  auto merged_vars_for_package_config_files = [&](const std::string& package_name) {
-    std::string pkg_ver = "0.0.0";
-    std::vector<std::pair<std::string, std::string>> pkg_vars;
-    const auto pd_it = package_name_to_desc.find(package_name);
-    if (pd_it != package_name_to_desc.end()) {
-      pkg_vars = pd_it->second.vars;
-      if (!pd_it->second.version.empty())
-        pkg_ver = pd_it->second.version;
-    }
-    static const std::vector<std::pair<std::string, std::string>> k_empty_target_vars;
-    return merge_var_layers(make_builtin_var_map(package_name, pkg_ver, "", build_system, config_mode), opts, pkg_vars,
-                            k_empty_target_vars);
-  };
-
   // 1 = include entry, 0 = skip (false), -1 = invalid when= (configure error).
   auto when_tri = [](const std::string& when, const std::map<std::string, std::string>& vars, std::string& err_out) -> int {
     if (when.empty())
@@ -1595,6 +1580,29 @@ int cmd_configure(const std::filesystem::path& cwd,
       return std::nullopt;
     }
     return c;
+  };
+
+  // Package.xml `<config_files>`: builtins + package `<vars>` + **every target.xml `<vars>` in this package**
+  // (same order as `build_targets`; later entries win on duplicate keys) + workspace. Builtin `UP_TARGET_NAME` stays
+  // empty unless a target `<var>` overlays it.
+  auto merged_vars_for_package_config_files = [&](const std::string& package_name) {
+    std::string pkg_ver = "0.0.0";
+    std::vector<std::pair<std::string, std::string>> pkg_vars;
+    const auto pd_it = package_name_to_desc.find(package_name);
+    if (pd_it != package_name_to_desc.end()) {
+      pkg_vars = pd_it->second.vars;
+      if (!pd_it->second.version.empty())
+        pkg_ver = pd_it->second.version;
+    }
+    std::vector<std::pair<std::string, std::string>> all_target_vars_flat;
+    for (const auto& bt : build_targets) {
+      if (bt.package_name != package_name)
+        continue;
+      for (const auto& kv : bt.desc.vars)
+        all_target_vars_flat.push_back(kv);
+    }
+    return merge_var_layers(make_builtin_var_map(package_name, pkg_ver, "", build_system, config_mode), opts, pkg_vars,
+                            all_target_vars_flat);
   };
 
   std::map<std::string, std::vector<std::string>> package_config_generated_abs;

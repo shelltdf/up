@@ -9,7 +9,7 @@ namespace {
 // English-only: embedded copy of rules aligned with doc/package-target-xml-spec.md for AI/tools without repo .md.
 // Split into named chunks: MSVC ~16kB string literal limit; edit the slice you need.
 constexpr const char* kXmlSpecEnThroughSection3 =
-  R"SPEC(UP_XML_SPEC_REVISION=12
+  R"SPEC(UP_XML_SPEC_REVISION=13
 
 # up — package.xml and target.xml (machine-oriented summary)
 
@@ -102,8 +102,9 @@ Rules:
 - `in` is relative to the **`package.xml` parent directory** (package root).
 - `to` is relative to **`.intermediate/generated/<package>/_package/`** (reserved directory name **`_package`**; avoid
   naming a compile target `_package` in the same package). Same safe-path rules as target config: no `..`, not absolute.
-- **`@NAME@` substitution map:** builtins + package `<vars>` + workspace options **only** (target `<vars>` are **not**
-  applied). **`UP_TARGET_NAME` is empty** for these templates.
+- **`@NAME@` / `${NAME}` substitution map:** builtins + package `<vars>` + **every `target.xml` `<vars>` in this package**
+  (flattened in `configure` **build_targets** order; **later** `<var>` / **later** target wins on duplicate keys) +
+  workspace options. Builtin **`UP_TARGET_NAME` is empty** unless a target `<var>` sets it.
 - Generated files are written **once per configure** per package and appended to **every** native compile target in that
   package as extra sources. **`.intermediate/generated/<package>/_package/`** is added to compile **include directories**
   for every `executable` / `static_library` / `shared_library` in the package whenever any package-level `<config_files>`
@@ -114,8 +115,8 @@ Rules:
 ## 2b. Variable merge order (builtin / package / target / workspace)
 
 Used for **`@KEY@`** and **`${KEY}`** substitution in **target-level** `<config_files>` templates (full stack below),
-**package-level** `<config_files>` (builtins + package `<vars>` + workspace only; `UP_TARGET_NAME` empty), and for
-evaluating `when="..."` on sources and headers.
+**package-level** `<config_files>` (builtins + package `<vars>` + **all targets' `<vars>` in the package** in build order,
+then workspace; builtin `UP_TARGET_NAME` empty unless overlaid), and for evaluating `when="..."` on sources and headers.
 
 **Layers (later overrides earlier):**
 
