@@ -160,6 +160,18 @@ static std::string build_configure_args_line() {
 @interface UpGuiCtrl : NSObject <NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate>
 @end
 
+static void upgui_apply_open_panel_directory(NSOpenPanel* p, NSString* primaryPath, const std::string& fallbackUtf8) {
+  NSString* s = primaryPath;
+  if (s.length == 0 && !fallbackUtf8.empty())
+    s = utf8_to_ns(fallbackUtf8);
+  if (s.length == 0)
+    return;
+  NSString* expanded = [s stringByExpandingTildeInPath];
+  BOOL isDir = NO;
+  if ([[NSFileManager defaultManager] fileExistsAtPath:expanded isDirectory:&isDir] && isDir)
+    [p setDirectoryURL:[NSURL fileURLWithPath:expanded isDirectory:YES]];
+}
+
 @implementation UpGuiCtrl
 
 - (void)browseCwd:(id)sender {
@@ -168,6 +180,7 @@ static std::string build_configure_args_line() {
   [p setCanChooseFiles:NO];
   [p setCanChooseDirectories:YES];
   [p setAllowsMultipleSelection:NO];
+  upgui_apply_open_panel_directory(p, [g_tf_cwd stringValue], g_persist.browse_cwd);
   if ([p runModal] == NSModalResponseOK) {
     NSURL* u = [[p URLs] firstObject];
     if (u) {
@@ -182,10 +195,12 @@ static std::string build_configure_args_line() {
   NSOpenPanel* pan = [NSOpenPanel openPanel];
   [pan setCanChooseDirectories:YES];
   [pan setCanChooseFiles:NO];
+  upgui_apply_open_panel_directory(pan, nil, g_persist.browse_scan);
   if ([pan runModal] == NSModalResponseOK) {
     NSURL* u = [[pan URLs] firstObject];
     if (u) {
       NSString* path = [u path];
+      g_persist.browse_scan = unix_shared::path_to_portable_utf8([path UTF8String]);
       [g_scan_rows addObject:path];
       [g_table_scan reloadData];
     }

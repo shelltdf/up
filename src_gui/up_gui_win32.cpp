@@ -238,6 +238,15 @@ struct GuiBrowseHistory {
 };
 GuiBrowseHistory g_browse_history;
 
+// IFileDialog::SetClientGuid buckets (Vista+): without distinct GUIDs, CLSID_FileOpenDialog reuses one shell
+// "last location" for every folder picker in the process. SetDefaultFolder() also updates that shared default;
+// we only call SetFolder() for the initial view.
+static const GUID kPickFolderClientGuidCwd = {0xa8b3f2c1u, 0x2d4eu, 0x5f67u, {0x90u, 0x12u, 0xabu, 0xcdu, 0xefu, 0x01u, 0x23u, 0x41u}};
+static const GUID kPickFolderClientGuidScan = {0xa8b3f2c1u, 0x2d4eu, 0x5f67u, {0x90u, 0x12u, 0xabu, 0xcdu, 0xefu, 0x01u, 0x23u, 0x42u}};
+static const GUID kPickFolderClientGuidAndroidSdk = {0xa8b3f2c1u, 0x2d4eu, 0x5f67u, {0x90u, 0x12u, 0xabu, 0xcdu, 0xefu, 0x01u, 0x23u, 0x43u}};
+static const GUID kPickFolderClientGuidAndroidNdk = {0xa8b3f2c1u, 0x2d4eu, 0x5f67u, {0x90u, 0x12u, 0xabu, 0xcdu, 0xefu, 0x01u, 0x23u, 0x44u}};
+static const GUID kPickFolderClientGuidEmsdk = {0xa8b3f2c1u, 0x2d4eu, 0x5f67u, {0x90u, 0x12u, 0xabu, 0xcdu, 0xefu, 0x01u, 0x23u, 0x45u}};
+
 // 与 src/engine/commands/commands_common.cpp 中 default_parallel_jobs_hardware() 的 Windows 分支保持一致：
 // 优先 GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)，再 GetNativeSystemInfo，再 STL，最后 4。
 unsigned PreferredLogicalCpuCountForGuiDefaults() {
@@ -1263,7 +1272,7 @@ struct EnvDialogState {
   HWND btn_cancel{};
 };
 
-bool PickFolder(HWND owner, const std::wstring& initial_dir, std::wstring& out);
+bool PickFolder(HWND owner, const std::wstring& initial_dir, std::wstring& out, const GUID& client_guid);
 void GetEditText(HWND ed, std::wstring& out);
 bool QueryConfigureBuildDirNameFromUpExe(const std::wstring& up_exe, const std::wstring& cwd, std::wstring& out_arch_leaf,
                                          std::wstring& err_msg);
@@ -1849,7 +1858,7 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         std::wstring init = g_browse_history.android_sdk_folder;
         if (init.empty())
           GetEditText(st->edt_android_sdk, init);
-        if (PickFolder(hwnd, init, folder)) {
+        if (PickFolder(hwnd, init, folder, kPickFolderClientGuidAndroidSdk)) {
           folder = PathToPortableSlashes(std::move(folder));
           SetWindowTextW(st->edt_android_sdk, folder.c_str());
           g_browse_history.android_sdk_folder = folder;
@@ -1862,7 +1871,7 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         std::wstring init = g_browse_history.android_ndk_folder;
         if (init.empty())
           GetEditText(st->edt_android_ndk, init);
-        if (PickFolder(hwnd, init, folder)) {
+        if (PickFolder(hwnd, init, folder, kPickFolderClientGuidAndroidNdk)) {
           folder = PathToPortableSlashes(std::move(folder));
           SetWindowTextW(st->edt_android_ndk, folder.c_str());
           g_browse_history.android_ndk_folder = folder;
@@ -1875,7 +1884,7 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
         std::wstring init = g_browse_history.emsdk_folder;
         if (init.empty())
           GetEditText(st->edt_emsdk, init);
-        if (PickFolder(hwnd, init, folder)) {
+        if (PickFolder(hwnd, init, folder, kPickFolderClientGuidEmsdk)) {
           folder = PathToPortableSlashes(std::move(folder));
           SetWindowTextW(st->edt_emsdk, folder.c_str());
           g_browse_history.emsdk_folder = folder;
@@ -1991,21 +2000,26 @@ std::wstring UpExePath() {
   return (std::filesystem::path(DirOfModule()) / L"up.exe").lexically_normal().generic_wstring();
 }
 
-bool PickFolder(HWND owner, const std::wstring& initial_dir, std::wstring& out) {
+bool PickFolder(HWND owner, const std::wstring& initial_dir, std::wstring& out, const GUID& client_guid) {
   IFileOpenDialog* dlg = nullptr;
   if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&dlg))))
     return false;
   DWORD opt = 0;
   dlg->GetOptions(&opt);
   dlg->SetOptions(opt | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+  IFileDialog* file_dlg = nullptr;
+  if (SUCCEEDED(dlg->QueryInterface(IID_PPV_ARGS(&file_dlg)))) {
+    (void)file_dlg->SetClientGuid(client_guid);
+    file_dlg->Release();
+  }
   if (!initial_dir.empty()) {
     std::error_code ec;
     std::filesystem::path p(initial_dir);
     if (std::filesystem::is_directory(p, ec)) {
       IShellItem* init = nullptr;
       if (SUCCEEDED(SHCreateItemFromParsingName(p.c_str(), nullptr, IID_PPV_ARGS(&init)))) {
+        // Only SetFolder: SetDefaultFolder() ties into the shell's shared "last place" for the dialog class.
         dlg->SetFolder(init);
-        dlg->SetDefaultFolder(init);
         init->Release();
       }
     }
@@ -4057,7 +4071,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         std::wstring init = g_browse_history.cwd_folder;
         if (init.empty())
           GetEditText(g_path, init);
-        if (PickFolder(hwnd, init, folder)) {
+        if (PickFolder(hwnd, init, folder, kPickFolderClientGuidCwd)) {
           folder = PathToPortableSlashes(std::move(folder));
           SetWindowTextW(g_path, folder.c_str());
           g_browse_history.cwd_folder = folder;
@@ -4087,10 +4101,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
       }
       if (id == IDC_SCAN_ADD) {
         std::wstring folder;
-        std::wstring init = g_browse_history.scan_folder;
-        if (init.empty())
-          GetEditText(g_path, init);
-        if (PickFolder(hwnd, init, folder)) {
+        // Scan-root picker keeps its own last folder (`browse.scan`); do not fall back to CWD so the two dialogs stay independent.
+        const std::wstring& init = g_browse_history.scan_folder;
+        if (PickFolder(hwnd, init, folder, kPickFolderClientGuidScan)) {
           folder = PathToPortableSlashes(std::move(folder));
           g_browse_history.scan_folder = folder;
           SaveGuiEnvSettings();

@@ -93,13 +93,17 @@ void save_ui_to_persist() {
 void on_browse_cwd(GtkWidget*, gpointer) {
   GtkWidget* dlg = gtk_file_chooser_dialog_new("Working directory (CWD)", GTK_WINDOW(g_win), GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER,
                                                "_Cancel", GTK_RESPONSE_CANCEL, "_Select", GTK_RESPONSE_ACCEPT, nullptr);
-  const std::string init = get_entry(g_entry_cwd);
+  std::string init = get_entry(g_entry_cwd);
+  if (init.empty())
+    init = g_persist.browse_cwd;
   if (!init.empty())
     gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(dlg), init.c_str());
   if (gtk_dialog_run(GTK_DIALOG(dlg)) == GTK_RESPONSE_ACCEPT) {
     char* p = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dlg));
     if (p) {
-      gtk_entry_set_text(GTK_ENTRY(g_entry_cwd), unix_shared::path_to_portable_utf8(p).c_str());
+      const std::string portable = unix_shared::path_to_portable_utf8(p);
+      gtk_entry_set_text(GTK_ENTRY(g_entry_cwd), portable.c_str());
+      g_persist.browse_cwd = portable;
       g_free(p);
     }
   }
