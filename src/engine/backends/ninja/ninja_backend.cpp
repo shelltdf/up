@@ -1,5 +1,6 @@
 ﻿#include "ninja/ninja_backend.hpp"
 
+#include "commands_common.hpp"
 #include "paths.hpp"
 
 #include <filesystem>
@@ -39,7 +40,7 @@ std::string quote_ninja_path(const std::filesystem::path& p) {
 
 std::string build_ninja_install_command(const BuildBackendContext& ctx) {
   std::ostringstream cmd;
-  cmd << "ninja -C \"" << to_posix_path_string(ctx.bin_dir) << "\" -v install";
+  cmd << "ninja -C \"" << to_posix_path_string(ctx.bin_dir) << "\" -j " << parallel_jobs_for_build(ctx.opts) << " -v install";
   return cmd.str();
 }
 

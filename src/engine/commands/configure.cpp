@@ -23,6 +23,9 @@
 
 namespace up {
 
+void ensure_default_build_parallel_options(std::map<std::string, std::string>& opts);
+unsigned parallel_jobs_for_build(const std::map<std::string, std::string>& opts);
+
 namespace {
 
 void collect_desc_files(const std::filesystem::path& root, std::vector<std::filesystem::path>& packages,
@@ -759,6 +762,7 @@ int cmd_configure(const std::filesystem::path& cwd,
     return 6;
 
   auto opts = merge_up_options(load_cached_up_options(build_root / "up_cache.txt"), opt_kvs);
+  ensure_default_build_parallel_options(opts);
   const std::string cpu = arch_from_target_cpu(option_or_compat(opts, "UP_TARGET_CPU_ARCH", "UP_CPU_ARCH", host_arch));
   const std::string system = lower_ascii(option_or_compat(opts, "UP_TARGET_SYSTEM", "UP_SYSTEM", detect_host_system_tag()));
   const std::string dyn = lower_ascii(option_or_compat(opts, "UP_TARGET_DYNAMIC_LIBRARY", "UP_DYNAMIC_LIBRARY", "OFF"));
@@ -1130,6 +1134,7 @@ int cmd_configure(const std::filesystem::path& cwd,
   graph_model.build_system = build_system;
   graph_model.package_name = primary_pkg.name;
   graph_model.config_mode = config_mode;
+  graph_model.parallel_compile_jobs = parallel_jobs_for_build(opts);
   graph_model.build_root = build_root;
   graph_model.out_dir = build_root / "out";
   graph_model.install_root = default_install_root(cwd) / arch;

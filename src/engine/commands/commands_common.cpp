@@ -3,8 +3,25 @@
 
 #include "paths.hpp"
 
+#include <algorithm>
+#include <cctype>
 #include <fstream>
 #include <iostream>
+#include <thread>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <Windows.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#elif defined(__APPLE__)
+#include <sys/sysctl.h>
+#endif
 
 namespace up {
 
@@ -112,6 +129,99 @@ std::string lower_ascii(std::string v) {
     if (c >= 'A' && c <= 'Z')
       c = static_cast<char>(c - 'A' + 'a');
   return v;
+}
+
+namespace {
+
+unsigned parse_jobs_string(const std::string& s_raw) {
+  std::string s = s_raw;
+  while (!s.empty() && (s.front() == ' ' || s.front() == '\t'))
+    s.erase(0, 1);
+  while (!s.empty() && (s.back() == ' ' || s.back() == '\t'))
+    s.pop_back();
+  if (s.empty())
+    return 0;
+  unsigned v = 0;
+  for (unsigned char uc : s) {
+    const char c = static_cast<char>(uc);
+    if (c < '0' || c > '9')
+      return 0;
+    v = v * 10u + static_cast<unsigned>(c - '0');
+    if (v > 512u)
+      return 512u;
+  }
+  return v > 0 ? v : 0u;
+}
+
+}  // namespace
+
+namespace {
+
+#if defined(_WIN32)
+unsigned os_preferred_logical_processor_count() {
+  const DWORD active = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+  if (active > 0 && active <= 65536u)
+    return static_cast<unsigned>(active);
+  SYSTEM_INFO si{};
+  GetNativeSystemInfo(&si);
+  if (si.dwNumberOfProcessors > 0 && si.dwNumberOfProcessors <= 65536u)
+    return static_cast<unsigned>(si.dwNumberOfProcessors);
+  return 0u;
+}
+#elif defined(__linux__)
+unsigned os_preferred_logical_processor_count() {
+  const long n = sysconf(_SC_NPROCESSORS_ONLN);
+  if (n > 0)
+    return static_cast<unsigned>((std::min)(n, 512L));
+  return 0u;
+}
+#elif defined(__APPLE__)
+unsigned os_preferred_logical_processor_count() {
+  int n = 0;
+  size_t sz = sizeof(n);
+  if (sysctlbyname("hw.logicalcpu", &n, &sz, nullptr, 0) == 0 && n > 0)
+    return static_cast<unsigned>((std::min)(n, 512));
+  n = 0;
+  sz = sizeof(n);
+  if (sysctlbyname("hw.ncpu", &n, &sz, nullptr, 0) == 0 && n > 0)
+    return static_cast<unsigned>((std::min)(n, 512));
+  return 0u;
+}
+#else
+unsigned os_preferred_logical_processor_count() { return 0u; }
+#endif
+
+}  // namespace
+
+unsigned default_parallel_jobs_hardware() {
+  unsigned n = os_preferred_logical_processor_count();
+  if (n == 0)
+    n = static_cast<unsigned>(std::thread::hardware_concurrency());
+  if (n == 0)
+    n = 4u;
+  return std::max(1u, std::min(n, 512u));
+}
+
+unsigned parallel_jobs_for_build(const std::map<std::string, std::string>& opts) {
+  for (const char* key : {"UP_BUILD_PARALLEL", "UP_BUILD_JOBS"}) {
+    const auto it = opts.find(key);
+    if (it != opts.end()) {
+      if (unsigned p = parse_jobs_string(it->second))
+        return std::max(1u, std::min(p, 512u));
+    }
+  }
+  return default_parallel_jobs_hardware();
+}
+
+void ensure_default_build_parallel_options(std::map<std::string, std::string>& opts) {
+  for (const char* key : {"UP_BUILD_PARALLEL", "UP_BUILD_JOBS"}) {
+    const auto it = opts.find(key);
+    if (it != opts.end() && parse_jobs_string(it->second) != 0)
+      return;
+  }
+  const std::string v = std::to_string(default_parallel_jobs_hardware());
+  opts["UP_BUILD_PARALLEL"] = v;
+  opts["UP_BUILD_JOBS"] = v;
 }
 
 std::string arch_from_options(const std::map<std::string, std::string>& opts) {

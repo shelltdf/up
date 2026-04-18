@@ -1,5 +1,6 @@
 ﻿#include "cmake/cmake_backend.hpp"
 
+#include "commands_common.hpp"
 #include "paths.hpp"
 
 #include <filesystem>
@@ -106,7 +107,8 @@ std::string build_cmake_build_command(const BuildBackendContext& ctx) {
   if (!ctx.multi_config) {
     cmd << " -DCMAKE_BUILD_TYPE=" << ctx.config_name;
   }
-  cmd << " && cmake --build \"" << to_posix_path_string(ctx.bin_dir) << "\" --verbose";
+  cmd << " && cmake --build \"" << to_posix_path_string(ctx.bin_dir) << "\" --parallel " << parallel_jobs_for_build(ctx.opts)
+      << " --verbose";
   if (ctx.multi_config) {
     cmd << " --config " << ctx.config_name;
   }
@@ -127,6 +129,7 @@ std::string build_cmake_configure_command(const ConfigureBackendContext& ctx) {
 }
 
 int write_cmake_lists(const ConfigureGraphModel& model) {
+  const unsigned ep_jobs = model.parallel_compile_jobs ? model.parallel_compile_jobs : 1u;
   std::ostringstream cm;
   int command_idx = 0;
   cm << "cmake_minimum_required(VERSION 3.20)\n";
@@ -155,7 +158,8 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
       for (const auto& kv : ep.upstream_cmake_args) {
         cm << "    \"-D" << kv.first << "=" << cmake_escape_string_value(kv.second) << "\"\n";
       }
-      cm << "  BUILD_COMMAND \"${CMAKE_COMMAND}\" --build \"" << bdir << "\" --config " << cfg_label << "\n";
+      cm << "  BUILD_COMMAND \"${CMAKE_COMMAND}\" --build \"" << bdir << "\" --config " << cfg_label << " --parallel "
+         << ep_jobs << "\n";
       cm << "  INSTALL_COMMAND \"${CMAKE_COMMAND}\" --install \"" << bdir << "\" --config " << cfg_label << "\n";
       cm << ")\n";
     }

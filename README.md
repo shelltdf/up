@@ -147,6 +147,8 @@ up build --build-dir-name default
 
 `<arch>` 当前按组合信息生成（如 `windows_x86_64_cmake_msvc_dynamic_release` 或 `windows_x86_64_ninja_msvc_dynamic_release`），来源于 `UP_TARGET_*` 配置与主机工具链探测。中间目录名 **`.intermediate`** 与 [mindmap.mmd](mindmap.mmd) 一致，建议加入 `.gitignore`。
 
+**并行编译（加速 `up build`）**：`cmake --build` 与 `ninja install` 会带上并行度；**默认并行度**按本机**当前可见的逻辑处理器数**（Windows：`GetActiveProcessorCount` / `GetNativeSystemInfo`；Linux：`sysconf(_SC_NPROCESSORS_ONLN)`；macOS：`sysctl`；再回退 `std::thread::hardware_concurrency()`，仍未知则用 4），并写入 **`up_cache.txt`** 的 **`UP_BUILD_PARALLEL`** 与 **`UP_BUILD_JOBS`**（二者同值，与 ninja `-j` / cmake `--parallel` 一致；仍可在命令行只改其一）。可用 `up configure --opt UP_BUILD_PARALLEL=16` 覆盖；**不再读取** `CMAKE_BUILD_PARALLEL_LEVEL` 等环境变量。含 `<cmake/>` 子工程时，生成根 `CMakeLists.txt` 里 **ExternalProject** 的 `BUILD_COMMAND` 会在 **configure 当刻** 按当前选项把并行数写进脚本；若要改子工程并行度需重新 `configure`。
+
 ## 仓库结构（摘要）
 
 ```

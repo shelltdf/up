@@ -65,7 +65,7 @@
 
 ### 2.2 build / run / test / pack
 
-- **build**：CLI 需指定 **`--build-dir-name`** 以定位 **`.intermediate/build/<叶子>/`**；在该目录按所选后端执行构建（`cmake` 或 `ninja`），产物安装到 **`install/<arch>/`**（含 `bin`、`include` 等）。
+- **build**：CLI 需指定 **`--build-dir-name`** 以定位 **`.intermediate/build/<叶子>/`**；在该目录按所选后端执行构建（`cmake` 或 `ninja`），产物安装到 **`install/<arch>/`**（含 `bin`、`include` 等）。实现上对 **`cmake --build`** 传入 **`--parallel N`**、对 **ninja** 传入 **`-j N`**（`N` 来自 **`up_cache.txt` / `--opt`** 中的 **`UP_BUILD_PARALLEL` 或 `UP_BUILD_JOBS`**（别名）；缺省由 **`configure`** 按 OS 报告的可用逻辑 CPU 数写入（Windows/Linux/macOS 各有首选 API，再回退 STL）；不读并行相关环境变量），以缩短编译阶段耗时。
 - **run**：CLI 需 **`--install-dir-name`**（安装前缀在 **`.intermediate/install/`** 下的子目录名，通常等于 **`up_cache.txt` 的 `arch=`**）；再指定可执行目标名。
 - **test**：同上，需 **`--install-dir-name`** 后可选测试名；底层如 CTest。
 - **pack**：可重复 **`--install-dir-name`**；输出到 **`pack/<arch>/`**。

@@ -238,15 +238,44 @@ struct GuiBrowseHistory {
 };
 GuiBrowseHistory g_browse_history;
 
-std::vector<OptionRow> g_options = {
-    {L"UP_TARGET_SYSTEM", L"windows", L"windows | linux | macos | android | ios | emsdk | uwp"},
-    {L"UP_TARGET_CPU_ARCH", L"x86_64", L"x86 | x86_64 | arm | arm64"},
-    {L"UP_TARGET_DYNAMIC_LIBRARY", L"OFF", L"ON | OFF"},
-    {L"UP_TARGET_CRT", L"dynamic_md", L"static_mt | dynamic_md"},
-    {L"UP_TARGET_DEBUG", L"OFF", L"ON | OFF"},
-    {L"UP_TARGET_BUILD_SYSTEM", L"cmake", L"cmake | ninja"},
-    {L"UP_CMAKE_GENERATOR", L"Visual Studio 17 2022", L"(when UP_TARGET_BUILD_SYSTEM=cmake) VS/Ninja/Makefiles"},
-};
+// 与 src/engine/commands/commands_common.cpp 中 default_parallel_jobs_hardware() 的 Windows 分支保持一致：
+// 优先 GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)，再 GetNativeSystemInfo，再 STL，最后 4。
+unsigned PreferredLogicalCpuCountForGuiDefaults() {
+  const DWORD active = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+  unsigned n = 0;
+  if (active > 0 && active <= 65536u)
+    n = static_cast<unsigned>(active);
+  if (n == 0) {
+    SYSTEM_INFO si{};
+    GetNativeSystemInfo(&si);
+    if (si.dwNumberOfProcessors > 0 && si.dwNumberOfProcessors <= 65536u)
+      n = static_cast<unsigned>(si.dwNumberOfProcessors);
+  }
+  if (n == 0)
+    n = static_cast<unsigned>(std::thread::hardware_concurrency());
+  if (n == 0)
+    n = 4u;
+  n = std::max(1u, std::min(n, 512u));
+  return n;
+}
+
+std::vector<OptionRow> MakeDefaultGuiOptions() {
+  const unsigned hc = PreferredLogicalCpuCountForGuiDefaults();
+  const std::wstring par = std::to_wstring(static_cast<unsigned long long>(hc));
+  return {
+      {L"UP_TARGET_SYSTEM", L"windows", L"windows | linux | macos | android | ios | emsdk | uwp"},
+      {L"UP_TARGET_CPU_ARCH", L"x86_64", L"x86 | x86_64 | arm | arm64"},
+      {L"UP_TARGET_DYNAMIC_LIBRARY", L"OFF", L"ON | OFF"},
+      {L"UP_TARGET_CRT", L"dynamic_md", L"static_mt | dynamic_md"},
+      {L"UP_TARGET_DEBUG", L"OFF", L"ON | OFF"},
+      {L"UP_TARGET_BUILD_SYSTEM", L"cmake", L"cmake | ninja"},
+      {L"UP_CMAKE_GENERATOR", L"Visual Studio 17 2022", L"(when UP_TARGET_BUILD_SYSTEM=cmake) VS/Ninja/Makefiles"},
+      {L"UP_BUILD_PARALLEL", par, L"1..512; cmake --build --parallel / ninja -j"},
+      {L"UP_BUILD_JOBS", par, L"alias of UP_BUILD_PARALLEL (ninja -j)"},
+  };
+}
+
+std::vector<OptionRow> g_options = MakeDefaultGuiOptions();
 const std::vector<OptionRow> g_default_options = g_options;
 
 std::string WideToUtf8(std::wstring_view ws) {

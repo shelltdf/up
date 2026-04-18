@@ -100,6 +100,8 @@ struct ConfigureGraphModel {
   std::filesystem::path build_root;
   std::filesystem::path out_dir;
   std::filesystem::path install_root;
+  /** Parallel jobs baked into ExternalProject BUILD_COMMAND (from merged UP_* options). */
+  unsigned parallel_compile_jobs = 1;
   std::vector<ConfigureTargetModel> targets;
   std::vector<std::string> install_exe_names;
   std::vector<ConfigureInstallDirRule> install_dir_rules;
