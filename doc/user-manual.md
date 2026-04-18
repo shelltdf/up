@@ -17,7 +17,7 @@
 | 支持多种目标类型 | 可执行程序 / 库 / 插件 / 资源文件 | 支持 `executable`、`static_library`、`shared_library` 等目标类型，并可组织插件与资源文件等工程产物。 |
 | 配置过程支持变量操作 | 全局变量 + 用户自定义变量 + 变量驱动 target 行为 | 系统会注入默认全局变量，用户可定义变量并在配置阶段参与目标行为控制，例如按 `win32/linux` 条件切换源码、依赖或构建选项。 |
 | 基于现有建造系统和编译器环境 + 不设立复杂规则不增加学习难度 | 复用 CMake / Ninja 与现有编译器链路 | 不额外发明复杂 DSL 或新规则体系，尽量沿用团队已有构建习惯，降低迁移与学习成本。 |
-| 全流程命令 + 全平台开发 + 全平台发布 | configure / build / test / run / pack / project | 覆盖从扫描、构建、测试到运行与打包的完整流程，并支持跨平台开发与发布。 |
+| 全流程命令 + 全平台开发 + 全平台发布 | configure / build / test / run / pack / project（可选编译） | 覆盖从扫描、构建、测试到运行与打包的完整流程，并支持跨平台开发与发布；**`project`** 需 **`UP_ENABLE_PROJECT=ON`** 构建宿主 `up`。 |
 | 最简单的外部依赖关系扩展 | 通过设置 `scan dir` 搜索外部包建立依赖关系 | 当前可把外部包目录加入扫描来源来建立包依赖；后续可扩展为 `git clone` 或下载并解压 `zip` 后自动纳入 `scan` 来源。 |
 | 可扩展元编程工具接入 | 支持 `moc` / `uic` / `rc` 等工具模式 | 可将代码生成工具接入包体系，支持输入文件转换、生成产物管理与测试验证。 |
 
@@ -38,15 +38,18 @@ cmake --build _build --config Release
 
 ```powershell
 .\_build\Release\up.exe configure --scan test_projects
-.\_build\Release\up.exe build
-.\_build\Release\up.exe test
-.\_build\Release\up.exe run hello_demo
+$ARCH = .\_build\Release\up.exe print-build-dir-name
+.\_build\Release\up.exe build --build-dir-name default
+.\_build\Release\up.exe test --install-dir-name $ARCH
+.\_build\Release\up.exe run --install-dir-name $ARCH hello_demo
 ```
+
+**说明：** `build` 必须使用 **`--build-dir-name`**（与 `configure` 使用的叶子名一致，未指定 configure 时一般为 **`default`**）。`run` / `test` / `pack` 必须使用 **`--install-dir-name`**，其值为 **`.intermediate/install/` 下的子目录名**，通常等于 **`up print-build-dir-name`**（或 `up_cache.txt` 里的 **`arch=`**），**不要**误用构建叶子名 `default`。
 
 ### 步骤 3：检查结果
 
-- 构建与生成目录：`.intermediate/build/<arch>/`
-- 安装结果目录：`.intermediate/install/<arch>/`
+- 构建与生成目录：`.intermediate/build/<叶子>/`（示例为 **`default/`**）
+- 安装结果目录：`.intermediate/install/<arch>/`（**`<arch>`** 见上一步 `$ARCH`）
 - 如果运行成功，你会看到 `hello_demo` 的输出日志（含 `hello_foo`、`hello_simple_lib`、`rock_stack` 调用）
 
 ### 步骤 4：继续深入
@@ -93,13 +96,13 @@ cmake --build _build --config Release
 3. **校验**：
    - 包依赖是否在扫描集中存在
    - 目标依赖是否能解析到库目标
-4. **生成**：在 `.intermediate/build/<arch>/` 生成构建文件
-5. **执行**：`build` 产物安装到 `.intermediate/install/<arch>/`
-6. **后续**：`run` / `test` / `pack` 基于安装与构建元数据继续工作
+4. **生成**：在 **`.intermediate/build/<叶子>/`** 生成构建文件（**`<叶子>`** 由 **`configure --build-dir-name`** 决定，省略时为 **`default`**），并写入 **`up_cache.txt`**（含 **`arch=`**）
+5. **执行**：`build` 将产物安装到 **`.intermediate/install/<arch>/`**（**`<arch>`** 来自缓存，通常 **不等于** **`<叶子>`**）
+6. **后续**：`run` / `test` / `pack` 基于安装与构建元数据继续工作（CLI 上通过 **`--install-dir-name <arch>`** 指向安装前缀）
 
 ### 目录流转（相对执行命令时的 cwd）
 
-- `.intermediate/build/<arch>/`：生成与构建目录
+- `.intermediate/build/<叶子>/`：生成与构建目录（含 `up_cache.txt`）
 - `.intermediate/install/<arch>/`：安装目录（`bin/`、`include/`）
 - `.intermediate/pack/<arch>/`：打包产物目录
 
@@ -187,6 +190,8 @@ cmake -S . -B _build -G "Visual Studio 17 2022" -A x64
 cmake --build _build --config Release
 ```
 
+如需启用 **`up project`**，请在首次配置时追加 **`-DUP_ENABLE_PROJECT=ON`** 后再编译。
+
 方式 B：Python 脚本
 
 ```powershell
@@ -201,19 +206,21 @@ python package.py
 
 ```powershell
 .\_build\Release\up.exe configure --scan test_projects
-.\_build\Release\up.exe build
-.\_build\Release\up.exe test
-.\_build\Release\up.exe run hello_demo
+$ARCH = .\_build\Release\up.exe print-build-dir-name
+.\_build\Release\up.exe build --build-dir-name default
+.\_build\Release\up.exe test --install-dir-name $ARCH
+.\_build\Release\up.exe run --install-dir-name $ARCH hello_demo
 ```
 
-常用命令：
+常用命令（与 **`up --help`** 一致）：
 
-- `up configure [--scan <dir>]... [--opt KEY=VALUE]...`
-- `up build`
-- `up run <target-name>`
-- `up test [test-target-name]`
-- `up pack`
-- `up project [--dry-run] [--force] [--output-dir <path>] [--package-name <n>] [--legacy-cmake-parse]`
+- `up configure [--build-dir-name <叶子>] [--scan <dir>]... [--opt KEY=VALUE]...`
+- `up build --build-dir-name <叶子>`
+- `up run --install-dir-name <名> <target-name>`
+- `up test --install-dir-name <名> [test-target-name]`
+- `up pack --install-dir-name <名>...`
+- `up spec` / `up print-build-dir-name`
+- `up project ...`（**需**宿主 `up` 以 **`-DUP_ENABLE_PROJECT=ON`** 构建；否则子命令不可用）
   - 默认：若探测到 **CMake** 工程，写入 **`<cmake source_dir="..."/>`**，并尽量从 `install(TARGETS ...)` 自动生成 `imported_installed_*` 包装 `target.xml`（默认落在 `.targets/<name>/target.xml`，目标名优先使用 CMake target 名，解析不到时仅生成 package.xml 并给出提示）。
   - `package.xml` 的 `name` 默认优先取 `CMakeLists.txt` 的 `project(...)` 名（若未解析到则回退目录名；`--package-name` 仍可覆盖）。
   - **`--legacy-cmake-parse`**：恢复旧的「从 `CMakeLists.txt` 猜 `add_library`/`add_executable`」行为。
@@ -224,9 +231,10 @@ python package.py
 
 ```powershell
 up configure
-up build
-up test
-up run rock_app_one
+$ARCH = up print-build-dir-name
+up build --build-dir-name default
+up test --install-dir-name $ARCH
+up run --install-dir-name $ARCH rock_app_one
 ```
 
 ### 4.5 up-gui 快速上手
@@ -254,7 +262,7 @@ up run rock_app_one
 1. 新建子目录（例如 `myLib/`）
 2. 放入 `target.xml` 与源码
 3. 在需要的可执行目标里声明 `<dependency name="myLib"/>`
-4. `up configure && up build && up test`
+4. 按 §4.3 的约定依次执行 `configure`、`print-build-dir-name`、`build --build-dir-name`、`test`/`run`（`build`/`run`/`test` 的参数为必填）
 
 #### 模板 B：新增跨包依赖
 
@@ -265,19 +273,19 @@ up run rock_app_one
 #### 模板 C：调试 includes 安装布局
 
 1. 用 `from/to` 声明 `dir/file/glob`
-2. `up configure && up build`
-3. 检查 `.intermediate/install/<arch>/include/` 是否符合预期
+2. `up configure`，再 `up build --build-dir-name default`（或与 configure 一致的叶子名）
+3. 检查 `.intermediate/install/<arch>/include/` 是否符合预期（**`<arch>`** 见 `up print-build-dir-name` 或 `up_cache.txt`）
 
 #### 模板 D：导入第三方 CMake SDK（zlib / FBX 风格）
 
-1. 在第三方 CMake 工程根目录执行 `up project`
-2. 执行 `up configure && up build`
+1. 在第三方 CMake 工程根目录执行 `up project`（需宿主 `up` 以 **`-DUP_ENABLE_PROJECT=ON`** 构建）
+2. 执行 `up configure`，再 `up build --build-dir-name default` 等（见 §4.3）
 3. 检查是否生成 `.targets/<name>/target.xml`
 4. 在消费方包里通过 `<dependency name="pkg:target"/>` 引用
 
 默认行为要点：
 
-- `up project` 会写 `package.xml`（含 `<cmake source_dir="..."/>`）
+- `up project` 会写 `package.xml`（含 `<cmake source_dir="..."/>`）（需 **`-DUP_ENABLE_PROJECT=ON`** 构建的 `up`）
 - 并尝试根据 `install(TARGETS ...)` 生成 `imported_installed_*` 包装目标
 - 并尝试根据 `find_package(...)` 生成包级依赖：
   - `REQUIRED` -> `<dependency ... optional="false"/>`
@@ -306,16 +314,18 @@ up run rock_app_one
 
 **常见原因**：
 
+- 未传 **`--install-dir-name`**，或传入的名字不是 **`.intermediate/install/<arch>/`** 这一段（误把 **`default`** 当成安装目录名）
 - 目标名写错
 - 尚未 `build` 成功
 - 当前目录对应的是另一个 package
 
-**建议**：先 `up test` 或查看 build 输出中的目标名，再执行 `up run <name>`。
+**建议**：用 **`up print-build-dir-name`** 得到 **`<arch>`**，执行 **`up run --install-dir-name <arch> <name>`**；或先 **`up test --install-dir-name <arch>`** 核对安装树。
 
 ### Q4：`test` 没有发现测试
 
 `up` 当前通过 CTest 执行测试；通常可执行目标会被注册为测试条目。若无测试：
 
+- 确认 **`up test --install-dir-name <arch>`** 中的 **`<arch>`** 与本次 `configure`/`build` 一致
 - 确认 configure/build 成功
 - 确认目标确实是 `executable`
 - 在正确的包/扫描范围下运行

@@ -25,15 +25,18 @@ cmake --build _build --config Release
 
 ```powershell
 .\_build\Release\up.exe configure --scan test_projects
-.\_build\Release\up.exe build
-.\_build\Release\up.exe test
-.\_build\Release\up.exe run hello_demo
+$ARCH = .\_build\Release\up.exe print-build-dir-name
+.\_build\Release\up.exe build --build-dir-name default
+.\_build\Release\up.exe test --install-dir-name $ARCH
+.\_build\Release\up.exe run --install-dir-name $ARCH hello_demo
 ```
+
+**Note:** `build` requires **`--build-dir-name`** (same leaf as `configure`, usually **`default`** if omitted). `run` / `test` / `pack` require **`--install-dir-name`**, which must name a **child directory under `.intermediate/install/`** — typically the **`arch`** string from **`up print-build-dir-name`** (or the `arch=` line in `up_cache.txt`), **not** the build leaf `default`.
 
 ### Step 3: Check outputs
 
-- Build tree: `.intermediate/build/<arch>/`
-- Install tree: `.intermediate/install/<arch>/`
+- Generated/build tree: `.intermediate/build/<leaf>/` (example **`default/`**)
+- Install tree: `.intermediate/install/<arch>/` (**`<arch>`** is `$ARCH` above)
 - You should see `hello_demo` logs including calls into `hello_foo`, `hello_simple_lib`, and `rock_stack`.
 
 ---
@@ -71,13 +74,13 @@ Main flow of `up`:
 3. **Validate**:
    - package dependencies exist in the scan set
    - target dependencies resolve to library targets
-4. **Generate**: create backend files under `.intermediate/build/<arch>/`
-5. **Build/install**: outputs go to `.intermediate/install/<arch>/`
-6. **Follow-up**: `run` / `test` / `pack` use generated/build metadata
+4. **Generate**: create backend files under **`.intermediate/build/<leaf>/`** (from **`configure --build-dir-name`**, default **`default`**) and write **`up_cache.txt`** (includes **`arch=`**)
+5. **Build/install**: `build` installs to **`.intermediate/install/<arch>/`** where **`<arch>`** comes from the cache (usually **not** equal to **`<leaf>`**)
+6. **Follow-up**: `run` / `test` / `pack` use install trees; CLI requires **`--install-dir-name <arch>`**
 
 Working directories (relative to command `cwd`):
 
-- `.intermediate/build/<arch>/`
+- `.intermediate/build/<leaf>/`
 - `.intermediate/install/<arch>/`
 - `.intermediate/pack/<arch>/`
 
@@ -166,6 +169,8 @@ cmake -S . -B _build -G "Visual Studio 17 2022" -A x64
 cmake --build _build --config Release
 ```
 
+Add **`-DUP_ENABLE_PROJECT=ON`** on the first `cmake` line if you need the **`up project`** subcommand.
+
 Option B: Python scripts
 
 ```powershell
@@ -178,19 +183,21 @@ python package.py
 
 ```powershell
 .\_build\Release\up.exe configure --scan test_projects
-.\_build\Release\up.exe build
-.\_build\Release\up.exe test
-.\_build\Release\up.exe run hello_demo
+$ARCH = .\_build\Release\up.exe print-build-dir-name
+.\_build\Release\up.exe build --build-dir-name default
+.\_build\Release\up.exe test --install-dir-name $ARCH
+.\_build\Release\up.exe run --install-dir-name $ARCH hello_demo
 ```
 
-Common commands:
+Common commands (see also `up --help`):
 
-- `up configure [--scan <dir>]... [--opt KEY=VALUE]...`
-- `up build`
-- `up run <target-name>`
-- `up test [test-target-name]`
-- `up pack`
-- `up project [--dry-run] [--force] [--output-dir <path>] [--package-name <name>] [--legacy-cmake-parse]`
+- `up configure [--build-dir-name <leaf>] [--scan <dir>]... [--opt KEY=VALUE]...`
+- `up build --build-dir-name <leaf>`
+- `up run --install-dir-name <name> <target-name>`
+- `up test --install-dir-name <name> [test-target-name]`
+- `up pack --install-dir-name <name>...`
+- `up spec` / `up print-build-dir-name`
+- `up project ...` (**requires** a host `up` built with **`-DUP_ENABLE_PROJECT=ON`**)
   - **Default** when a **CMake** tree is detected: writes **`<cmake source_dir="..."/>`** and tries to auto-generate `imported_installed_*` wrapper `target.xml` files from `install(TARGETS ...)` rules (written under `.targets/<name>/target.xml`, target names prefer CMake target names). If parsing fails, only `package.xml` is written with warnings.
   - `package.xml` `name` prefers the CMake `project(...)` name by default (falls back to directory name when unresolved; `--package-name` still overrides).
   - **`--legacy-cmake-parse`**: restore heuristic `add_library` / `add_executable` import into `target.xml`.
@@ -201,9 +208,10 @@ If `up` is on PATH:
 
 ```powershell
 up configure
-up build
-up test
-up run rock_app_one
+$ARCH = up print-build-dir-name
+up build --build-dir-name default
+up test --install-dir-name $ARCH
+up run --install-dir-name $ARCH rock_app_one
 ```
 
 ### 4.5 `up-gui` quick flow
@@ -231,7 +239,7 @@ The GUI passes selected settings to `up.exe` via `--opt`.
 1. Create a subdirectory (for example `myLib/`)
 2. Add `target.xml` and source files
 3. Reference it from an executable target with `<dependency name="myLib"/>`
-4. Run `up configure && up build && up test`
+4. Run `configure`, then `print-build-dir-name`, then `build --build-dir-name`, then `test`/`run` with **`--install-dir-name`** (see §4.3)
 
 #### Template B: Add cross-package dependency
 
@@ -242,19 +250,19 @@ The GUI passes selected settings to `up.exe` via `--opt`.
 #### Template C: Verify includes install layout
 
 1. Use `from/to` entries in `<includes>` (`dir/file/glob`)
-2. Run `up configure && up build`
-3. Check `.intermediate/install/<arch>/include/`
+2. Run `up configure`, then `up build --build-dir-name default` (or the same leaf you used for configure)
+3. Check `.intermediate/install/<arch>/include/` (**`<arch>`** from `up print-build-dir-name` or `up_cache.txt`)
 
 #### Template D: Import third-party CMake SDK (zlib / FBX style)
 
-1. In the third-party CMake project root, run `up project`
-2. Run `up configure && up build`
+1. In the third-party CMake project root, run `up project` (requires **`-DUP_ENABLE_PROJECT=ON`** host build)
+2. Run `up configure`, then `up build --build-dir-name default` (see §4.3)
 3. Check generated `.targets/<name>/target.xml`
 4. Consume from another package via `<dependency name="pkg:target"/>`
 
 Default behavior highlights:
 
-- `up project` writes `package.xml` with `<cmake source_dir="..."/>`
+- `up project` writes `package.xml` with `<cmake source_dir="..."/>` (requires **`-DUP_ENABLE_PROJECT=ON`** host build)
 - Tries to generate `imported_installed_*` wrappers from `install(TARGETS ...)`
 - Tries to generate package-level dependencies from `find_package(...)`:
   - `REQUIRED` -> `<dependency ... optional="false"/>`
@@ -283,14 +291,18 @@ Current implementation enforces ASCII path constraints to avoid backend toolchai
 
 Possible causes:
 
+- missing or wrong **`--install-dir-name`** (using **`default`** by mistake — that is a **build** leaf, not the **`<arch>`** install folder name)
 - wrong target name
 - build not completed
 - running under the wrong package/root
+
+Use **`up print-build-dir-name`** and run **`up run --install-dir-name <arch> <name>`**.
 
 ### Q4: `test` finds no tests
 
 Make sure:
 
+- **`up test --install-dir-name <arch>`** uses the same **`<arch>`** as the last successful configure/build
 - configure/build succeeded
 - target type is `executable`
 - command is executed from the correct package/scan scope

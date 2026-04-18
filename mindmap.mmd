@@ -113,10 +113,11 @@
         扫描到 package.xml 与各子目录中的 target.xml 每目录至多一个。建立 package 关系图并打印树状图。
         扫描到 package 就作为当前包，其下子目录中的 target 作为子节点。每个 target 须落在 package 目录树内。
         扫描完成后，会生成具体的后端文件。在 .intermediate/build 目录中。
+        实现约定为 .intermediate/build 下按叶子名分子目录 例如 default 与 configure 的 build-dir-name 对应。
         这个过程是可以生成一个设置结果文件的，这里是保存了用户输入的开关和变量信息。类似于 cmake cache 文件的作用。
         up_cache 规划
-          文件名可定为 up_cache.txt 或待定。
-          建议放在 .intermediate/build 下与 arch 或生成根并列 具体由实现定。
+          文件名为 up_cache.txt。
+          放在 .intermediate/build 叶子目录内 含 arch 字段用于命名 install 子目录。
           configure 时加载 更新 写入。
       build 启动编译过程。
         编译生成的cmake项目，采用内编译方式，并安装到 .intermediate/install 目录中。
@@ -133,7 +134,7 @@
       执行 up.exe 会在当前 cwd 目录里产生一个中间文件目录
       中间目录（这是个真实存在的目录叫做 .intermediate）包含几个子目录
         build
-          先产生当前 arch 目录；cmake 模式生成 CMakeLists，ninja 模式在 out 目录生成 build.ninja。
+          先按叶子名分子目录 如 default；cmake 模式生成 CMakeLists，ninja 模式在 out 目录生成 build.ninja。
         install
           这里是各个 arch 的目录。里面是 bin include 等文件。
         pack

@@ -61,14 +61,14 @@
 - 可配置**扫描路径**；**未配置时默认递归搜索当前 cwd**。
 - 扫描到 `package.xml` 及包树内各目录下的 **`target.xml`**（**每个目录至多一个**），建立 **package 关系图**，并在控制台**打印树状图**便于核对。
 - **归属规则**：扫描到的 **package** 作为当前包节点，其下的 **target** 作为子节点；**每个 target 必须能归属到某个 package 父节点**。
-- 生成结果落在中间目录下的 **`build`** 中：先按 **`arch`** 分目录，其下再按**库/包**组织；`cmake` 模式产出 `CMakeLists.txt`，`ninja` 模式产出 `out/build.ninja`。
+- 生成结果落在 **`.intermediate/build/<叶子>/`**（由 **`configure --build-dir-name`** 指定，省略时为 **`default`**）：`cmake` 模式产出 `CMakeLists.txt`，`ninja` 模式产出 `out/build.ninja`；同目录写入 **`up_cache.txt`**，其中 **`arch=`** 字段用于命名 **`.intermediate/install/<arch>/`**（构建目录名与 `arch` 目录名不必相同）。
 
 ### 2.2 build / run / test / pack
 
-- **build**：在 `build` 中按所选后端执行构建（`cmake` 或 `ninja`），产物安装到 **`install/<arch>/`**（含 `bin`、`include` 等）。
-- **run**：从 `install` 或构建元数据定位可执行目标并启动。
-- **test**：执行测试用例（如 CTest 或各目标约定入口）。
-- **pack**：输出到 **`pack/<arch>/`**。
+- **build**：CLI 需指定 **`--build-dir-name`** 以定位 **`.intermediate/build/<叶子>/`**；在该目录按所选后端执行构建（`cmake` 或 `ninja`），产物安装到 **`install/<arch>/`**（含 `bin`、`include` 等）。
+- **run**：CLI 需 **`--install-dir-name`**（安装前缀在 **`.intermediate/install/`** 下的子目录名，通常等于 **`up_cache.txt` 的 `arch=`**）；再指定可执行目标名。
+- **test**：同上，需 **`--install-dir-name`** 后可选测试名；底层如 CTest。
+- **pack**：可重复 **`--install-dir-name`**；输出到 **`pack/<arch>/`**。
 
 ## 3. 包文件设计
 
@@ -104,8 +104,8 @@
 
 | 路径（相对 cwd） | 说明 |
 |------------------|------|
-| `.intermediate/build/` | 构建根目录；按 `arch` 分目录，内部根据 `UP_TARGET_BUILD_SYSTEM` 生成 cmake 或 ninja 文件。 |
-| `.intermediate/install/` | 按 **`arch`** 分子目录；其下为 `bin`、`include` 等安装布局。 |
+| `.intermediate/build/` | 构建根目录；其下按 **`<叶子>`**（如 **`default`**）分子目录，内部根据 `UP_TARGET_BUILD_SYSTEM` 生成 cmake 或 ninja 文件，并含 **`up_cache.txt`**。 |
+| `.intermediate/install/` | 按 **`arch`** 分子目录；其下为 `bin`、`include` 等安装布局（**`arch`** 来自对应构建目录的缓存，不是 `<叶子>` 名）。 |
 | `.intermediate/pack/` | 按 **`arch`** 分目录，存放打包产物。 |
 
 另可生成**配置结果文件**（名称与格式由实现定义），保存在 `.intermediate` 内或与其并列策略由实现选定，语义上类比 **CMake cache**（保存用户输入的开关与变量）。
@@ -143,7 +143,7 @@
 | 宿主工具 Python（`build.py` / `install.py` / `package.py`） | 导图「宿主工具开发与分发 Python」 |
 | 工作原理（up.exe / up-gui、configure/build/run/test/pack） | §4 |
 | up-gui 目标界面 vs Win32 参考实现 | 导图「工作原理」下 up-gui 分支 |
-| `up_cache` 与缓存语义（规划中） | §4、§5 脚注、导图「up_cache 规划」 |
+| `up_cache.txt` 与缓存语义 | §2.1、§4、§5、导图「up_cache 规划」 |
 | 当前实现要点（单包 CMake、CTest、install 首个 exe、`arch` 组合标签） | §5.1、导图「当前实现要点」 |
 | 目录关系（`.intermediate`、`build`/`install`/`pack`、`arch` 组合） | §5、§5.1 |
 | 文档（DESIGN / README） | 导图「文档」 |

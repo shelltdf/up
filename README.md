@@ -18,6 +18,8 @@ cmake --build _build --config Release
 
 生成可执行文件（默认）：`_build\Release\up.exe`。MSVC 下工程启用 **静态 CRT**（`/MT`）与 **`/utf-8`**，与 [DESIGN.md](DESIGN.md) 中对 `up.exe` 的取向一致。
 
+可选：首次 `cmake` 时加上 **`-DUP_ENABLE_PROJECT=ON`** 以编译并启用 **`up project`** 子命令（以及 GUI 中对应能力）。默认 **OFF** 时执行 `up project` 会提示需重编译。
+
 也可用 Python 脚本（在仓库根目录）：
 
 ```powershell
@@ -38,12 +40,14 @@ python package.py
 
 | 命令 | 说明 |
 |------|------|
-| `up configure [--scan <目录>]... [--opt KEY=VALUE]...` | 扫描 `package.xml` 及包树内各 **`target.xml`**；在 `.intermediate/build/<arch>/` 下：`cmake` 模式生成 `CMakeLists.txt`，`ninja` 模式直接生成 `out/build.ninja`（不生成 CMakeLists），并更新 `up_cache.txt` |
-| `up build` | 对已生成的 CMake 工程配置、编译并 **install** 到 `.intermediate/install/<arch>/` |
-| `up run <目标名>` | 运行 `.intermediate/install/<arch>/bin/` 下的可执行文件（Windows 下可省略 `.exe`） |
-| `up test [测试目标名]` | 在构建目录中执行 **CTest**（可选指定单个测试目标） |
-| `up pack` | 将 `.intermediate/install/<arch>/` 打包为归档文件输出到 `.intermediate/pack/<arch>/`（Windows: zip；其他平台: tar.gz） |
-| `up project` | 探测现有工程并生成 `package.xml` / `target.xml`。CMake 默认写 `<cmake source_dir=\"...\"/>`，并尽量从 `install(TARGETS ...)` 自动生成 `.targets/` 下的 `imported_installed_*` 包装目标；在需要时还会尝试 **CMake File API**（需本机 `cmake` 能成功配置该工程）。若依赖未齐或不想跑配置，可加 **`--cmake-no-file-api`**，仅做安装规则扫描 + **CMakeLists 启发式扫描**（含对 `target_link_libraries` / `target_include_directories` 的尽力解析），精度低于 codemodel |
+| `up configure [--build-dir-name <叶子>] [--scan <目录>]... [--opt KEY=VALUE]...` | 扫描 `package.xml` 及包树内各 **`target.xml`**；在 **`.intermediate/build/<叶子>/`**（省略时为 **`default`**）下：`cmake` 模式生成 `CMakeLists.txt`，`ninja` 模式直接生成 `out/build.ninja`（不生成 CMakeLists），并写入 **`up_cache.txt`**（含 **`arch=`** 供安装目录命名） |
+| `up build --build-dir-name <叶子>` | **必填** `--build-dir-name`；读取对应目录下 `up_cache.txt`，对已生成工程编译并 **install** 到 **`.intermediate/install/<arch>/`** |
+| `up run --install-dir-name <名> <目标名>` | **必填** `--install-dir-name`：`<名>` 为 **`.intermediate/install/` 下的直接子目录名**（通常等于 `up_cache.txt` 的 **`arch`**，与构建叶子名不必相同）；运行其下 `bin/` 中可执行文件（Windows 下目标名可省略 `.exe`） |
+| `up test --install-dir-name <名> [测试目标名]` | **必填** `--install-dir-name`；在对应安装树关联的构建元数据上执行 **CTest**（可选单个测试名） |
+| `up pack --install-dir-name <名>...` | **至少一次** `--install-dir-name`（可重复，多架构）；打包到 **`.intermediate/pack/<arch>/`**（Windows: zip；其他平台: tar.gz） |
+| `up spec` | 向 stdout 输出内嵌的英文 `package.xml` / `target.xml` 规则说明（供工具/AI） |
+| `up print-build-dir-name [--build-dir-name <叶子>] [--opt ...]` | 打印当前配置对应的 **`<arch>`** 字符串（便于脚本传给 `run`/`test`/`pack` 的 `--install-dir-name`） |
+| `up project ...` | **仅当**构建时启用 **`-DUP_ENABLE_PROJECT=ON`**。探测现有工程并生成 `package.xml` / `target.xml`。CMake 默认写 `<cmake source_dir=\"...\"/>`，并尽量从 `install(TARGETS ...)` 自动生成 `.targets/` 下的 `imported_installed_*` 包装目标；在需要时还会尝试 **CMake File API**（需本机 `cmake` 能成功配置该工程）。若依赖未齐或不想跑配置，可加 **`--cmake-no-file-api`**，仅做安装规则扫描 + **CMakeLists 启发式扫描**（含对 `target_link_libraries` / `target_include_directories` 的尽力解析），精度低于 codemodel |
 
 无子命令或未知子命令时会打印简短用法。
 
@@ -57,12 +61,13 @@ python package.py
 
 ```powershell
 .\_build\Release\up.exe configure --scan test_projects
-.\_build\Release\up.exe build
-.\_build\Release\up.exe test
-.\_build\Release\up.exe run hello_demo
+$ARCH = .\_build\Release\up.exe print-build-dir-name
+.\_build\Release\up.exe build --build-dir-name default
+.\_build\Release\up.exe test --install-dir-name $ARCH
+.\_build\Release\up.exe run --install-dir-name $ARCH hello_demo
 ```
 
-若将 `up.exe` 加入 `PATH`，也可在 **`test_projects` 下某一子包目录**（例如 `test_projects\hello_demo`）内直接执行 `up configure`、`up build` 等（此时默认只扫描当前目录对应的那一个包）。
+若将 `up.exe` 加入 `PATH`，也可在 **`test_projects` 下某一子包目录**（例如 `test_projects\hello_demo`）内直接执行 `up configure`、`up build --build-dir-name default` 等（此时默认只扫描当前目录对应的那一个包）；`run`/`test`/`pack` 仍需带 **`--install-dir-name`**（一般为 **`up print-build-dir-name`** 的输出）。
 
 ## 第三方 SDK 导入（zlib / FBX 风格最小流程）
 
@@ -71,10 +76,14 @@ python package.py
 在 SDK 根目录执行：
 
 ```powershell
+# 需要宿主 up 以 -DUP_ENABLE_PROJECT=ON 构建
 up project
 up configure
-up build
+$ARCH = up print-build-dir-name
+up build --build-dir-name default
 ```
+
+安装与运行仍使用 **`--install-dir-name $ARCH`**（或从 `.intermediate/build/default/up_cache.txt` 读取 `arch=`）。
 
 默认行为（CMake 探测）：
 
@@ -132,8 +141,8 @@ up build
 
 | 路径 | 含义 |
 |------|------|
-| `.intermediate/build/<arch>/` | 构建根目录：`cmake` 模式写 `CMakeLists.txt`；`ninja` 模式写 `out/build.ninja` |
-| `.intermediate/install/<arch>/` | 安装前缀（如 `bin/`、`include/`） |
+| `.intermediate/build/<叶子>/` | **configure** 生成根（如 **`default`**）：`cmake` 模式写 `CMakeLists.txt`；`ninja` 模式写 `out/build.ninja`；同目录含 **`up_cache.txt`** |
+| `.intermediate/install/<arch>/` | **install** 前缀（如 `bin/`、`include/`）；`<arch>` 来自 `up_cache.txt` 的 **`arch=`**，与 **`<叶子>`** 通常不同 |
 | `.intermediate/pack/<arch>/` | 打包输出（例如 `up-<arch>.zip` 或 `up-<arch>.tar.gz`） |
 
 `<arch>` 当前按组合信息生成（如 `windows_x86_64_cmake_msvc_dynamic_release` 或 `windows_x86_64_ninja_msvc_dynamic_release`），来源于 `UP_TARGET_*` 配置与主机工具链探测。中间目录名 **`.intermediate`** 与 [mindmap.mmd](mindmap.mmd) 一致，建议加入 `.gitignore`。
@@ -146,6 +155,7 @@ up build
 ├── install.py          # cmake --install（默认前缀 dist/）
 ├── package.py          # 将 up / up-gui 打成 zip 或 tar.gz
 ├── DESIGN.md           # 设计文档
+├── ai-software-engineering/  # 四阶段工程文档（概念/逻辑/物理/运维），与实现同步维护
 ├── doc/                # 补充规范（如 XML 描述文件）
 ├── README.md           # 本文件
 ├── mindmap.mmd         # 设计思维导图
