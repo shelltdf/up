@@ -465,10 +465,10 @@ void write_up_cache(const std::filesystem::path& cache_path,
     f << kv.first << "=" << kv.second << "\n";
 }
 
-std::string mermaid_node_id(const std::string& package_name) {
-  std::string out = "pkg_";
-  out.reserve(package_name.size() + 4);
-  for (char c : package_name) {
+std::string mermaid_sanitize_id_chars(const std::string& s) {
+  std::string out;
+  out.reserve(s.size());
+  for (char c : s) {
     const unsigned char uc = static_cast<unsigned char>(c);
     if ((uc >= 'a' && uc <= 'z') || (uc >= 'A' && uc <= 'Z') || (uc >= '0' && uc <= '9'))
       out.push_back(c);
@@ -478,9 +478,109 @@ std::string mermaid_node_id(const std::string& package_name) {
   return out;
 }
 
+std::string mermaid_node_id(const std::string& package_name) {
+  return std::string("pkg_") + mermaid_sanitize_id_chars(package_name);
+}
+
+std::string mermaid_target_node_id(const std::string& package_name, const std::string& target_name) {
+  return std::string("t_") + mermaid_sanitize_id_chars(package_name) + "__" + mermaid_sanitize_id_chars(target_name);
+}
+
+// Index-only diagrams: separate ids so they never collide with `t_*` link graphs.
+std::string mermaid_exe_index_node_id(const std::string& package_name, const std::string& target_name) {
+  return std::string("ex_") + mermaid_sanitize_id_chars(package_name) + "__" + mermaid_sanitize_id_chars(target_name);
+}
+
+std::string mermaid_lib_index_node_id(const std::string& package_name, const std::string& target_name) {
+  return std::string("lb_") + mermaid_sanitize_id_chars(package_name) + "__" + mermaid_sanitize_id_chars(target_name);
+}
+
+// Text inside Mermaid node labels `["..."]` must not break quoting or bracket parsing.
+std::string mermaid_escape_node_label(const std::string& s) {
+  std::string o;
+  o.reserve(s.size());
+  for (unsigned char uc : s) {
+    const char c = static_cast<char>(uc);
+    if (c == '"' || c == '[' || c == ']' || c == '\n' || c == '\r')
+      o.push_back('?');
+    else
+      o.push_back(c);
+  }
+  return o;
+}
+
+void emit_mermaid_target_index_diagrams(std::ofstream& f, const std::string& intra_pkg,
+                                        const std::vector<std::string>& names_sorted, bool as_executable_role,
+                                        std::size_t names_per_block) {
+  if (names_sorted.empty())
+    return;
+  const std::size_t n = names_sorted.size();
+  const std::size_t num_parts = (n + names_per_block - 1) / names_per_block;
+  for (std::size_t part = 0; part < num_parts; ++part) {
+    const std::size_t off = part * names_per_block;
+    const std::size_t end = std::min(off + names_per_block, n);
+    if (num_parts > 1)
+      f << "_Index block " << (part + 1) << " / " << num_parts << " (" << (end - off) << " targets)_\n\n";
+    f << "```mermaid\n";
+    f << "flowchart LR\n";
+    if (as_executable_role)
+      f << "  subgraph EXG" << part << " [Executables]\n";
+    else
+      f << "  subgraph LBG" << part << " [Libraries]\n";
+    f << "    direction TB\n";
+    for (std::size_t j = off; j < end; ++j) {
+      const std::string& nm = names_sorted[j];
+      const std::string nid =
+          as_executable_role ? mermaid_exe_index_node_id(intra_pkg, nm) : mermaid_lib_index_node_id(intra_pkg, nm);
+      const std::string role = as_executable_role ? "exe" : "lib";
+      f << "    " << nid << "[\"" << role << ": " << mermaid_escape_node_label(nm) << "\"]\n";
+    }
+    f << "  end\n";
+    f << "```\n\n";
+  }
+}
+
+void emit_target_link_mermaid_diagrams(std::ofstream& f, const std::string& intra_pkg,
+                                       const std::vector<std::pair<std::string, std::string>>& edges_in,
+                                       std::size_t edges_per_block) {
+  if (edges_in.empty())
+    return;
+  std::vector<std::pair<std::string, std::string>> edges = edges_in;
+  std::sort(edges.begin(), edges.end());
+  edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
+  const std::size_t n = edges.size();
+  const std::size_t num_parts = (n + edges_per_block - 1) / edges_per_block;
+  for (std::size_t part = 0; part < num_parts; ++part) {
+    const std::size_t off = part * edges_per_block;
+    const std::size_t end = std::min(off + edges_per_block, n);
+    if (num_parts > 1)
+      f << "_Mermaid block " << (part + 1) << " / " << num_parts << " (" << (end - off) << " edges)_\n\n";
+    std::set<std::string> node_names;
+    for (std::size_t j = off; j < end; ++j) {
+      node_names.insert(edges[j].first);
+      node_names.insert(edges[j].second);
+    }
+    f << "```mermaid\n";
+    f << "flowchart LR\n";
+    for (const auto& name : node_names) {
+      f << "  " << mermaid_target_node_id(intra_pkg, name) << "[\"" << mermaid_escape_node_label(name) << "\"]\n";
+    }
+    for (std::size_t j = off; j < end; ++j) {
+      const auto& e = edges[j];
+      f << "  " << mermaid_target_node_id(intra_pkg, e.first) << " --> " << mermaid_target_node_id(intra_pkg, e.second)
+        << "\n";
+    }
+    f << "```\n\n";
+  }
+}
+
 void write_packages_md(const std::filesystem::path& out_path,
                        const std::vector<std::pair<std::filesystem::path, PackageDesc>>& loaded_packages,
-                       const std::vector<std::filesystem::path>& scan_roots) {
+                       const std::vector<std::filesystem::path>& scan_roots,
+                       const std::vector<LoadedTarget>& all_targets,
+                       const std::string& intra_package_target_graph_pkg,
+                       const ConfigureGraphModel& graph_model,
+                       const std::vector<LoadedTarget>& build_targets) {
   std::ofstream f(out_path);
   if (!f) {
     std::cerr << "configure: warning: could not write " << to_posix_path_string(out_path) << "\n";
@@ -530,16 +630,32 @@ void write_packages_md(const std::filesystem::path& out_path,
 
   f << "# Package Dependencies\n\n";
   f << "Generated by `up configure` at `" << time_buf << "`.\n\n";
+  if (!intra_package_target_graph_pkg.empty()) {
+    f << "## Current package\n\n";
+    f << "- **Name:** `" << intra_package_target_graph_pkg << "`\n";
+    const auto it_dir = pkg_paths.find(intra_package_target_graph_pkg);
+    const auto it_xml = pkg_xml_paths.find(intra_package_target_graph_pkg);
+    if (it_dir != pkg_paths.end())
+      f << "- **Root directory:** `" << it_dir->second.generic_string() << "`\n";
+    if (it_xml != pkg_xml_paths.end())
+      f << "- **`package.xml`:** `" << it_xml->second.generic_string() << "`\n";
+    f << "\n";
+  }
   f << "## Scan Roots\n\n";
   for (const auto& root : scan_roots) {
     f << "- `" << std::filesystem::absolute(root).lexically_normal().generic_string() << "`\n";
   }
   f << "\n";
+  f << "## Package dependency graph (`package.xml`)\n\n";
+  f << "Edges are taken only from `package.xml` files found under **Scan Roots**. An arrow `A --> B` means "
+       "`B` is listed as a dependency of package `A` (dashed `A -.-> B` when optional). "
+       "If a dependency package is not scanned here, it appears as a node without edges sourced from its own "
+       "`package.xml`, so transitive package chains are incomplete unless those packages are also under the scan set.\n\n";
   f << "```mermaid\n";
-  f << "graph LR\n";
+  f << "flowchart LR\n";
   for (const auto& pkg_name : all_pkgs) {
     const auto pkg_id = mermaid_node_id(pkg_name);
-    f << "  " << pkg_id << "[\"" << pkg_name << "\"]\n";
+    f << "  " << pkg_id << "[\"" << mermaid_escape_node_label(pkg_name) << "\"]\n";
   }
   for (const auto& kv : deps) {
     const auto src_id = mermaid_node_id(kv.first);
@@ -561,6 +677,169 @@ void write_packages_md(const std::filesystem::path& out_path,
     const std::string xml_text =
         (it_xml != pkg_xml_paths.end()) ? ("`" + it_xml->second.generic_string() + "`") : "`(not in current scan set)`";
     f << "| `" << pkg_name << "` | " << dir_text << " | " << xml_text << " |\n";
+  }
+
+  bool any_intra_target_dep = false;
+  if (!intra_package_target_graph_pkg.empty()) {
+    for (const auto& lt : all_targets) {
+      if (lt.package_name != intra_package_target_graph_pkg)
+        continue;
+      for (const auto& dep_ref : lt.desc.dependencies) {
+        std::string dep_pkg;
+        std::string dep_tgt;
+        if (!split_dep_ref(dep_ref, lt.package_name, dep_pkg, dep_tgt))
+          continue;
+        if (dep_pkg == intra_package_target_graph_pkg) {
+          any_intra_target_dep = true;
+          break;
+        }
+      }
+      if (any_intra_target_dep)
+        break;
+    }
+  }
+  if (any_intra_target_dep) {
+    f << "\n## Target dependency graph (`target.xml`, package \"" << intra_package_target_graph_pkg << "\")\n\n";
+    f << "Only **intra-package** edges are shown: both endpoints are targets under package `" << intra_package_target_graph_pkg
+       << "` (from `<dependency name=\"...\"/>` entries in each `target.xml`). Links to targets in other packages are "
+          "omitted.\n\n";
+    f << "```mermaid\n";
+    f << "flowchart LR\n";
+    std::set<std::pair<std::string, std::string>> target_nodes;
+    for (const auto& lt : all_targets) {
+      if (lt.package_name != intra_package_target_graph_pkg)
+        continue;
+      for (const auto& dep_ref : lt.desc.dependencies) {
+        std::string dep_pkg;
+        std::string dep_tgt;
+        if (!split_dep_ref(dep_ref, lt.package_name, dep_pkg, dep_tgt))
+          continue;
+        if (dep_pkg != intra_package_target_graph_pkg)
+          continue;
+        target_nodes.insert({lt.package_name, lt.desc.name});
+        target_nodes.insert({dep_pkg, dep_tgt});
+      }
+    }
+    for (const auto& pr : target_nodes) {
+      f << "  " << mermaid_target_node_id(pr.first, pr.second) << "[\"" << mermaid_escape_node_label(pr.second)
+        << "\"]\n";
+    }
+    for (const auto& lt : all_targets) {
+      if (lt.package_name != intra_package_target_graph_pkg)
+        continue;
+      const auto src_id = mermaid_target_node_id(lt.package_name, lt.desc.name);
+      for (const auto& dep_ref : lt.desc.dependencies) {
+        std::string dep_pkg;
+        std::string dep_tgt;
+        if (!split_dep_ref(dep_ref, lt.package_name, dep_pkg, dep_tgt))
+          continue;
+        if (dep_pkg != intra_package_target_graph_pkg)
+          continue;
+        f << "  " << src_id << " --> " << mermaid_target_node_id(dep_pkg, dep_tgt) << "\n";
+      }
+    }
+    f << "```\n";
+  } else if (!intra_package_target_graph_pkg.empty() && graph_model.targets.size() == build_targets.size()) {
+    auto is_lib_target = [](const std::string& ty) {
+      return ty == "static_library" || ty == "shared_library" || ty == "imported_static_library" ||
+             ty == "imported_shared_library" || ty == "imported_installed_static_library" ||
+             ty == "imported_installed_shared_library";
+    };
+    std::set<std::string> primary_lib_names;
+    for (const auto& lt : all_targets) {
+      if (lt.package_name == intra_package_target_graph_pkg && is_lib_target(lt.desc.type))
+        primary_lib_names.insert(lt.desc.name);
+    }
+    std::vector<std::pair<std::string, std::string>> link_edges;
+    for (size_t i = 0; i < graph_model.targets.size(); ++i) {
+      const auto& lt = build_targets[i];
+      if (lt.package_name != intra_package_target_graph_pkg)
+        continue;
+      if (lt.desc.type != "executable")
+        continue;
+      for (const auto& link : graph_model.targets[i].links) {
+        if (!primary_lib_names.count(link))
+          continue;
+        if (link == lt.desc.name)
+          continue;
+        link_edges.push_back({lt.desc.name, link});
+      }
+    }
+    if (!link_edges.empty()) {
+      std::sort(link_edges.begin(), link_edges.end());
+      link_edges.erase(std::unique(link_edges.begin(), link_edges.end()), link_edges.end());
+      constexpr std::size_t k_link_edges_hard_cap = 8000;
+      const std::size_t total_edges = link_edges.size();
+      if (total_edges > k_link_edges_hard_cap)
+        link_edges.resize(k_link_edges_hard_cap);
+
+      f << "\n## Target link graph (configure-resolved, package \"" << intra_package_target_graph_pkg << "\")\n\n";
+      f << "No same-package `<dependency name=\"...\"/>` entries were found in `target.xml`. Output is based on "
+            "**resolved executable → library** link lines from `up configure`.\n\n"
+            "1. **By target type**: isolated **Executables** and **Libraries** index diagrams (no edges) so previews "
+            "do not mix hundreds of unrelated nodes with arrows.\n"
+            "2. **By library kind**: actual `exe → lib` edges are split into **compiled libraries** (`static_library` / "
+            "`shared_library`) vs **imported / installed** libraries; within each kind, Mermaid output is split only by "
+            "**edge count** (≤ 70 edges per block), with no target-name heuristics.\n\n";
+      if (total_edges > k_link_edges_hard_cap) {
+        f << "_Only the first " << k_link_edges_hard_cap << " edges (of " << total_edges << ") participate in the "
+             "split below._\n\n";
+      }
+
+      constexpr std::size_t k_edges_per_mermaid = 70;
+      constexpr std::size_t k_index_names_per_block = 55;
+
+      std::set<std::string> exe_name_set;
+      std::set<std::string> lib_name_set;
+      for (const auto& e : link_edges) {
+        exe_name_set.insert(e.first);
+        lib_name_set.insert(e.second);
+      }
+      std::vector<std::string> exe_names(exe_name_set.begin(), exe_name_set.end());
+      std::vector<std::string> lib_names(lib_name_set.begin(), lib_name_set.end());
+
+      f << "### By type — executable targets (" << exe_names.size() << ")\n\n";
+      f << "_Nodes only; link arrows appear under the library-kind sections below._\n\n";
+      emit_mermaid_target_index_diagrams(f, intra_package_target_graph_pkg, exe_names, true, k_index_names_per_block);
+
+      f << "### By type — library targets (" << lib_names.size() << ")\n\n";
+      f << "_Only libraries that appear as a link target for at least one executable in (1)._\n\n";
+      emit_mermaid_target_index_diagrams(f, intra_package_target_graph_pkg, lib_names, false, k_index_names_per_block);
+
+      std::map<std::string, std::string> target_type_by_name;
+      for (const auto& lt : all_targets) {
+        if (lt.package_name == intra_package_target_graph_pkg)
+          target_type_by_name[lt.desc.name] = lt.desc.type;
+      }
+      auto is_compiled_lib_type = [](const std::string& ty) {
+        return ty == "static_library" || ty == "shared_library";
+      };
+
+      std::vector<std::pair<std::string, std::string>> edges_compiled;
+      std::vector<std::pair<std::string, std::string>> edges_imported;
+      edges_compiled.reserve(link_edges.size());
+      edges_imported.reserve(link_edges.size());
+      for (const auto& e : link_edges) {
+        const auto tit = target_type_by_name.find(e.second);
+        std::string ty = "static_library";
+        if (tit != target_type_by_name.end())
+          ty = tit->second;
+        if (is_compiled_lib_type(ty))
+          edges_compiled.push_back(e);
+        else
+          edges_imported.push_back(e);
+      }
+
+      if (!edges_compiled.empty()) {
+        f << "### Link lines — compiled libraries (`static_library` / `shared_library`, " << edges_compiled.size()
+          << " edges)\n\n";
+        emit_target_link_mermaid_diagrams(f, intra_package_target_graph_pkg, edges_compiled, k_edges_per_mermaid);
+      }
+      if (!edges_imported.empty()) {
+        f << "### Link lines — imported / installed libraries (" << edges_imported.size() << " edges)\n\n";
+        emit_target_link_mermaid_diagrams(f, intra_package_target_graph_pkg, edges_imported, k_edges_per_mermaid);
+      }
+    }
   }
 }
 
@@ -1395,7 +1674,8 @@ int cmd_configure(const std::filesystem::path& cwd,
     cache_opts["UP_CMAKE_PREFIX_PATH"] = graph_model.cmake_prefix_path;
   cli_verbose_phase("configure", "write_cache");
   write_up_cache(cache_path, cwd, arch, primary_pkg.name, generated_file, roots_cached, cache_opts);
-  write_packages_md(cache_path.parent_path() / "packages.md", loaded_packages, roots_cached);
+  write_packages_md(cache_path.parent_path() / "packages.md", loaded_packages, roots_cached, all_targets,
+                    primary_pkg.name, graph_model, build_targets);
   if (equals_ci(build_system, "ninja")) {
     cli_verbose_phase("configure", "done_ninja");
     return 0;
