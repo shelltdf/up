@@ -9,7 +9,7 @@ namespace {
 // English-only: embedded copy of rules aligned with doc/package-target-xml-spec.md for AI/tools without repo .md.
 // Split into named chunks: MSVC ~16kB string literal limit; edit the slice you need.
 constexpr const char* kXmlSpecEnThroughSection3 =
-  R"SPEC(UP_XML_SPEC_REVISION=11
+  R"SPEC(UP_XML_SPEC_REVISION=12
 
 # up — package.xml and target.xml (machine-oriented summary)
 
@@ -203,7 +203,8 @@ outside the forms above.
 - `in` is relative to **`target.xml` directory**; `to` is relative to **`.intermediate/generated/<package>/<target>/`** and
   must be a safe relative path (no `..` segments, not absolute).
 - During **configure**, `up` reads each template, applies **`@NAME@`** and **`${NAME}`** substitution (same merged variable
-  map as §2b; unknown names are left unchanged) using the **full** merged variable map for target-level templates, then
+  map as §2b; unknown names are left unchanged), alternating both passes until nothing changes (max 64 rounds), using the
+  **full** merged variable map for target-level templates, then
   writes the output under the generated directory, and adds that file to the target’s compile sources. The target’s
   generated directory is also added as an **include directory** for `executable` / `static_library` / `shared_library`
   targets.

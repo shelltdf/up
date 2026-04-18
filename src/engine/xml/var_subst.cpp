@@ -166,8 +166,8 @@ std::string substitute_dollar_brace_vars(const std::string& text, const std::map
       out.append(text, d, text.size() - d);
       break;
     }
-    const std::string key = text.substr(d + 2, e - d - 2);
-    if (!std::regex_match(key, key_ok)) {
+    const std::string key = trim_ws(text.substr(d + 2, e - d - 2));
+    if (key.empty() || !std::regex_match(key, key_ok)) {
       out.append(text, d, e - d + 1);
       i = e + 1;
       continue;
@@ -184,6 +184,17 @@ std::string substitute_dollar_brace_vars(const std::string& text, const std::map
 
 std::string apply_cmakedefine_directives(const std::string& text, const std::map<std::string, std::string>& vars) {
   return apply_cmakedefine_directives_impl(text, vars);
+}
+
+std::string finalize_config_template_text(const std::string& text, const std::map<std::string, std::string>& vars) {
+  std::string out = text;
+  for (int iter = 0; iter < 64; ++iter) {
+    const std::string step = substitute_dollar_brace_vars(substitute_at_vars(out, vars), vars);
+    if (step == out)
+      break;
+    out = step;
+  }
+  return apply_cmakedefine_directives(out, vars);
 }
 
 bool eval_when(const std::string& when, const std::map<std::string, std::string>& vars, std::string& error_out) {

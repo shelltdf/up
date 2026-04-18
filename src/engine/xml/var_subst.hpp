@@ -29,7 +29,10 @@ std::string substitute_at_vars(const std::string& text, const std::map<std::stri
 // identifier. Does not interpret `$<...>` generator expressions.
 std::string substitute_dollar_brace_vars(const std::string& text, const std::map<std::string, std::string>& vars);
 
-// After `@KEY@` substitution: expand CMake-style `#cmakedefine` / `#cmakedefine01` lines using the same `vars` map
+// `<config_files>`: alternate `@KEY@` and `${KEY}` until fixed point (max 64 rounds), then `#cmakedefine` / `#cmakedefine01`.
+std::string finalize_config_template_text(const std::string& text, const std::map<std::string, std::string>& vars);
+
+// After `@` / `${}` substitution: expand CMake-style `#cmakedefine` / `#cmakedefine01` lines using the same `vars` map
 // (subset of CMake `configure_file`; unknown macros => false / #undef).
 std::string apply_cmakedefine_directives(const std::string& text, const std::map<std::string, std::string>& vars);
 

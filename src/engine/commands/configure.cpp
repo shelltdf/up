@@ -1630,8 +1630,7 @@ int cmd_configure(const std::filesystem::path& cwd,
         }
         std::ostringstream tbuf;
         tbuf << tin.rdbuf();
-        const std::string rendered = apply_cmakedefine_directives(
-            substitute_dollar_brace_vars(substitute_at_vars(tbuf.str(), src_vars), src_vars), src_vars);
+        const std::string rendered = finalize_config_template_text(tbuf.str(), src_vars);
         const auto out_path = (gen_pkg_root / rel_out).lexically_normal();
         std::error_code mk_ec;
         std::filesystem::create_directories(out_path.parent_path(), mk_ec);
@@ -1750,8 +1749,7 @@ int cmd_configure(const std::filesystem::path& cwd,
         }
         std::ostringstream tbuf;
         tbuf << tin.rdbuf();
-        const std::string rendered = apply_cmakedefine_directives(
-            substitute_dollar_brace_vars(substitute_at_vars(tbuf.str(), src_vars), src_vars), src_vars);
+        const std::string rendered = finalize_config_template_text(tbuf.str(), src_vars);
         const auto out_path = (gen_root / rel_out).lexically_normal();
         std::error_code mk_ec;
         std::filesystem::create_directories(out_path.parent_path(), mk_ec);
