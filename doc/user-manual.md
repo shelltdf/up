@@ -83,7 +83,12 @@ $ARCH = .\_build\Release\up.exe print-build-dir-name
 
 ### 和仓库脚本的边界
 
-仓库根目录的 `build.py` / `install.py` 只负责构建并安装宿主工具 `up.exe` / `up-gui.exe`。它们**不会**构建 `test_projects` 里的示例包。
+仓库根目录的 `build.py` / `install.py` 只负责构建并安装宿主工具 `up.exe` / `up-gui.exe`（可选安装 `up.lib` 开发库）。它们**不会**构建 `test_projects` 里的示例包。
+
+源码结构上，`up` 已拆分为：
+
+- `src/exe/`：CLI 入口与命令分发（`up.exe`）
+- `src/lib/`：核心实现（`up.lib`，含 `engine` / `infra`）
 
 ---
 
@@ -221,11 +226,18 @@ $ARCH = .\_build\Release\up.exe print-build-dir-name
 - `up run --install-dir-name <名> <target-name>`
 - `up test --install-dir-name <名> [test-target-name]`
 - `up pack --install-dir-name <名>...`
+- `up list [--format tree|json|xml] [--xml <path>] [--json <path>] [--quiet]`
 - `up spec` / `up print-build-dir-name`
 - `up project ...`（**需**宿主 `up` 以 **`-DUP_ENABLE_PROJECT=ON`** 构建；否则子命令不可用）
   - 默认：若探测到 **CMake** 工程，写入 **`<cmake source_dir="..."/>`**，并尽量从 `install(TARGETS ...)` 自动生成 `imported_installed_*` 包装 `target.xml`（默认落在 `.targets/<name>/target.xml`，目标名优先使用 CMake target 名，解析不到时仅生成 package.xml 并给出提示）。
   - `package.xml` 的 `name` 默认优先取 `CMakeLists.txt` 的 `project(...)` 名（若未解析到则回退目录名；`--package-name` 仍可覆盖）。
-  - **`--legacy-cmake-parse`**：恢复旧的「从 `CMakeLists.txt` 猜 `add_library`/`add_executable`」行为。
+
+`list` 参数行为摘要：
+
+- stdout 由 `--format` 决定：`tree`（默认）/`json`/`xml`。
+- `--xml <path>` 与 `--json <path>` 是文件导出，可与任意 stdout 格式并存。
+- `--quiet` 抑制树形文本与导出提示，但不抑制 `--format json|xml` 的主载荷。
+- 某些组合只告警不失败（例如 `--format json + --xml <path>`）。
 
 ### 4.4 在单包目录工作
 

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<up_dom>
+  <global name="global">
+    <package name="rock_stack" version="0.1.0" path="E:/ai_github/up/test_projects/rock_stack/package.xml">
+      <target name="rock_app_one" type="executable" path="E:/ai_github/up/test_projects/rock_stack/app/rock_app_one/target.xml">
+      </target>
+      <target name="rock_app_two" type="executable" path="E:/ai_github/up/test_projects/rock_stack/app/rock_app_two/target.xml">
+      </target>
+      <target name="rockBase" type="static_library" path="E:/ai_github/up/test_projects/rock_stack/src/rockBase/target.xml">
+      </target>
+      <target name="rockBus" type="static_library" path="E:/ai_github/up/test_projects/rock_stack/src/rockBus/target.xml">
+      </target>
+      <target name="rockNet" type="static_library" path="E:/ai_github/up/test_projects/rock_stack/src/rockNet/target.xml">
+      </target>
+      <target name="rockBase_test" type="executable" path="E:/ai_github/up/test_projects/rock_stack/test/rockBase_test/target.xml">
+      </target>
+      <target name="rockBus_test" type="executable" path="E:/ai_github/up/test_projects/rock_stack/test/rockBus_test/target.xml">
+      </target>
+      <target name="rockNet_test" type="executable" path="E:/ai_github/up/test_projects/rock_stack/test/rockNet_test/target.xml">
+      </target>
+    </package>
+  </global>
+</up_dom>

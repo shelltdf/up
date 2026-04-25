@@ -2,11 +2,12 @@
 
 ```mermaid
 flowchart TB
-  subgraph cli [CLI]
+  subgraph exe [src/exe]
     main[main.cpp]
   end
-  subgraph cmds [commands]
+  subgraph libcmd [src/lib/engine/commands]
     configure[configure]
+    list[list]
     build[build]
     run[run]
     test[test]
@@ -14,13 +15,21 @@ flowchart TB
     spec[spec]
     project[project optional]
   end
-  subgraph backends [backends]
+  subgraph libback [src/lib/engine/backends]
     cmake[cmake_backend]
     ninja[ninja_backend]
     ctest[ctest_backend]
     archive[archive_backend]
   end
-  main --> configure & build & run & test & pack & spec & project
+  subgraph libinfra [src/lib/infra]
+    i18n[i18n]
+    paths[paths]
+  end
+  main --> configure & list & build & run & test & pack & spec & project
+  main -.shared.-> i18n & paths
+  configure -.shared.-> i18n & paths
+  list -.shared.-> i18n & paths
+  build -.shared.-> i18n & paths
   build --> cmake & ninja
   test --> ctest
   pack --> archive

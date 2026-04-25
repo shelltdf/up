@@ -7,7 +7,7 @@ cmake -S . -B _build -G "Visual Studio 17 2022" -A x64
 cmake --build _build --config Release
 ```
 
-可选开启 **`project`** 子命令（会增加 `src/engine/project/*` 等编译单元）：
+可选开启 **`project`** 子命令（会增加 `src/lib/engine/project/*` 等编译单元）：
 
 ```powershell
 cmake -S . -B _build -G "Visual Studio 17 2022" -A x64 -DUP_ENABLE_PROJECT=ON

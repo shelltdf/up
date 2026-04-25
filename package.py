@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Pack up.exe and up-gui.exe into a distributable archive (zip / tar.gz).
+"""Pack up.exe/up-gui.exe (+ optional up.lib) into an archive.
 
 默认只打包宿主工具，与 test_projects/ 无关。
 约定：package.py 会先执行 install.py；install.py 会先执行 build.py。
@@ -18,7 +18,7 @@ import zipfile
 from pathlib import Path
 
 
-def _run_install_py(root: Path, build_dir: Path, config: str, prefix: Path) -> int:
+def _run_install_py(root: Path, build_dir: Path, config: str, prefix: Path, with_dev: bool) -> int:
     cmd = [
         sys.executable,
         str(root / "install.py"),
@@ -29,6 +29,8 @@ def _run_install_py(root: Path, build_dir: Path, config: str, prefix: Path) -> i
         "--prefix",
         str(prefix),
     ]
+    if with_dev:
+        cmd.append("--with-dev")
     print("+", " ".join(cmd), flush=True)
     return subprocess.call(cmd, cwd=str(root))
 
@@ -56,32 +58,38 @@ def _default_archive_path(root: Path, fmt: str, config: str) -> Path:
     return (root / "dist" / f"{base}{ext}").resolve()
 
 
-def _readme_bytes() -> bytes:
+def _readme_bytes(with_dev: bool) -> bytes:
     text = (
         "Contents:\n"
         "  bin/up (or up.exe)\n"
-        "  bin/up-gui (or up-gui.exe)\n\n"
+        "  bin/up-gui (or up-gui.exe)\n"
+        + ("  lib/up.lib\n" if with_dev else "")
+        + "\n"
         "Keep both binaries in the same directory.\n"
         "up-gui runs up from the same folder.\n"
     )
     return text.encode("utf-8")
 
 
-def _write_zip(out: Path, up: Path, gui: Path) -> None:
+def _write_zip(out: Path, up: Path, gui: Path, dev_lib: Path | None) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
-    readme = _readme_bytes()
+    readme = _readme_bytes(dev_lib is not None)
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.write(up, f"bin/{up.name}")
         zf.write(gui, f"bin/{gui.name}")
+        if dev_lib is not None:
+            zf.write(dev_lib, f"lib/{dev_lib.name}")
         zf.writestr("README_PACKAGE.txt", readme)
 
 
-def _write_tar_gz(out: Path, up: Path, gui: Path) -> None:
+def _write_tar_gz(out: Path, up: Path, gui: Path, dev_lib: Path | None) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
-    readme = _readme_bytes()
+    readme = _readme_bytes(dev_lib is not None)
     with tarfile.open(out, "w:gz") as tf:
         tf.add(up, arcname=f"bin/{up.name}")
         tf.add(gui, arcname=f"bin/{gui.name}")
+        if dev_lib is not None:
+            tf.add(dev_lib, arcname=f"lib/{dev_lib.name}")
         ti = tarfile.TarInfo(name="README_PACKAGE.txt")
         ti.size = len(readme)
         tf.addfile(ti, fileobj=io.BytesIO(readme))
@@ -103,6 +111,11 @@ def main() -> int:
         default="auto",
         help="auto: Windows 用 zip，其它平台用 tar.gz",
     )
+    ap.add_argument(
+        "--with-dev",
+        action="store_true",
+        help="Also include up.lib (installs up_dev component before packing)",
+    )
     ap.add_argument("-o", "--output", type=Path, default=None, help="输出归档路径（默认 dist/up-tools_*.zip）")
     args = ap.parse_args()
     build_dir = args.build_dir
@@ -113,9 +126,17 @@ def main() -> int:
         prefix = (root / prefix).resolve()
 
     # 约定：package.py 总是先执行 install.py（install.py 内会先 build.py）。
-    code = _run_install_py(root, build_dir, args.config, prefix)
+    code = _run_install_py(root, build_dir, args.config, prefix, args.with_dev)
     if code != 0:
         return code
+    dev_lib: Path | None = None
+    if args.with_dev:
+        candidate = prefix / "lib" / "up.lib"
+        if not candidate.is_file():
+            print("error: --with-dev requested but lib/up.lib not found under prefix", file=sys.stderr)
+            return 2
+        dev_lib = candidate
+
 
     try:
         up, gui = _find_installed_up_pair(prefix)
@@ -134,9 +155,9 @@ def main() -> int:
         out = (root / out).resolve()
 
     if fmt == "zip":
-        _write_zip(out, up, gui)
+        _write_zip(out, up, gui, dev_lib)
     else:
-        _write_tar_gz(out, up, gui)
+        _write_tar_gz(out, up, gui, dev_lib)
 
     print("wrote", out)
     return 0

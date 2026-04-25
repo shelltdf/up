@@ -61,7 +61,12 @@ In C/C++ projects, common pain points are:
 
 ### Boundary with repo scripts
 
-`build.py` and `install.py` only build/install host tools (`up.exe`, `up-gui.exe`). They do not build packages under `test_projects`.
+`build.py` and `install.py` only build/install host tools (`up.exe`, `up-gui.exe`, and optional `up.lib` as dev component). They do not build packages under `test_projects`.
+
+Source layout is split as:
+
+- `src/exe/`: CLI entry and command dispatch (`up.exe`)
+- `src/lib/`: core implementation (`up.lib`, including `engine` and `infra`)
 
 ---
 
@@ -198,11 +203,18 @@ Common commands (see also `up --help`):
 - `up run --install-dir-name <name> <target-name>`
 - `up test --install-dir-name <name> [test-target-name]`
 - `up pack --install-dir-name <name>...`
+- `up list [--format tree|json|xml] [--xml <path>] [--json <path>] [--quiet]`
 - `up spec` / `up print-build-dir-name`
 - `up project ...` (**requires** a host `up` built with **`-DUP_ENABLE_PROJECT=ON`**)
   - **Default** when a **CMake** tree is detected: writes **`<cmake source_dir="..."/>`** and tries to auto-generate `imported_installed_*` wrapper `target.xml` files from `install(TARGETS ...)` rules (written under `.targets/<name>/target.xml`, target names prefer CMake target names). If parsing fails, only `package.xml` is written with warnings.
   - `package.xml` `name` prefers the CMake `project(...)` name by default (falls back to directory name when unresolved; `--package-name` still overrides).
-  - **`--legacy-cmake-parse`**: restore heuristic `add_library` / `add_executable` import into `target.xml`.
+
+`list` option behavior summary:
+
+- stdout payload is selected by `--format`: `tree` (default), `json`, or `xml`.
+- `--xml <path>` and `--json <path>` are file exports and can be combined with any stdout format.
+- `--quiet` suppresses tree text and export hint lines, but does not suppress payload for `--format json|xml`.
+- Some option combinations are warning-only (no failure), such as `--format json + --xml <path>`.
 
 ### 4.4 Work in a single package directory
 

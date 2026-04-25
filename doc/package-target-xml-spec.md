@@ -1,6 +1,6 @@
 ﻿# `package.xml` 与 `target.xml` 规范说明
 
-本文档描述 **up** 当前实现对两种描述文件的**解析约定**与 **configure** 阶段的**语义约束**。实现采用轻量正则扫描（见 `src/engine/xml/simple_xml.cpp`），**不是**完整 XML 校验器：建议仍写成良构 XML，并遵守下列可识别形态。与 **`up spec`** 内嵌英文规范不一致时，以 **`up spec`** 与源码为准；本文件侧重中文说明与仓库内交叉引用。
+本文档描述 **up** 当前实现对两种描述文件的**解析约定**与 **configure** 阶段的**语义约束**。实现采用轻量正则扫描（见 `src/lib/engine/xml/simple_xml.cpp`），**不是**完整 XML 校验器：建议仍写成良构 XML，并遵守下列可识别形态。与 **`up spec`** 内嵌英文规范不一致时，以 **`up spec`** 与源码为准；本文件侧重中文说明与仓库内交叉引用。
 
 ---
 
@@ -190,7 +190,7 @@
 - **未实现（勿依赖；写了也不会按条件生效）**：**`<assets>`**、**`<define>`**、**`<dependency/>`**、**`<config_files>`** 内 **`<file>`**、**`<var>`**、包级行、**`<prebuilt/>`**、**`<install/>`**、预处理/后处理子标签、以及 **`<package>` / `<target>` 根标签**。
 - 产品上可为更多「行级」配置逐步统一 `when`，但需逐类定义语义并实现（例如跳过依赖与「未声明依赖」的边界）。
 
-#### `when` 表达式语法（与 `eval_when`，`src/engine/xml/var_subst.cpp` 一致）
+#### `when` 表达式语法（与 `eval_when`，`src/lib/engine/xml/var_subst.cpp` 一致）
 
 对 `when="..."` 的字符串先做 **ASCII 首尾空白** 修剪，再按下列 **唯一一种** 形式匹配（**自上而下**；整串须完全属于该形式）：
 
@@ -215,7 +215,7 @@
 - **目标级**（`target.xml`）：块 **`<config_files>...</config_files>`**，内为 **`<file in="模板相对路径" to="输出相对路径"/>`**（`in`、`to` 均必填）。`in` 相对 **`target.xml` 所在目录**；`to` 相对 **`.intermediate/generated/<包名>/<目标名>/`**，且须为安全相对路径（**不得**含 `..` 段、不得为绝对路径）。**`@NAME@`** 使用 **§3.5 完整变量层**。生成文件加入**该目标**的编译源列表，并把 **`generated/<包名>/<目标名>/`** 加入该目标的 **编译期 include 路径**。
 - **包级**（`package.xml`）：形状相同；`in` 相对 **包根**；`to` 相对 **`.intermediate/generated/<包名>/_package/`**（保留名 **`_package`**）。**`@NAME@` / `${NAME}`** 使用 **包级 `<vars>` + 本包内全部目标的 `<vars>`**（顺序与叠加规则见上）+ 工作区；**`UP_TARGET_NAME`** 默认为空。生成文件加入本包内**所有**原生编译目标的源列表，并把 **`generated/<包名>/_package/`** 加入这些目标的 **include 路径**。
 - **`${NAME}`**（CMake **`configure_file`** 风格）：与 **`@NAME@`** 使用**同一套**合并后的变量表；`NAME` 须为 C 标识符（`${` 与 `}` 之间允许首尾空白）。**先做占位符收集**：模板里出现但表中**没有**的 `NAME` 会**以空串加入表**，再交替替换，故未在 XML / `--opt` 声明的占位符会变成**空展开**（不再保留 `${NAME}`）；需要非空内容必须在 **`<vars>`** 或 **`--opt`** 中提供。不解析 **`$<...>`** 生成器表达式。处理顺序：**反复交替 `@NAME@` 与 `${NAME}` 至不再变化（有上限）**，最后再做 **`#cmakedefine`**。
-- **`#cmakedefine` / `#cmakedefine01`**：在上述占位符替换之后，按与 CMake **`configure_file`** 相近的**子集**处理（见 `src/engine/xml/var_subst.cpp` 中 `apply_cmakedefine_directives`）：未出现在合并变量表、或值为空 / `0` / `false` / `off` / `no` 视为假；`#cmakedefine01` 展开为 **`#define NAME 0`** 或 **`1`**；`#cmakedefine NAME` 为真则 **`#define NAME`**，否则 **`/* #undef NAME */`**；带尾部内容的 **`#cmakedefine NAME …`** 为真则输出 **`#define NAME …`**。用于 zlib 等 **`zconf.h.in`** 类模板；**不是**完整 CMake 生成器。
+- **`#cmakedefine` / `#cmakedefine01`**：在上述占位符替换之后，按与 CMake **`configure_file`** 相近的**子集**处理（见 `src/lib/engine/xml/var_subst.cpp` 中 `apply_cmakedefine_directives`）：未出现在合并变量表、或值为空 / `0` / `false` / `off` / `no` 视为假；`#cmakedefine01` 展开为 **`#define NAME 0`** 或 **`1`**；`#cmakedefine NAME` 为真则 **`#define NAME`**，否则 **`/* #undef NAME */`**；带尾部内容的 **`#cmakedefine NAME …`** 为真则输出 **`#define NAME …`**。用于 zlib 等 **`zconf.h.in`** 类模板；**不是**完整 CMake 生成器。
 
 **CMake 与 Ninja**：两后端均直接消费 **已由 up 写出的生成文件**（与普通源文件相同），当前实现**不**为此生成 CMake 的 `configure_file()`。若需要完整上游 CMake `configure_file` 语义，请使用 **`<cmake/>`** 子工程。
 
@@ -266,10 +266,10 @@
 
 | 话题 | 源码位置 |
 |------|----------|
-| 解析 `package.xml` / `target.xml` | `src/engine/xml/simple_xml.cpp`（`load_package_xml` / `load_target_xml`） |
-| 依赖校验、生成后端 | `src/engine/commands/configure.cpp` |
-| 变量合并、`@KEY@`、`when` | `src/engine/xml/var_subst.cpp` |
-| 数据结构 | `src/engine/xml/simple_xml.hpp`（`PackageDesc` / `TargetDesc`） |
+| 解析 `package.xml` / `target.xml` | `src/lib/engine/xml/simple_xml.cpp`（`load_package_xml` / `load_target_xml`） |
+| 依赖校验、生成后端 | `src/lib/engine/commands/configure.cpp` |
+| 变量合并、`@KEY@`、`when` | `src/lib/engine/xml/var_subst.cpp` |
+| 数据结构 | `src/lib/engine/xml/simple_xml.hpp`（`PackageDesc` / `TargetDesc`） |
 
 后续若引入 XSD/JSON Schema，可在本文件顶部增加版本号与变更记录。
 
@@ -286,5 +286,5 @@
 - 规则边界：`up` / `up-gui` 不内置针对具体第三方项目（库名、仓库名、目录布局）的特判逻辑；行为必须由 `package.xml` / `target.xml` 显式配置驱动。
 - 目标名优先使用 CMake target 名（必要时做 sanitize / 去重）。
 - 包名默认优先取 `CMakeLists.txt` 中 `project(...)` 名；若无法解析则回退目录名（`--package-name` 仍最高优先）。
-- `install(TARGETS ...)` 解析不到库规则时，仅生成 `package.xml` 并输出提示；可改用 `--legacy-cmake-parse` 或手工补充 `target.xml`。
+- `install(TARGETS ...)` 解析不到库规则时，仅生成 `package.xml` 并输出提示；可手工补充 `target.xml`。
 - 对声明的依赖包，若可从其 `imported_installed_*` 目标推导出安装库/头路径，`configure` 会向主包上游 CMake 额外注入常见缓存变量（如 `<PKG>_LIBRARY` / `<PKG>_LIBRARY_DEBUG` / `<PKG>_INCLUDE_DIR` 等）以辅助 `find_package`；Windows 下优先使用 `implib` 或 `.lib`，避免把 `.dll` 注入链接库变量。

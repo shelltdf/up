@@ -4,17 +4,17 @@
 
 ```mermaid
 flowchart LR
-  CLI[src/cli] --> CMD[src/engine/commands]
-  CMD --> BACK[src/engine/backends]
-  CMD --> XML[src/engine/xml]
-  CMD --> INFRA[src/infra]
+  CLI[src/exe] --> CMD[src/lib/engine/commands]
+  CMD --> BACK[src/lib/engine/backends]
+  CMD --> XML[src/lib/engine/xml]
+  CMD --> INFRA[src/lib/infra]
   GUI[src_gui] -->|spawn| CLI
 ```
 
 - **CLI**：解析 argv，校验全局选项，按子命令名分发。
 - **命令层**：实现业务编排（扫描、建图、写缓存、调后端）。
 - **后端层**：隔离 CMake / Ninja / CTest / 归档等外部工具调用细节。
-- **GUI**：不链接 `src/`；通过子进程调用 `up`，传递 cwd 与参数。
+- **GUI**：不链接 `src/lib/` 或 `src/exe/`；通过子进程调用 `up`，传递 cwd 与参数。
 
 ## 主数据流
 

@@ -10,7 +10,7 @@
 
 - **`run` / `test` / `pack` 使用**：`--install-dir-name <installLeaf>`。
 - **语义**：`<cwd>/.intermediate/install/<installLeaf>/`。
-- **与 `<leaf>` 的关系**：通常 **`<installLeaf>` 应等于 `up_cache.txt` 中的 `arch` 字段**，而不是构建叶子名 `default`。`build` 实现将安装前缀设为 `default_install_root(cwd) / arch`（见 `src/engine/commands/build.cpp`）。
+- **与 `<leaf>` 的关系**：通常 **`<installLeaf>` 应等于 `up_cache.txt` 中的 `arch` 字段**，而不是构建叶子名 `default`。`build` 实现将安装前缀设为 `default_install_root(cwd) / arch`（见 `src/lib/engine/commands/build.cpp`）。
 - **获取方式**：在同一 cwd 下执行 **`up print-build-dir-name`**（默认读取 `.intermediate/build/default/up_cache.txt`，亦可通过 `--build-dir-name` / `--opt` 与 configure 对齐）。
 
 ## 典型脚本序列（PowerShell）
@@ -29,5 +29,5 @@ $ARCH = .\path\to\up.exe print-build-dir-name
 
 ## `project` 子命令
 
-- 预处理/探测外部工程并生成 `package.xml` 与 `.targets/` 等；实现位于 `src/engine/project/*`（条件编译）。
+- 预处理/探测外部工程并生成 `package.xml` 与 `.targets/` 等；实现位于 `src/lib/engine/project/*`（条件编译）。
 - **若二进制未带 `UP_ENABLE_PROJECT=1`**：`up project` 固定失败并提示使用 `-DUP_ENABLE_PROJECT=ON` 重编译。

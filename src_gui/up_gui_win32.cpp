@@ -9,6 +9,8 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <commctrl.h>
+#include <commdlg.h>
+#include <shellapi.h>
 #include <shobjidl.h>
 
 // Vista+ thread right for CancelSynchronousIo; not declared when targeting older _WIN32_WINNT.
@@ -61,6 +63,8 @@ constexpr int IDC_PATH = 101;
 constexpr int IDC_BROWSE = 102;
 constexpr int IDC_CONFIGURE = 103;
 constexpr int IDC_PROJECT = 139;
+constexpr int IDC_LIST = 141;
+constexpr int IDC_LIST_HINT = 142;
 constexpr int IDC_BUILD = 104;
 constexpr int IDC_TEST = 105;
 constexpr int IDC_RUN = 106;
@@ -268,7 +272,7 @@ static const GUID kPickFolderClientGuidAndroidSdk = {0xa8b3f2c1u, 0x2d4eu, 0x5f6
 static const GUID kPickFolderClientGuidAndroidNdk = {0xa8b3f2c1u, 0x2d4eu, 0x5f67u, {0x90u, 0x12u, 0xabu, 0xcdu, 0xefu, 0x01u, 0x23u, 0x44u}};
 static const GUID kPickFolderClientGuidEmsdk = {0xa8b3f2c1u, 0x2d4eu, 0x5f67u, {0x90u, 0x12u, 0xabu, 0xcdu, 0xefu, 0x01u, 0x23u, 0x45u}};
 
-// 与 src/engine/commands/commands_common.cpp 中 default_parallel_jobs_hardware() 的 Windows 分支保持一致：
+// 与 src/lib/engine/commands/commands_common.cpp 中 default_parallel_jobs_hardware() 的 Windows 分支保持一致：
 // 优先 GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)，再 GetNativeSystemInfo，再 STL，最后 4。
 unsigned PreferredLogicalCpuCountForGuiDefaults() {
   const DWORD active = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
@@ -327,6 +331,45 @@ std::string WideToUtf8(std::wstring_view ws) {
 std::wstring Utf8ToWide(std::string_view utf8) {
   if (utf8.empty())
     return {};
+  auto decode_utf16_bytes = [](std::string_view bytes, bool little_endian) -> std::wstring {
+    if (bytes.size() < 2)
+      return {};
+    std::wstring out;
+    out.reserve(bytes.size() / 2);
+    for (size_t i = 0; i + 1 < bytes.size(); i += 2) {
+      const unsigned char b0 = static_cast<unsigned char>(bytes[i]);
+      const unsigned char b1 = static_cast<unsigned char>(bytes[i + 1]);
+      const unsigned short code = little_endian ? static_cast<unsigned short>(b0 | (b1 << 8))
+                                                 : static_cast<unsigned short>((b0 << 8) | b1);
+      out.push_back(static_cast<wchar_t>(code));
+    }
+    return out;
+  };
+  auto looks_utf16_stream = [](std::string_view bytes, bool little_endian) -> bool {
+    if (bytes.size() < 6)
+      return false;
+    size_t zeros = 0;
+    size_t checked = 0;
+    const size_t limit = (std::min)(bytes.size(), static_cast<size_t>(128));
+    // UTF-16LE text usually has many zeros in odd bytes for ASCII-ish content.
+    for (size_t i = little_endian ? 1 : 0; i < limit; i += 2) {
+      ++checked;
+      if (bytes[i] == '\0')
+        ++zeros;
+    }
+    return checked >= 8 && zeros * 100 / checked >= 60;
+  };
+  const auto* raw = reinterpret_cast<const unsigned char*>(utf8.data());
+  if (utf8.size() >= 2) {
+    if (raw[0] == 0xFF && raw[1] == 0xFE)
+      return decode_utf16_bytes(utf8.substr(2), true);
+    if (raw[0] == 0xFE && raw[1] == 0xFF)
+      return decode_utf16_bytes(utf8.substr(2), false);
+  }
+  if (looks_utf16_stream(utf8, true))
+    return decode_utf16_bytes(utf8, true);
+  if (looks_utf16_stream(utf8, false))
+    return decode_utf16_bytes(utf8, false);
   auto looks_mojibake_zh = [](const std::wstring& s) -> bool {
     static const wchar_t* kBadMarks[] = {
         L"閫傜敤浜", L"鐗堟湰", L"姝ｅ湪", L"鍒涘缓", L"缂栬瘧", L"鎿嶄綔",
@@ -2261,7 +2304,7 @@ void RefreshInstallDirDisplay(const std::filesystem::path& cache_path, const std
   SetWindowTextW(g_install_dir, install_dir.c_str());
 }
 
-// 与 src/engine/commands/commands_common.cpp 中 up_mergeable_option_key 语义对齐（up-gui 不链接引擎）。
+// 与 src/lib/engine/commands/commands_common.cpp 中 up_mergeable_option_key 语义对齐（up-gui 不链接引擎）。
 bool GuiMergeableCacheKeyUtf8(const std::string& k) {
   if (k.empty())
     return false;
@@ -2930,6 +2973,7 @@ void SetUiRunning(bool running) {
 #if UP_ENABLE_PROJECT
     SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_PROJECT, static_cast<LPARAM>(!running));
 #endif
+    SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_LIST, static_cast<LPARAM>(!running));
     SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_CONFIGURE, static_cast<LPARAM>(!running));
     SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_BUILD, static_cast<LPARAM>(!running));
     SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_RUN, static_cast<LPARAM>(!running));
@@ -2968,6 +3012,7 @@ void SetUiRunning(bool running) {
 #if UP_ENABLE_PROJECT
     EnableMenuItem(menu, IDC_PROJECT, running ? gray : ena);
 #endif
+    EnableMenuItem(menu, IDC_LIST, running ? gray : ena);
     EnableMenuItem(menu, IDC_CONFIGURE, running ? gray : ena);
     EnableMenuItem(menu, IDC_BUILD, running ? gray : ena);
     EnableMenuItem(menu, IDC_TEST, running ? gray : ena);
@@ -3404,6 +3449,7 @@ void CreateMainMenu(HWND hwnd) {
 #if UP_ENABLE_PROJECT
   AppendMenuW(tools, MF_STRING, IDC_PROJECT, T(L"工程(&J)", L"pro&ject"));
 #endif
+  AppendMenuW(tools, MF_STRING, IDC_LIST, T(L"列表(&L)", L"&list"));
   AppendMenuW(tools, MF_STRING, IDC_CONFIGURE, T(L"配置(&C)", L"&configure"));
   AppendMenuW(tools, MF_STRING, IDC_BUILD, T(L"编译(&B)", L"&build"));
   AppendMenuW(tools, MF_STRING, IDC_TEST, T(L"测试(&T)", L"&test"));
@@ -3567,6 +3613,759 @@ void ShowUpHelpInfo(HWND hwnd) {
     ss << L"[exit code " << static_cast<unsigned long>(exit_code) << L"]\r\n";
   ShowUpHelpDialog(hwnd, ss.str());
   SetStatusRunHelpLoaded();
+}
+
+struct UpListDialogState {
+  std::wstring text;
+  std::wstring up_exe;
+  std::wstring cwd;
+  std::wstring last_export_path;
+  HWND tree{};
+  HWND lbl_hint{};
+  HWND lbl_detail{};
+  HWND edit_detail{};
+  HWND btn_expand{};
+  HWND btn_collapse{};
+  HWND btn_export_json{};
+  HWND btn_export_xml{};
+  HWND btn_open_dir{};
+  HWND btn_copy{};
+  HWND btn_close{};
+  HIMAGELIST tree_images{};
+};
+
+std::wstring BuildUpListDialogTitle(const UpListDialogState* st) {
+  std::wstring cwd_label = st->cwd;
+  if (cwd_label.empty())
+    cwd_label = T(L"(未设置)", L"(unset)");
+  if (cwd_label.size() > 48) {
+    const size_t keep = 22;
+    cwd_label = cwd_label.substr(0, keep) + L"..." + cwd_label.substr(cwd_label.size() - keep);
+  }
+
+  std::wstringstream ss;
+  ss << T(L"DOM 列表 - CWD: ", L"DOM List - CWD: ") << cwd_label;
+  if (!st->last_export_path.empty()) {
+    std::wstring export_name = st->last_export_path;
+    try {
+      std::filesystem::path ep(st->last_export_path);
+      const std::wstring f = ep.filename().wstring();
+      if (!f.empty())
+        export_name = f;
+    } catch (...) {
+    }
+    ss << T(L" | 最近导出: ", L" | Last export: ") << export_name;
+  }
+  return ss.str();
+}
+
+void RefreshUpListDialogTitle(HWND hwnd, const UpListDialogState* st) {
+  SetWindowTextW(hwnd, BuildUpListDialogTitle(st).c_str());
+  if (st->lbl_hint) {
+    std::wstring hint = T(L"当前 CWD: ", L"CWD: ");
+    hint += st->cwd.empty() ? T(L"(未设置)", L"(unset)") : st->cwd;
+    SetWindowTextW(st->lbl_hint, hint.c_str());
+  }
+}
+
+int list_line_indent_level(const std::wstring& line) {
+  int spaces = 0;
+  for (wchar_t ch : line) {
+    if (ch == L' ') {
+      ++spaces;
+      continue;
+    }
+    if (ch == L'\t') {
+      spaces += 2;
+      continue;
+    }
+    break;
+  }
+  return spaces / 2;
+}
+
+std::wstring list_line_label_text(const std::wstring& line) {
+  size_t i = 0;
+  while (i < line.size() && (line[i] == L' ' || line[i] == L'\t'))
+    ++i;
+  while (i < line.size()) {
+    const wchar_t ch = line[i];
+    if (ch == L'|' || ch == L'+' || ch == L'-' || ch == L'>' || ch == L'`' || ch == 0x2502 || ch == 0x251c ||
+        ch == 0x2514 || ch == 0x2500 || ch == L' ') {
+      ++i;
+      continue;
+    }
+    break;
+  }
+  std::wstring label = line.substr(i);
+  TrimInPlace(label);
+  return label;
+}
+
+std::vector<std::wstring> parse_dependencies_from_label(const std::wstring& label) {
+  std::vector<std::wstring> out;
+  const std::wstring key = L"deps=";
+  const size_t p = label.find(key);
+  if (p == std::wstring::npos)
+    return out;
+  std::wstring deps = label.substr(p + key.size());
+  TrimInPlace(deps);
+  if (deps.empty())
+    return out;
+  size_t off = 0;
+  while (off <= deps.size()) {
+    const size_t comma = deps.find(L',', off);
+    std::wstring one = deps.substr(off, comma == std::wstring::npos ? std::wstring::npos : (comma - off));
+    TrimInPlace(one);
+    if (!one.empty())
+      out.push_back(one);
+    if (comma == std::wstring::npos)
+      break;
+    off = comma + 1;
+  }
+  return out;
+}
+
+void parse_node_identity_from_label(const std::wstring& label, std::wstring& out_type, std::wstring& out_name) {
+  out_type.clear();
+  out_name.clear();
+  std::wstring s = label;
+  TrimInPlace(s);
+  if (s.empty())
+    return;
+  const size_t sp = s.find(L' ');
+  if (sp == std::wstring::npos) {
+    out_type = s;
+    return;
+  }
+  out_type = s.substr(0, sp);
+  std::wstring tail = s.substr(sp + 1);
+  TrimInPlace(tail);
+  if (tail.empty())
+    return;
+  if (tail.front() == L'"') {
+    const size_t q2 = tail.find(L'"', 1);
+    if (q2 != std::wstring::npos)
+      out_name = tail.substr(1, q2 - 1);
+  }
+}
+
+enum DepVisualState : LPARAM {
+  DEP_NODE_NONE = 0,
+  DEP_NODE_FOUND = 1,
+  DEP_NODE_OPTIONAL = 2,
+  DEP_NODE_REQUIRED_MISSING = 3,
+};
+
+enum DepIconIndex {
+  DEP_ICON_NORMAL = 0,
+  DEP_ICON_FOUND = 1,
+  DEP_ICON_OPTIONAL = 2,
+  DEP_ICON_REQUIRED_MISSING = 3,
+};
+
+int icon_index_from_dep_state(LPARAM state) {
+  if (state == DEP_NODE_FOUND)
+    return DEP_ICON_FOUND;
+  if (state == DEP_NODE_OPTIONAL)
+    return DEP_ICON_OPTIONAL;
+  if (state == DEP_NODE_REQUIRED_MISSING)
+    return DEP_ICON_REQUIRED_MISSING;
+  return DEP_ICON_NORMAL;
+}
+
+void EnsureUpListTreeImages(UpListDialogState* st) {
+  if (!st || st->tree_images || !st->tree)
+    return;
+  st->tree_images = ImageList_Create(16, 16, ILC_COLOR32 | ILC_MASK, 4, 4);
+  if (!st->tree_images)
+    return;
+  HICON ico_normal = LoadIcon(nullptr, IDI_APPLICATION);
+  HICON ico_found = LoadIcon(nullptr, IDI_INFORMATION);
+  HICON ico_optional = LoadIcon(nullptr, IDI_WARNING);
+  HICON ico_missing = LoadIcon(nullptr, IDI_ERROR);
+  ImageList_AddIcon(st->tree_images, ico_normal ? ico_normal : LoadIcon(nullptr, IDI_APPLICATION));
+  ImageList_AddIcon(st->tree_images, ico_found ? ico_found : LoadIcon(nullptr, IDI_APPLICATION));
+  ImageList_AddIcon(st->tree_images, ico_optional ? ico_optional : LoadIcon(nullptr, IDI_APPLICATION));
+  ImageList_AddIcon(st->tree_images, ico_missing ? ico_missing : LoadIcon(nullptr, IDI_APPLICATION));
+  TreeView_SetImageList(st->tree, st->tree_images, TVSIL_NORMAL);
+}
+
+void FillUpListTree(HWND tree, const std::wstring& text) {
+  TreeView_DeleteAllItems(tree);
+  std::wstring normalized = text;
+  // Some stdout capture paths may contain embedded NULs (e.g. UTF-16-like interleaving).
+  // TreeView treats NUL as end-of-string, which would show only the first letter.
+  normalized.erase(std::remove(normalized.begin(), normalized.end(), L'\0'), normalized.end());
+  std::replace(normalized.begin(), normalized.end(), L'\r', L'\n');
+  struct LineEntry {
+    int depth = 0;
+    std::wstring label;
+  };
+  std::vector<LineEntry> lines;
+  std::set<std::wstring> package_names;
+  std::set<std::wstring> target_names;
+  {
+    std::wstringstream ss(normalized);
+    std::wstring line;
+    while (std::getline(ss, line, L'\n')) {
+      if (line.empty())
+        continue;
+      std::wstring label = list_line_label_text(line);
+      if (label.empty())
+        continue;
+      int depth = list_line_indent_level(line);
+      if (depth < 0)
+        depth = 0;
+      lines.push_back({depth, label});
+      std::wstring node_type, node_name;
+      parse_node_identity_from_label(label, node_type, node_name);
+      if (node_name.empty())
+        continue;
+      if (node_type == L"package")
+        package_names.insert(node_name);
+      else if (node_type == L"target")
+        target_names.insert(node_name);
+    }
+  }
+
+  std::vector<HTREEITEM> stack;
+  for (const auto& e : lines) {
+    int depth = e.depth;
+    std::wstring label = e.label;
+    if (depth > static_cast<int>(stack.size()))
+      depth = static_cast<int>(stack.size());
+    while (static_cast<int>(stack.size()) > depth)
+      stack.pop_back();
+
+    TVINSERTSTRUCTW ins{};
+    ins.hParent = stack.empty() ? TVI_ROOT : stack.back();
+    ins.hInsertAfter = TVI_LAST;
+    ins.item.mask = TVIF_TEXT | TVIF_PARAM | TVIF_IMAGE | TVIF_SELECTEDIMAGE;
+    ins.item.pszText = const_cast<LPWSTR>(label.c_str());
+    ins.item.lParam = DEP_NODE_NONE;  // normal node
+    ins.item.iImage = DEP_ICON_NORMAL;
+    ins.item.iSelectedImage = DEP_ICON_NORMAL;
+    HTREEITEM item = reinterpret_cast<HTREEITEM>(SendMessageW(tree, TVM_INSERTITEMW, 0, reinterpret_cast<LPARAM>(&ins)));
+    if (!item)
+      continue;
+    const auto deps = parse_dependencies_from_label(label);
+    for (const auto& dep : deps) {
+      std::wstring dep_name = dep;
+      bool optional = false;
+      if (!dep_name.empty() && dep_name.back() == L'?') {
+        optional = true;
+        dep_name.pop_back();
+      }
+      TrimInPlace(dep_name);
+      bool found = false;
+      const size_t colon = dep_name.find(L':');
+      if (colon != std::wstring::npos) {
+        const std::wstring pkg = dep_name.substr(0, colon);
+        const std::wstring tgt = dep_name.substr(colon + 1);
+        found = package_names.count(pkg) > 0 && target_names.count(tgt) > 0;
+      } else {
+        found = package_names.count(dep_name) > 0 || target_names.count(dep_name) > 0;
+      }
+      LPARAM dep_state = DEP_NODE_REQUIRED_MISSING;
+      if (found)
+        dep_state = DEP_NODE_FOUND;
+      else if (optional)
+        dep_state = DEP_NODE_OPTIONAL;
+      std::wstring dep_text = L"dep: " + dep_name + (optional ? L" (optional)" : L"");
+      TVINSERTSTRUCTW dep_ins{};
+      dep_ins.hParent = item;
+      dep_ins.hInsertAfter = TVI_LAST;
+      dep_ins.item.mask = TVIF_TEXT | TVIF_PARAM | TVIF_IMAGE | TVIF_SELECTEDIMAGE;
+      dep_ins.item.pszText = const_cast<LPWSTR>(dep_text.c_str());
+      dep_ins.item.lParam = dep_state;
+      dep_ins.item.iImage = icon_index_from_dep_state(dep_state);
+      dep_ins.item.iSelectedImage = dep_ins.item.iImage;
+      SendMessageW(tree, TVM_INSERTITEMW, 0, reinterpret_cast<LPARAM>(&dep_ins));
+    }
+    stack.push_back(item);
+  }
+
+  std::function<void(HTREEITEM)> expand_all = [&](HTREEITEM item) {
+    while (item) {
+      TreeView_Expand(tree, item, TVE_EXPAND);
+      HTREEITEM child = TreeView_GetChild(tree, item);
+      if (child)
+        expand_all(child);
+      item = TreeView_GetNextSibling(tree, item);
+    }
+  };
+  expand_all(TreeView_GetRoot(tree));
+}
+
+void ExpandCollapseTreeRecursive(HWND tree, HTREEITEM item, UINT code) {
+  while (item) {
+    TreeView_Expand(tree, item, code);
+    HTREEITEM child = TreeView_GetChild(tree, item);
+    if (child)
+      ExpandCollapseTreeRecursive(tree, child, code);
+    item = TreeView_GetNextSibling(tree, item);
+  }
+}
+
+std::wstring GetSelectedTreeItemText(HWND tree) {
+  HTREEITEM sel = TreeView_GetSelection(tree);
+  if (!sel)
+    return {};
+  wchar_t buf[1024]{};
+  TVITEMW item{};
+  item.mask = TVIF_TEXT;
+  item.hItem = sel;
+  item.pszText = buf;
+  item.cchTextMax = static_cast<int>(std::size(buf));
+  if (!SendMessageW(tree, TVM_GETITEMW, 0, reinterpret_cast<LPARAM>(&item)))
+    return {};
+  std::wstring text = buf;
+  TrimInPlace(text);
+  return text;
+}
+
+std::wstring BuildNodePropertyTextFromLabel(const std::wstring& label) {
+  std::wstring s = label;
+  TrimInPlace(s);
+  if (s.empty())
+    return T(L"未选中节点。", L"No node selected.");
+
+  std::wstringstream out;
+  out << T(L"当前节点属性\r\n\r\n", L"Current node properties\r\n\r\n");
+  out << T(L"原始标签: ", L"Raw label: ") << s << L"\r\n";
+
+  std::wstring node_type;
+  std::wstring node_name;
+  const size_t colon = s.find(L':');
+  if (colon != std::wstring::npos) {
+    node_type = s.substr(0, colon);
+    node_name = s.substr(colon + 1);
+    TrimInPlace(node_type);
+    TrimInPlace(node_name);
+  } else {
+    const size_t sp = s.find(L' ');
+    if (sp == std::wstring::npos)
+      node_type = s;
+    else {
+      node_type = s.substr(0, sp);
+      node_name = s.substr(sp + 1);
+      TrimInPlace(node_name);
+    }
+  }
+
+  if (!node_type.empty())
+    out << T(L"类型: ", L"Type: ") << node_type << L"\r\n";
+  if (!node_name.empty())
+    out << T(L"名称: ", L"Name: ") << node_name << L"\r\n";
+
+  std::wregex kv_re(LR"(([A-Za-z_][A-Za-z0-9_\-]*)=("[^"]*"|[^\s]+))");
+  auto begin = std::wsregex_iterator(s.begin(), s.end(), kv_re);
+  auto end = std::wsregex_iterator();
+  if (begin == end) {
+    out << L"\r\n" << T(L"该节点标签中未解析到 key=value 属性。", L"No key=value attributes parsed from this node label.");
+    return out.str();
+  }
+
+  out << L"\r\n" << T(L"属性:\r\n", L"Attributes:\r\n");
+  for (auto it = begin; it != end; ++it) {
+    std::wstring k = (*it)[1].str();
+    std::wstring v = (*it)[2].str();
+    out << L"- " << k << L" = " << v << L"\r\n";
+  }
+  return out.str();
+}
+
+void RefreshUpListDetailPanel(UpListDialogState* st) {
+  if (!st || !st->edit_detail || !st->tree)
+    return;
+  const std::wstring label = GetSelectedTreeItemText(st->tree);
+  const std::wstring details = BuildNodePropertyTextFromLabel(label);
+  SetWindowTextW(st->edit_detail, details.c_str());
+}
+
+void LayoutUpListDialog(HWND hwnd, UpListDialogState* st) {
+  RECT rc{};
+  GetClientRect(hwnd, &rc);
+  const int pad = 10;
+  const int hint_h = 20;
+  const int detail_lbl_h = 20;
+  const int btn_h = 28;
+  const int btn_w = 90;
+  const int content_top = pad + hint_h + 6;
+  const int content_h = rc.bottom - content_top - pad * 2 - btn_h;
+  const int left_w = (rc.right - pad * 3) * 58 / 100;
+  const int right_x = pad * 2 + left_w;
+  const int right_w = rc.right - right_x - pad;
+  MoveWindow(st->lbl_hint, pad, pad, rc.right - pad * 2, hint_h, TRUE);
+  MoveWindow(st->tree, pad, content_top, left_w, content_h, TRUE);
+  MoveWindow(st->lbl_detail, right_x, content_top, right_w, detail_lbl_h, TRUE);
+  MoveWindow(st->edit_detail, right_x, content_top + detail_lbl_h + 4, right_w, content_h - detail_lbl_h - 4, TRUE);
+  const int y = rc.bottom - pad - btn_h;
+  MoveWindow(st->btn_expand, pad, y, btn_w, btn_h, TRUE);
+  MoveWindow(st->btn_collapse, pad + btn_w + 8, y, btn_w, btn_h, TRUE);
+  MoveWindow(st->btn_export_json, pad + (btn_w + 8) * 2, y, btn_w, btn_h, TRUE);
+  MoveWindow(st->btn_export_xml, pad + (btn_w + 8) * 3, y, btn_w, btn_h, TRUE);
+  MoveWindow(st->btn_open_dir, pad + (btn_w + 8) * 4, y, btn_w, btn_h, TRUE);
+  MoveWindow(st->btn_close, rc.right - pad - btn_w, y, btn_w, btn_h, TRUE);
+  MoveWindow(st->btn_copy, rc.right - pad - btn_w * 2 - 8, y, btn_w, btn_h, TRUE);
+}
+
+bool PickSaveListExportPath(HWND owner, const wchar_t* default_name, const wchar_t* filter, const wchar_t* def_ext,
+                            std::wstring& out_path) {
+  wchar_t buf[MAX_PATH]{};
+  wcsncpy_s(buf, default_name, _TRUNCATE);
+  OPENFILENAMEW ofn{};
+  ofn.lStructSize = sizeof(ofn);
+  ofn.hwndOwner = owner;
+  ofn.lpstrFilter = filter;
+  ofn.lpstrFile = buf;
+  ofn.nMaxFile = static_cast<DWORD>(std::size(buf));
+  ofn.lpstrDefExt = def_ext;
+  ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+  if (!GetSaveFileNameW(&ofn))
+    return false;
+  out_path.assign(buf);
+  return true;
+}
+
+bool ExportDomFromUpList(HWND owner, UpListDialogState* st, const wchar_t* option_flag, const wchar_t* default_name,
+                         const wchar_t* filter, const wchar_t* def_ext, std::wstring* out_export_path) {
+  std::wstring path;
+  if (!PickSaveListExportPath(owner, default_name, filter, def_ext, path))
+    return false;
+  std::wstring cmd = L"\"" + st->up_exe + L"\" list ";
+  cmd += option_flag;
+  cmd += L" ";
+  cmd += QuoteWinArg(path);
+  std::wstring output;
+  DWORD exit_code = 0;
+  if (!RunProcessCapture(st->up_exe, cmd, st->cwd, output, exit_code)) {
+    AppendErrorLog(L"执行导出命令失败。", L"Failed to run export command.");
+    AppendLogRaw(L"$ " + cmd + L"\r\n");
+    MessageBoxW(owner, T(L"执行导出失败。", L"Failed to run export command."), T(L"DOM 列表", L"DOM List"), MB_OK | MB_ICONERROR);
+    return false;
+  }
+  if (exit_code != 0) {
+    std::wstringstream ss;
+    ss << T(L"导出失败，退出码：", L"Export failed with exit code: ") << static_cast<unsigned long>(exit_code) << L"\r\n\r\n"
+       << output;
+    AppendErrorLog(L"导出失败（退出码非 0）。", L"Export failed (non-zero exit code).");
+    AppendLogRaw(L"$ " + cmd + L"\r\n" + output + L"\r\n");
+    MessageBoxW(owner, ss.str().c_str(), T(L"DOM 列表", L"DOM List"), MB_OK | MB_ICONERROR);
+    return false;
+  }
+  std::wstringstream ok;
+  ok << T(L"导出成功：", L"Exported to: ") << path;
+  MessageBoxW(owner, ok.str().c_str(), T(L"DOM 列表", L"DOM List"), MB_OK | MB_ICONINFORMATION);
+  if (out_export_path)
+    *out_export_path = path;
+  return true;
+}
+
+LRESULT CALLBACK UpListWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+  auto* st = reinterpret_cast<UpListDialogState*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+  switch (msg) {
+    case WM_CREATE: {
+      auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
+      st = reinterpret_cast<UpListDialogState*>(cs->lpCreateParams);
+      SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(st));
+      const HFONT ui = reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+      st->tree = CreateWindowExW(WS_EX_CLIENTEDGE, WC_TREEVIEWW, L"",
+                                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | TVS_HASLINES | TVS_LINESATROOT | TVS_HASBUTTONS |
+                                     TVS_SHOWSELALWAYS,
+                                 0, 0, 100, 100, hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
+      EnsureUpListTreeImages(st);
+      st->lbl_hint = CreateWindowExW(0, L"STATIC", T(L"提示：双击节点可展开/折叠，支持复制原始 list 文本。",
+                                                     L"Tip: double-click a node to expand/collapse; copy exports raw list text."),
+                                     WS_CHILD | WS_VISIBLE | SS_NOTIFY, 0, 0, 100, 20, hwnd,
+                                     reinterpret_cast<HMENU>(static_cast<UINT_PTR>(IDC_LIST_HINT)),
+                                     GetModuleHandleW(nullptr), nullptr);
+      st->lbl_detail = CreateWindowExW(0, L"STATIC", T(L"属性详情", L"Properties"), WS_CHILD | WS_VISIBLE, 0, 0, 100, 20, hwnd, nullptr,
+                                       GetModuleHandleW(nullptr), nullptr);
+      st->edit_detail = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+                                        WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL |
+                                            ES_READONLY | ES_WANTRETURN,
+                                        0, 0, 100, 100, hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
+      st->btn_expand =
+          CreateWindowExW(0, L"BUTTON", T(L"展开全部", L"Expand all"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
+                          nullptr, GetModuleHandleW(nullptr), nullptr);
+      st->btn_collapse =
+          CreateWindowExW(0, L"BUTTON", T(L"折叠全部", L"Collapse all"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
+                          nullptr, GetModuleHandleW(nullptr), nullptr);
+      st->btn_export_json =
+          CreateWindowExW(0, L"BUTTON", T(L"导出 JSON", L"Export JSON"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
+                          nullptr, GetModuleHandleW(nullptr), nullptr);
+      st->btn_export_xml =
+          CreateWindowExW(0, L"BUTTON", T(L"导出 XML", L"Export XML"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
+                          nullptr, GetModuleHandleW(nullptr), nullptr);
+      st->btn_open_dir =
+          CreateWindowExW(0, L"BUTTON", T(L"打开目录", L"Open dir"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
+                          nullptr, GetModuleHandleW(nullptr), nullptr);
+      st->btn_copy = CreateWindowExW(0, L"BUTTON", T(L"复制", L"Copy"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
+                                     nullptr, GetModuleHandleW(nullptr), nullptr);
+      st->btn_close = CreateWindowExW(0, L"BUTTON", T(L"关闭", L"Close"), WS_CHILD | WS_VISIBLE | WS_TABSTOP, 0, 0, 90, 28, hwnd,
+                                      nullptr, GetModuleHandleW(nullptr), nullptr);
+      SendMessageW(st->tree, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(st->lbl_hint, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(st->lbl_detail, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(st->edit_detail, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(st->btn_expand, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(st->btn_collapse, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(st->btn_export_json, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(st->btn_export_xml, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(st->btn_open_dir, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(st->btn_copy, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      SendMessageW(st->btn_close, WM_SETFONT, reinterpret_cast<WPARAM>(ui), TRUE);
+      EnableWindow(st->btn_open_dir, FALSE);
+      FillUpListTree(st->tree, st->text);
+      {
+        HTREEITEM root = TreeView_GetRoot(st->tree);
+        if (root)
+          TreeView_SelectItem(st->tree, root);
+      }
+      RefreshUpListDetailPanel(st);
+      RefreshUpListDialogTitle(hwnd, st);
+      LayoutUpListDialog(hwnd, st);
+      return 0;
+    }
+    case WM_SIZE:
+      if (st)
+        LayoutUpListDialog(hwnd, st);
+      return 0;
+    case WM_GETMINMAXINFO: {
+      auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
+      mmi->ptMinTrackSize.x = 860;
+      mmi->ptMinTrackSize.y = 380;
+      return 0;
+    }
+    case WM_NOTIFY: {
+      if (!st)
+        return 0;
+      auto* nm = reinterpret_cast<NMHDR*>(lParam);
+      if (nm && nm->hwndFrom == st->tree && nm->code == NM_CUSTOMDRAW) {
+        auto* cd = reinterpret_cast<LPNMTVCUSTOMDRAW>(lParam);
+        if (cd->nmcd.dwDrawStage == CDDS_PREPAINT)
+          return CDRF_NOTIFYITEMDRAW;
+        if (cd->nmcd.dwDrawStage == CDDS_ITEMPREPAINT) {
+          TVITEMW item{};
+          item.mask = TVIF_PARAM;
+          item.hItem = reinterpret_cast<HTREEITEM>(cd->nmcd.dwItemSpec);
+          if (SendMessageW(st->tree, TVM_GETITEMW, 0, reinterpret_cast<LPARAM>(&item))) {
+            if (item.lParam == DEP_NODE_FOUND) {
+              cd->clrText = RGB(20, 140, 20);  // found: green
+              return CDRF_NEWFONT;
+            }
+            if (item.lParam == DEP_NODE_OPTIONAL) {
+              cd->clrText = RGB(190, 150, 0);  // optional: yellow-ish
+              return CDRF_NEWFONT;
+            }
+            if (item.lParam == DEP_NODE_REQUIRED_MISSING) {
+              cd->clrText = RGB(200, 40, 40);  // required missing: red
+              return CDRF_NEWFONT;
+            }
+          }
+          return CDRF_DODEFAULT;
+        }
+      }
+      if (nm && nm->hwndFrom == st->tree && (nm->code == TVN_SELCHANGEDW || nm->code == TVN_SELCHANGEDA)) {
+        RefreshUpListDetailPanel(st);
+      }
+      return 0;
+    }
+    case WM_COMMAND:
+      if (!st)
+        return 0;
+      if ((HWND)lParam == st->lbl_hint) {
+        const std::wstring cwd_text = st->cwd.empty() ? T(L"(未设置)", L"(unset)") : st->cwd;
+        if (CopyTextToClipboard(hwnd, cwd_text))
+          SetStatus(T(L"已复制 CWD", L"CWD copied"));
+        else
+          SetStatusCopyFailed();
+        return 0;
+      }
+      if ((HWND)lParam == st->btn_expand) {
+        HTREEITEM root = TreeView_GetRoot(st->tree);
+        if (root)
+          ExpandCollapseTreeRecursive(st->tree, root, TVE_EXPAND);
+        return 0;
+      }
+      if ((HWND)lParam == st->btn_collapse) {
+        HTREEITEM root = TreeView_GetRoot(st->tree);
+        if (root)
+          ExpandCollapseTreeRecursive(st->tree, root, TVE_COLLAPSE);
+        return 0;
+      }
+      if ((HWND)lParam == st->btn_export_json) {
+        std::wstring exported;
+        if (ExportDomFromUpList(hwnd, st, L"--json", L"dom.json", L"JSON files (*.json)\0*.json\0All files (*.*)\0*.*\0", L"json",
+                                &exported)) {
+          st->last_export_path = exported;
+          EnableWindow(st->btn_open_dir, TRUE);
+          RefreshUpListDialogTitle(hwnd, st);
+        }
+        return 0;
+      }
+      if ((HWND)lParam == st->btn_export_xml) {
+        std::wstring exported;
+        if (ExportDomFromUpList(hwnd, st, L"--xml", L"dom.xml", L"XML files (*.xml)\0*.xml\0All files (*.*)\0*.*\0", L"xml",
+                                &exported)) {
+          st->last_export_path = exported;
+          EnableWindow(st->btn_open_dir, TRUE);
+          RefreshUpListDialogTitle(hwnd, st);
+        }
+        return 0;
+      }
+      if ((HWND)lParam == st->btn_open_dir) {
+        if (st->last_export_path.empty()) {
+          MessageBoxW(hwnd, T(L"请先执行一次导出。", L"Export first."), T(L"DOM 列表", L"DOM List"), MB_OK | MB_ICONINFORMATION);
+          return 0;
+        }
+        std::filesystem::path p = std::filesystem::path(st->last_export_path).parent_path();
+        if (p.empty())
+          p = std::filesystem::path(st->last_export_path);
+        const std::wstring dir = p.wstring();
+        const auto h = reinterpret_cast<INT_PTR>(ShellExecuteW(hwnd, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+        if (h <= 32) {
+          AppendErrorLog(L"打开导出目录失败。", L"Failed to open export folder.");
+          AppendLogRaw(T(L"目录: ", L"Folder: ") + dir + L"\r\n");
+          MessageBoxW(hwnd, T(L"打开目录失败。", L"Failed to open folder."), T(L"DOM 列表", L"DOM List"), MB_OK | MB_ICONERROR);
+        }
+        return 0;
+      }
+      if ((HWND)lParam == st->btn_copy) {
+        CopyTextToClipboard(hwnd, st->text);
+        return 0;
+      }
+      if ((HWND)lParam == st->btn_close) {
+        DestroyWindow(hwnd);
+        return 0;
+      }
+      return 0;
+    case WM_KEYDOWN:
+      if (!st)
+        return 0;
+      if (wParam == 'C' && (GetKeyState(VK_CONTROL) & 0x8000)) {
+        const bool with_shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        if (with_shift) {
+          const std::wstring cwd_text = st->cwd.empty() ? T(L"(未设置)", L"(unset)") : st->cwd;
+          if (CopyTextToClipboard(hwnd, cwd_text))
+            SetStatus(T(L"已复制 CWD", L"CWD copied"));
+          else
+            SetStatusCopyFailed();
+          return 0;
+        }
+        std::wstring selected = GetSelectedTreeItemText(st->tree);
+        if (selected.empty())
+          selected = st->text;
+        if (CopyTextToClipboard(hwnd, selected))
+          SetStatus(T(L"已复制节点文本", L"Node text copied"));
+        else
+          SetStatusCopyFailed();
+        return 0;
+      }
+      return 0;
+    case WM_CLOSE:
+      DestroyWindow(hwnd);
+      return 0;
+    case WM_DESTROY:
+      if (st && st->tree_images) {
+        ImageList_Destroy(st->tree_images);
+        st->tree_images = nullptr;
+      }
+      return 0;
+    default:
+      return DefWindowProcW(hwnd, msg, wParam, lParam);
+  }
+}
+
+void ShowUpListDialog(HWND owner, const std::wstring& text, const std::wstring& up_exe, const std::wstring& cwd) {
+  static bool cls_registered = false;
+  static constexpr wchar_t kListClass[] = L"UpGuiListDialogClass";
+  if (!cls_registered) {
+    WNDCLASSW wc{};
+    wc.lpfnWndProc = UpListWndProc;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = kListClass;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    attach_default_gui_icons(wc);
+    RegisterClassW(&wc);
+    cls_registered = true;
+  }
+  UpListDialogState st{};
+  st.text = text;
+  st.up_exe = up_exe;
+  st.cwd = cwd;
+  EnableWindow(owner, FALSE);
+  RECT rc{};
+  GetWindowRect(owner, &rc);
+  HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kListClass, T(L"DOM 列表", L"DOM List"),
+                             WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE | WS_THICKFRAME, rc.left + 40, rc.top + 40,
+                             760, 520, owner, nullptr, GetModuleHandleW(nullptr), &st);
+  if (!dlg) {
+    EnableWindow(owner, TRUE);
+    return;
+  }
+  MSG msg{};
+  while (IsWindow(dlg) && GetMessageW(&msg, nullptr, 0, 0) > 0) {
+    if (!IsDialogMessageW(dlg, &msg)) {
+      TranslateMessage(&msg);
+      DispatchMessageW(&msg);
+    }
+  }
+  EnableWindow(owner, TRUE);
+  SetActiveWindow(owner);
+}
+
+void ShowUpListInfo(HWND hwnd) {
+  const std::wstring up = UpExePath();
+  if (GetFileAttributesW(up.c_str()) == INVALID_FILE_ATTRIBUTES) {
+    LogErrorUpExeNotFound();
+    MessageBoxW(hwnd, T(L"未找到 up.exe（需与 up-gui.exe 同目录）。", L"up.exe not found (must sit next to up-gui.exe)."),
+                T(L"DOM 列表", L"DOM List"), MB_OK | MB_ICONWARNING);
+    return;
+  }
+  std::wstring cwd;
+  GetEditText(g_path, cwd);
+  TrimInPlace(cwd);
+  if (cwd.empty()) {
+    LogErrorWorkingDirRequired();
+    SetStatus(T(L"请先设置 CWD", L"Set CWD first"));
+    return;
+  }
+  std::error_code ec_dir;
+  const auto cwd_path = std::filesystem::path(cwd);
+  if (!std::filesystem::exists(cwd_path, ec_dir) || !std::filesystem::is_directory(cwd_path, ec_dir)) {
+    AppendErrorLog(L"CWD 无效：目录不存在或不可访问。", L"Invalid CWD: directory does not exist or is inaccessible.");
+    SetStatus(T(L"CWD 无效", L"Invalid CWD"));
+    return;
+  }
+  SetStatus(T(L"正在运行 up list…", L"Running up list…"));
+  std::wstring scan_args;
+  AppendConfigureScanDirs(scan_args);
+  const std::wstring cmd = L"\"" + up + L"\" list" + scan_args;
+  std::wstring output;
+  DWORD exit_code = 0;
+  if (!RunProcessCapture(up, cmd, cwd, output, exit_code)) {
+    AppendErrorLog(L"执行 up list 失败。", L"Failed to run up list.");
+    AppendLogRaw(L"$ " + cmd + L"\r\n");
+    MessageBoxW(hwnd, T(L"执行 up list 失败。", L"Failed to run up list."), T(L"DOM 列表", L"DOM List"), MB_OK | MB_ICONERROR);
+    SetStatus(T(L"运行 up list 失败", L"Failed to run up list"));
+    return;
+  }
+  if (exit_code != 0) {
+    std::wstringstream ss;
+    ss << T(L"up list 执行失败，退出码：", L"up list failed with exit code: ") << static_cast<unsigned long>(exit_code) << L"\r\n\r\n"
+       << output;
+    AppendErrorLog(L"up list 失败（退出码非 0）。", L"up list failed (non-zero exit code).");
+    AppendLogRaw(L"$ " + cmd + L"\r\n" + output + L"\r\n");
+    MessageBoxW(hwnd, ss.str().c_str(), T(L"DOM 列表", L"DOM List"), MB_OK | MB_ICONERROR);
+    SetStatus(T(L"运行 up list 失败", L"Failed to run up list"));
+    return;
+  }
+  ShowUpListDialog(hwnd, output, up, cwd);
+  SetStatus(T(L"已加载 DOM 列表", L"DOM list loaded"));
 }
 
 bool IsConfigureOptionName(const std::wstring& name) {
@@ -3912,6 +4711,7 @@ void CreateToolbarButtons(HWND tb) {
 #if UP_ENABLE_PROJECT
       {IDC_PROJECT, STD_FILEOPEN, T(L"工程", L"project")},
 #endif
+      {IDC_LIST, STD_COPY, T(L"列表", L"list")},
       {IDC_CONFIGURE, STD_PROPERTIES, T(L"配置", L"configure")},
       {IDC_BUILD, STD_REPLACE, T(L"编译", L"build")},
       {IDC_RUN, STD_FILENEW, T(L"运行", L"run")},
@@ -4019,7 +4819,7 @@ std::wstring InitialWelcomeLogText() {
   if (g_ui_lang_zh) {
     return L"up-gui：在「当前工作目录 (CWD)」下调用同目录的 up.exe。\r\n"
            L"「运行参数」可加 --scan 指定额外扫描根（与 CWD 相同的路径不会重复传入）；up 默认已扫描当前工作目录。\r\n"
-           L"工具栏与「操作」菜单均可触发 configure / build / test / pack / run。\r\n"
+           L"工具栏与「操作」菜单均可触发 list / configure / build / test / pack / run。\r\n"
            L"运行目标与单元测试列表会在 configure 成功后自动刷新。\r\n"
            L"纯库包（无 executable）也可 configure/build；CMake 导入目标常位于 .targets/<name>/target.xml。\r\n"
            L"点击工具栏「configure」可在弹窗中编辑 Option（含按前缀分组）。\r\n"
@@ -4027,7 +4827,7 @@ std::wstring InitialWelcomeLogText() {
   }
   return L"up-gui runs up.exe from the same folder as up-gui.exe, using the working directory (CWD).\r\n"
          L"Use \"Extra args\" to pass --scan for extra scan roots (duplicates of CWD are skipped); up already scans CWD.\r\n"
-         L"The toolbar and Actions menu trigger configure / build / test / pack / run.\r\n"
+         L"The toolbar and Actions menu trigger list / configure / build / test / pack / run.\r\n"
          L"Run targets and test lists refresh after a successful configure.\r\n"
          L"Library-only packages (no executable) are supported for configure/build; imported wrappers are commonly under .targets/<name>/target.xml.\r\n"
          L"Click toolbar \"configure\" to edit Options (including prefix grouping).\r\n"
@@ -4338,6 +5138,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
           SetStatusEnvSettingsUnchanged();
         return 0;
       }
+      if (id == IDC_LIST) {
+        ShowUpListInfo(hwnd);
+        return 0;
+      }
       if (id == IDC_LOG_COPY) {
         const int len = GetWindowTextLengthW(g_log);
         std::wstring text;
@@ -4545,7 +5349,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int show) {
 
   INITCOMMONCONTROLSEX icc{};
   icc.dwSize = sizeof(icc);
-  icc.dwICC = ICC_BAR_CLASSES | ICC_LISTVIEW_CLASSES | ICC_STANDARD_CLASSES | ICC_TAB_CLASSES;
+  icc.dwICC = ICC_BAR_CLASSES | ICC_LISTVIEW_CLASSES | ICC_TREEVIEW_CLASSES | ICC_STANDARD_CLASSES | ICC_TAB_CLASSES;
   InitCommonControlsEx(&icc);
 
   WNDCLASSW wc{};

@@ -9,10 +9,10 @@
 
 ## 源码布局（概念映射）
 
-- `src/cli/`：入口、全局参数（如 `--verbose`）、子命令分发。
-- `src/engine/commands/`：各子命令实现（configure、build、run、test、pack、spec；可选 `project`）。
-- `src/engine/backends/`：CMake / Ninja / CTest / 归档等后端适配。
-- `src/infra/`：路径、i18n、控制台 UTF-8 等横切能力。
+- `src/exe/`：入口、全局参数（如 `--verbose`）、子命令分发。
+- `src/lib/engine/commands/`：各子命令实现（configure、build、run、test、pack、spec；可选 `project`）。
+- `src/lib/engine/backends/`：CMake / Ninja / CTest / 归档等后端适配。
+- `src/lib/infra/`：路径、i18n、控制台 UTF-8 等横切能力。
 - `src_gui/`：GUI 与设置持久化，调用 CLI。
 
 ## 可选编译能力

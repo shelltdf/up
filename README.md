@@ -1,6 +1,6 @@
 ﻿# uni-package (up)
 
-**uni-package**（缩写 **`up`**）是一个面向「用数据结构驱动构建与包关系」的原型命令行工具：用 **`package.xml`** 与各目标子目录中的 **`target.xml`**（每目录至多一个）描述包与目标，`up` 负责扫描、生成 CMake 工程、构建、测试与运行。新手从零上手建议先读 **[doc/user-manual.md](doc/user-manual.md)**（中文）或 **[doc/user-manual.en.md](doc/user-manual.en.md)**（English）；`package.xml` / `target.xml` 的字段与解析约定见 **[doc/package-target-xml-spec.md](doc/package-target-xml-spec.md)**；设计背景与完整约定见 **[DESIGN.md](DESIGN.md)**，思维导图见 **[mindmap.mmd](mindmap.mmd)**。
+**uni-package**（缩写 **`up`**）是一个面向「用数据结构驱动构建与包关系」的原型命令行工具：用 **`package.xml`** 与各目标子目录中的 **`target.xml`**（每目录至多一个）描述包与目标，`up` 负责扫描、生成 CMake 工程、构建、测试与运行。新手从零上手建议先读 **[doc/user-manual.md](doc/user-manual.md)**（中文）或 **[doc/user-manual.en.md](doc/user-manual.en.md)**（English）；`package.xml` / `target.xml` 的字段与解析约定见 **[doc/package-target-xml-spec.md](doc/package-target-xml-spec.md)**；设计背景与完整约定见 **[DESIGN.md](DESIGN.md)**，思维导图见 **[mindmap.mmd](mindmap.mmd)**。近期变更记录见 **[CHANGELOG.md](CHANGELOG.md)**。
 
 ## 依赖
 
@@ -16,7 +16,12 @@ cmake -S . -B _build -G "Visual Studio 17 2022" -A x64
 cmake --build _build --config Release
 ```
 
-生成可执行文件（默认）：`_build\Release\up.exe`。MSVC 下工程启用 **静态 CRT**（`/MT`）与 **`/utf-8`**，与 [DESIGN.md](DESIGN.md) 中对 `up.exe` 的取向一致。
+默认构建产物：
+
+- `up.exe`（CLI 入口）
+- `up.lib`（静态库实现）
+
+位于 `_build\Release\`（Windows + Release 示例）。MSVC 下工程启用 **静态 CRT**（`/MT`）与 **`/utf-8`**，与 [DESIGN.md](DESIGN.md) 中对 `up.exe` 的取向一致。
 
 可选：首次 `cmake` 时加上 **`-DUP_ENABLE_PROJECT=ON`** 以编译并启用 **`up project`** 子命令（以及 GUI 中对应能力）。默认 **OFF** 时执行 `up project` 会提示需重编译。
 
@@ -25,14 +30,18 @@ cmake --build _build --config Release
 ```powershell
 python build.py
 python install.py --prefix dist
+# 如需同时安装开发静态库 up.lib：
+python install.py --prefix dist --with-dev
 python package.py
+# 如需把 up.lib 一并打包：
+python package.py --with-dev
 ```
 
-**`package.py`**：将 **`up`** 与 **`up-gui`** 打进 **`dist/`** 下的归档（Windows 默认 **`.zip`**，其它系统默认 **`.tar.gz`**）。脚本会先执行 `install.py`（其内部会先执行 `build.py`）；`-o` 指定输出文件；`--format zip|tgz` 强制格式。归档内含 **`bin/`** 与简短 **`README_PACKAGE.txt`**。
+**`package.py`**：将 **`up`** 与 **`up-gui`** 打进 **`dist/`** 下的归档（Windows 默认 **`.zip`**，其它系统默认 **`.tar.gz`**）。脚本会先执行 `install.py`（其内部会先执行 `build.py`）；`-o` 指定输出文件；`--format zip|tgz` 强制格式；`--with-dev` 可把 **`up.lib`** 一并打包。归档内含 **`bin/`**（可选 `lib/`）与简短 **`README_PACKAGE.txt`**。
 
-`build.py` 在 Windows 上默认使用 **Visual Studio 17 2022**（x64）；可通过环境变量 **`UP_CMAKE_GENERATOR`** 或参数 **`--generator`** 覆盖。脚本**只编译** CMake 目标 **`up`** 与 **`up-gui`**（不构建工程中其它可能新增的目标）。
+`build.py` 在 Windows 上默认使用 **Visual Studio 17 2022**（x64）；可通过环境变量 **`UP_CMAKE_GENERATOR`** 或参数 **`--generator`** 覆盖。脚本**只编译** CMake 目标 **`up`** 与 **`up-gui`**（`up` 由 `src/exe/` 入口 + `src/lib/` 静态库组成，不构建工程中其它可能新增的目标）。
 
-`install.py` 通过 **`cmake --install --component up_runtime`** 仅安装 **`up`** 与 **`up-gui`** 到 **`dist/`**（例如 `dist/bin/up.exe`、`dist/bin/up-gui.exe`；与 CMake 的 `COMPONENT` 名一致，见 `CMakeLists.txt`）。
+`install.py` 默认通过 **`cmake --install --component up_runtime`** 安装 **`up`** 与 **`up-gui`** 到 **`dist/`**（例如 `dist/bin/up.exe`、`dist/bin/up-gui.exe`；与 CMake 的 `COMPONENT` 名一致，见 `CMakeLists.txt`）。若加 **`--with-dev`**，会额外安装 **`up_dev`** 组件（当前为 `dist/lib/up.lib`）。
 
 上述两脚本**只作用于仓库根 CMake 工程**（默认 `_build` / `dist`），**不会编译或安装 `test_projects/` 里的内容**；那些示例包仍须用已安装的 **`up.exe`** 自行执行 `configure` / `build` / `test` 等（见 [test_projects/README.md](test_projects/README.md)）。
 
@@ -46,12 +55,29 @@ python package.py
 | `up test --install-dir-name <名> [测试目标名]` | **必填** `--install-dir-name`；在对应安装树关联的构建元数据上执行 **CTest**（可选单个测试名） |
 | `up pack --install-dir-name <名>...` | **至少一次** `--install-dir-name`（可重复，多架构）；打包到 **`.intermediate/pack/<arch>/`**（Windows: zip；其他平台: tar.gz） |
 | `up spec` | 向 stdout 输出内嵌的英文 `package.xml` / `target.xml` 规则说明（供工具/AI） |
+| `up list [--format tree\|json\|xml] [--xml <路径>] [--json <路径>] [--quiet]` | 输出当前 DOM 结构（默认 tree）；`--format` 控制 stdout 载荷；`--xml/--json` 导出文件；`--quiet` 抑制树形与导出提示。部分组合参数会给 warning 但不失败 |
 | `up print-build-dir-name [--build-dir-name <叶子>] [--opt ...]` | 打印当前配置对应的 **`<arch>`** 字符串（便于脚本传给 `run`/`test`/`pack` 的 `--install-dir-name`） |
 | `up project ...` | **仅当**构建时启用 **`-DUP_ENABLE_PROJECT=ON`**。探测现有工程并生成 `package.xml` / `target.xml`。CMake 默认写 `<cmake source_dir=\"...\"/>`，并尽量从 `install(TARGETS ...)` 自动生成 `.targets/` 下的 `imported_installed_*` 包装目标；在需要时还会尝试 **CMake File API**（需本机 `cmake` 能成功配置该工程）。若依赖未齐或不想跑配置，可加 **`--cmake-no-file-api`**，仅做安装规则扫描 + **CMakeLists 启发式扫描**（含对 `target_link_libraries` / `target_include_directories` 的尽力解析），精度低于 codemodel |
 
 无子命令或未知子命令时会打印简短用法。
 
 `up-gui` 已提供“编译环境设置”窗口（菜单与工具栏入口），包含本地环境 / Android 环境 / emsdk 环境三个 Tab。设置保存到 `up_gui_settings.txt`，并在执行 `configure` 时追加为 `--opt` 参数传给 `up.exe`。
+
+### `up list` 常用示例
+
+```powershell
+# 1) 默认树形输出（stdout）
+up list
+
+# 2) JSON 输出到 stdout（推荐写法）
+up list --format json
+
+# 3) 同时导出 XML + JSON 文件（保留默认 tree stdout）
+up list --xml .intermediate/dom.xml --json .intermediate/dom.json
+
+# 4) 仅导出文件，不打印树形和导出提示
+up list --xml .intermediate/dom.xml --json .intermediate/dom.json --quiet
+```
 
 ## 快速试用（示例工程）
 
@@ -135,7 +161,7 @@ up build --build-dir-name default
 
 - 纯库包（没有 executable）也支持 `configure/build`
 - Windows 下依赖库变量优先使用 `implib` / `.lib`，避免将 `.dll` 误传给链接器
-- 若 `install(TARGETS ...)` 解析不到可包装库，只会生成 `package.xml`，此时可手工补 `.targets/*/target.xml`，或改用 `--legacy-cmake-parse`
+- 若 `install(TARGETS ...)` 解析不到可包装库，只会生成 `package.xml`，此时可手工补 `.targets/*/target.xml`
 - 在 **`target.xml`** 里写目标级依赖时，CMake 后端可选 **`visibility="private|public|interface"`**（默认 `private`，对应 `target_link_libraries` 的可见性）；**可执行目标**不得对依赖使用 **`interface`**。完整语法与 `when` 适用范围以 **`up spec`** 与 **`doc/package-target-xml-spec.md`** 为准。
 
 ## 工作目录约定（相对于执行 `up` 时的 cwd）
@@ -162,7 +188,9 @@ up build --build-dir-name default
 ├── doc/                # 补充规范（如 XML 描述文件）
 ├── README.md           # 本文件
 ├── mindmap.mmd         # 设计思维导图
-├── src/                # up CLI 源码（*.hpp 与 *.cpp）
+├── src/
+│   ├── exe/            # up.exe 入口（main 与命令分发）
+│   └── lib/            # up.lib 实现（engine + infra）
 ├── src_gui/            # up-gui 外壳（Windows: up_gui_win32.cpp；Linux: GTK3；macOS: Cocoa；共享 gui_unix_shared）
 └── test_projects/      # 测试包集合（每子目录一包）
 ```
