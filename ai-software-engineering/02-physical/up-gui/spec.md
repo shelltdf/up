@@ -9,7 +9,7 @@
 
 | 平台 | 主要文件 |
 |------|-----------|
-| Windows | `main/main_win32.cpp`、`platform/win32_gui.cpp`、`win32_gui.hpp`、`platform/win32_paths.*`、`platform/win32_window_placement.*`、`platform/win32_modal_file_dialog_center.*`、`resources/up_gui.rc`（路径前缀均为 `src_gui/`） |
+| Windows | `main/main_win32.cpp`、`platform/win32_gui.cpp`、`win32_gui.hpp`、`platform/win32_paths.*`、`platform/win32_encoding.*`、`platform/win32_fsutil.*`、`platform/win32_text_util.*`、`platform/win32_window_placement.*`、`platform/win32_modal_file_dialog_center.*`、`resources/up_gui.rc`（路径前缀均为 `src_gui/`） |
 | Linux | `main/main_unix.cpp`、`platform/gtk_gui.cpp`、`gtk_gui.hpp`、`core/gui_persist.cpp`、`core/gui_persist.hpp` |
 | macOS | `main/main_cocoa.mm`、`platform/cocoa_gui.mm`、`cocoa_gui.hpp`、`core/gui_persist.cpp`、`core/gui_persist.hpp` |
 

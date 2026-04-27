@@ -38,16 +38,29 @@
 #include <vector>
 
 #include "core/gui_core_actions.hpp"
+#include "platform/win32_encoding.hpp"
+#include "platform/win32_fsutil.hpp"
 #include "platform/win32_modal_file_dialog_center.hpp"
 #include "platform/win32_paths.hpp"
+#include "platform/win32_text_util.hpp"
 #include "platform/win32_window_placement.hpp"
 
 namespace {
 
 using up::gui::platform::win32::CenterOuterWindowOnScreen;
+using up::gui::platform::win32::CmdExePath;
 using up::gui::platform::win32::DirOfModule;
+using up::gui::platform::win32::GetEnvVarW;
 using up::gui::platform::win32::GuiSettingsPath;
+using up::gui::platform::win32::ExtractXmlAttr;
+using up::gui::platform::win32::NormalizePath;
+using up::gui::platform::win32::NowTimeStamp;
 using up::gui::platform::win32::PathToPortableSlashes;
+using up::gui::platform::win32::ReadTextFileUtf8BestEffort;
+using up::gui::platform::win32::SplitPathList;
+using up::gui::platform::win32::ToLowerAscii;
+using up::gui::platform::win32::Utf8ToWide;
+using up::gui::platform::win32::WideToUtf8;
 
 constexpr wchar_t kClassName[] = L"UpGuiMainClass";
 constexpr wchar_t kTitle[] = L"up-gui";
@@ -321,102 +334,6 @@ std::vector<OptionRow> MakeDefaultGuiOptions() {
 std::vector<OptionRow> g_options = MakeDefaultGuiOptions();
 const std::vector<OptionRow> g_default_options = g_options;
 
-std::string WideToUtf8(std::wstring_view ws) {
-  if (ws.empty())
-    return {};
-  const int n = WideCharToMultiByte(CP_UTF8, 0, ws.data(), static_cast<int>(ws.size()), nullptr, 0, nullptr, nullptr);
-  if (n <= 0) {
-    std::string fallback;
-    fallback.reserve(ws.size());
-    for (wchar_t c : ws)
-      fallback.push_back((c >= 0 && c <= 127) ? static_cast<char>(c) : '?');
-    return fallback;
-  }
-  std::string out(static_cast<size_t>(n), '\0');
-  WideCharToMultiByte(CP_UTF8, 0, ws.data(), static_cast<int>(ws.size()), out.data(), n, nullptr, nullptr);
-  return out;
-}
-
-std::wstring Utf8ToWide(std::string_view utf8) {
-  if (utf8.empty())
-    return {};
-  auto decode_utf16_bytes = [](std::string_view bytes, bool little_endian) -> std::wstring {
-    if (bytes.size() < 2)
-      return {};
-    std::wstring out;
-    out.reserve(bytes.size() / 2);
-    for (size_t i = 0; i + 1 < bytes.size(); i += 2) {
-      const unsigned char b0 = static_cast<unsigned char>(bytes[i]);
-      const unsigned char b1 = static_cast<unsigned char>(bytes[i + 1]);
-      const unsigned short code = little_endian ? static_cast<unsigned short>(b0 | (b1 << 8))
-                                                 : static_cast<unsigned short>((b0 << 8) | b1);
-      out.push_back(static_cast<wchar_t>(code));
-    }
-    return out;
-  };
-  auto looks_utf16_stream = [](std::string_view bytes, bool little_endian) -> bool {
-    if (bytes.size() < 6)
-      return false;
-    size_t zeros = 0;
-    size_t checked = 0;
-    const size_t limit = (std::min)(bytes.size(), static_cast<size_t>(128));
-    // UTF-16LE text usually has many zeros in odd bytes for ASCII-ish content.
-    for (size_t i = little_endian ? 1 : 0; i < limit; i += 2) {
-      ++checked;
-      if (bytes[i] == '\0')
-        ++zeros;
-    }
-    return checked >= 8 && zeros * 100 / checked >= 60;
-  };
-  const auto* raw = reinterpret_cast<const unsigned char*>(utf8.data());
-  if (utf8.size() >= 2) {
-    if (raw[0] == 0xFF && raw[1] == 0xFE)
-      return decode_utf16_bytes(utf8.substr(2), true);
-    if (raw[0] == 0xFE && raw[1] == 0xFF)
-      return decode_utf16_bytes(utf8.substr(2), false);
-  }
-  if (looks_utf16_stream(utf8, true))
-    return decode_utf16_bytes(utf8, true);
-  if (looks_utf16_stream(utf8, false))
-    return decode_utf16_bytes(utf8, false);
-  auto looks_mojibake_zh = [](const std::wstring& s) -> bool {
-    static const wchar_t* kBadMarks[] = {
-        L"閫傜敤浜", L"鐗堟湰", L"姝ｅ湪", L"鍒涘缓", L"缂栬瘧", L"鎿嶄綔",
-    };
-    for (const auto* m : kBadMarks) {
-      if (s.find(m) != std::wstring::npos)
-        return true;
-    }
-    return false;
-  };
-  auto convert = [&](unsigned cp, DWORD flags = 0) -> std::wstring {
-    const int n = MultiByteToWideChar(cp, flags, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
-    if (n <= 0)
-      return {};
-    std::wstring w(static_cast<size_t>(n), L'\0');
-    if (MultiByteToWideChar(cp, flags, utf8.data(), static_cast<int>(utf8.size()), w.data(), n) <= 0)
-      return {};
-    return w;
-  };
-  // Prefer strict UTF-8 first; if invalid, fall back to local code pages.
-  std::wstring w = convert(CP_UTF8, MB_ERR_INVALID_CHARS);
-  if (!w.empty())
-    return w;
-  const std::wstring utf8_lenient = convert(CP_UTF8, 0);
-  // Prefer ANSI code page before OEM for redirected MSBuild/CMake logs on Windows.
-  w = convert(CP_ACP);
-  if (!w.empty() && !utf8_lenient.empty() && looks_mojibake_zh(w))
-    return utf8_lenient;
-  if (!w.empty())
-    return w;
-  w = convert(CP_OEMCP);
-  if (!w.empty() && !utf8_lenient.empty() && looks_mojibake_zh(w))
-    return utf8_lenient;
-  if (!w.empty())
-    return w;
-  return utf8_lenient;
-}
-
 void TrimInPlace(std::wstring& s) {
   while (!s.empty() && (s.front() == L' ' || s.front() == L'\t'))
     s.erase(0, 1);
@@ -679,16 +596,6 @@ void PostRunLogChunk(HWND hwnd, unsigned long run_no, const std::wstring& text) 
   PostMessageW(hwnd, WM_APPEND_RUN_LOG, 0, reinterpret_cast<LPARAM>(p));
 }
 
-std::wstring NowTimeStamp() {
-  SYSTEMTIME st{};
-  GetLocalTime(&st);
-  wchar_t buf[64]{};
-  swprintf_s(buf, L"%04u-%02u-%02u %02u:%02u:%02u", static_cast<unsigned>(st.wYear), static_cast<unsigned>(st.wMonth),
-             static_cast<unsigned>(st.wDay), static_cast<unsigned>(st.wHour), static_cast<unsigned>(st.wMinute),
-             static_cast<unsigned>(st.wSecond));
-  return buf;
-}
-
 // 单次 up 运行的「Run # / vcvars / 命令行」必须与当次 stdout 成组显示：
 // - 不走 AppendLog 的去重（否则连续多次相同 [vcvars] 行会在 1200ms 内被静默丢弃）；
 // - 用 SendMessage 同步写入，避免与 worker 的 WM_APPEND_RUN_LOG 在队列里交错导致顺序错乱。
@@ -709,47 +616,6 @@ void AppendRunBookkeepingToLog(const up::gui::core::UpLaunchPlan& plan, const st
   push_sync(L"\r\n> " + plan.display_command + L"\r\n");
 }
 
-std::wstring GetEnvVarW(const wchar_t* name) {
-  wchar_t buf[32767]{};
-  const DWORD n = GetEnvironmentVariableW(name, buf, static_cast<DWORD>(std::size(buf)));
-  if (n == 0 || n >= std::size(buf))
-    return {};
-  return std::wstring(buf, buf + n);
-}
-
-std::wstring CmdExePath() {
-  std::wstring comspec = GetEnvVarW(L"COMSPEC");
-  if (!comspec.empty()) {
-    std::error_code ec;
-    if (std::filesystem::exists(std::filesystem::path(comspec), ec))
-      return PathToPortableSlashes(std::move(comspec));
-  }
-  std::wstring sysroot = GetEnvVarW(L"SystemRoot");
-  if (!sysroot.empty()) {
-    std::filesystem::path p = std::filesystem::path(sysroot) / "System32" / "cmd.exe";
-    std::error_code ec;
-    if (std::filesystem::exists(p, ec))
-      return p.lexically_normal().generic_wstring();
-  }
-  return L"cmd.exe";
-}
-
-std::vector<std::wstring> SplitPathList(const std::wstring& s) {
-  std::vector<std::wstring> out;
-  size_t off = 0;
-  while (off <= s.size()) {
-    const size_t p = s.find(L';', off);
-    std::wstring part = s.substr(off, p == std::wstring::npos ? std::wstring::npos : (p - off));
-    TrimInPlace(part);
-    if (!part.empty())
-      out.push_back(part);
-    if (p == std::wstring::npos)
-      break;
-    off = p + 1;
-  }
-  return out;
-}
-
 void AddUnique(std::vector<std::wstring>& v, const std::wstring& s) {
   if (s.empty())
     return;
@@ -758,12 +624,6 @@ void AddUnique(std::vector<std::wstring>& v, const std::wstring& s) {
       return;
   }
   v.push_back(s);
-}
-
-std::wstring NormalizePath(const std::filesystem::path& p) {
-  std::error_code ec;
-  const auto abs = std::filesystem::absolute(p, ec);
-  return (ec ? p : abs).lexically_normal().generic_wstring();
 }
 
 void AddUniqueHit(std::vector<ToolHit>& hits, const std::wstring& name, const std::filesystem::path& p, bool from_path) {
@@ -2123,33 +1983,6 @@ bool PickFolder(HWND owner, const std::wstring& initial_dir, std::wstring& out, 
 
 void GetEditText(HWND ed, std::wstring& out);
 void RebuildOptionsListView();
-
-std::string ReadTextFileUtf8BestEffort(const std::filesystem::path& p) {
-  std::ifstream in(p, std::ios::binary);
-  if (!in)
-    return {};
-  return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-}
-
-std::string ExtractXmlAttr(const std::string& xml, const char* attr) {
-  const std::string key = std::string(attr) + "=\"";
-  const auto k = xml.find(key);
-  if (k == std::string::npos)
-    return {};
-  const auto b = k + key.size();
-  const auto e = xml.find('"', b);
-  if (e == std::string::npos || e <= b)
-    return {};
-  return xml.substr(b, e - b);
-}
-
-std::string ToLowerAscii(std::string s) {
-  for (char& c : s) {
-    if (c >= 'A' && c <= 'Z')
-      c = static_cast<char>(c - 'A' + 'a');
-  }
-  return s;
-}
 
 std::vector<std::wstring> DiscoverExecutableTargets(const std::wstring& cwd_w, bool test_only) {
   std::vector<std::wstring> out;

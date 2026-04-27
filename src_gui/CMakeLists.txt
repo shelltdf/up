@@ -6,9 +6,12 @@ set(UP_GUI_CORE_SOURCES
 if(WIN32)
   set(UP_GUI_PLATFORM_SOURCES
     main/main_win32.cpp
+    platform/win32_encoding.cpp
+    platform/win32_fsutil.cpp
     platform/win32_gui.cpp
     platform/win32_modal_file_dialog_center.cpp
     platform/win32_paths.cpp
+    platform/win32_text_util.cpp
     platform/win32_window_placement.cpp
     resources/up_gui.rc
   )
