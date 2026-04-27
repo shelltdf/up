@@ -2,6 +2,8 @@
 # Only paths under src_gui/ are allowed as up-gui sources (enforced below).
 set(UP_GUI_CORE_SOURCES
   core/gui_core_actions.cpp
+  core/gui_persist.cpp
+  core/gui_shell_actions.cpp
 )
 if(WIN32)
   set(UP_GUI_PLATFORM_SOURCES
@@ -19,7 +21,6 @@ elseif(APPLE)
   set(UP_GUI_PLATFORM_SOURCES
     main/main_cocoa.mm
     platform/cocoa_gui.mm
-    core/gui_persist.cpp
   )
 else()
   find_package(PkgConfig REQUIRED)
@@ -27,7 +28,6 @@ else()
   set(UP_GUI_PLATFORM_SOURCES
     main/main_unix.cpp
     platform/gtk_gui.cpp
-    core/gui_persist.cpp
   )
 endif()
 set(UP_GUI_ALL_SOURCES ${UP_GUI_PLATFORM_SOURCES} ${UP_GUI_CORE_SOURCES})

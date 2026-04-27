@@ -6,7 +6,7 @@
 
 namespace up::gui::persist {
 
-// GTK/Cocoa 与 Win32 共用：可执行文件旁的 up_gui_settings.txt（UTF-8 key=value）；Win32 另有宽字符路径实现，文件格式一致。
+// 各平台共用 UTF-8 的 `up_gui_settings.txt` 与「POSIX 单引号风格」子进程命令行；Win32 上 `run_shell_in_dir` 通过 PowerShell -EncodedCommand 执行等价脚本（主界面仍由 win32_gui 宽字符实现）。
 std::filesystem::path settings_path_near_executable();
 
 // 可执行文件所在目录（不含文件名）。

@@ -3,7 +3,9 @@
 | 能力 | 路径 |
 |------|------|
 | 共享动作 / 调起 `up` | `src_gui/core/gui_core_actions.cpp`、`gui_core_actions.hpp` |
-| GTK/macOS 设置与 `up_gui_settings.txt` | `src_gui/core/gui_persist.cpp`、`gui_persist.hpp` |
+| 与 UI 线程投递相关的类型别名 | `src_gui/core/gui_os_queue.hpp` |
+| configure/run 等命令拼装与后台调 `up`（无原生控件；三平台 core 均编译） | `src_gui/core/gui_shell_actions.cpp`、`gui_shell_actions.hpp` |
+| UTF-8 设置与 `up_gui_settings.txt`、POSIX 风格子进程封装 | `src_gui/core/gui_persist.cpp`、`gui_persist.hpp` |
 | Win32 UI | `src_gui/main/main_win32.cpp`、`src_gui/platform/win32_gui.cpp`、`win32_gui.hpp` |
 | Win32 路径与设置文件位置 | `src_gui/platform/win32_paths.cpp`、`win32_paths.hpp` |
 | Win32 编码 UTF-8/宽字符 | `src_gui/platform/win32_encoding.cpp`、`win32_encoding.hpp` |

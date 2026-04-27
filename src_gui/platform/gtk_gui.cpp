@@ -4,19 +4,20 @@
 #include "platform/gtk_gui.hpp"
 
 #include "gui_persist.hpp"
+#include "gui_shell_actions.hpp"
 
 #include <gtk/gtk.h>
 
 #include <atomic>
 #include <filesystem>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace up::gui::platform::gtk {
 namespace {
 
 namespace persist = up::gui::persist;
+namespace shell = up::gui::shell;
 
 std::atomic<bool> g_busy{false};
 GtkApplication* g_app{};
@@ -36,13 +37,6 @@ GtkWidget* g_status{};
 persist::PersistedEnv g_persist{};
 std::filesystem::path g_settings_file;
 std::filesystem::path g_up_exe;
-
-static void trim_ascii(std::string& s) {
-  while (!s.empty() && (s.front() == ' ' || s.front() == '\t'))
-    s.erase(0, 1);
-  while (!s.empty() && (s.back() == ' ' || s.back() == '\t'))
-    s.pop_back();
-}
 
 std::string get_entry(GtkWidget* e) {
   return e ? gtk_entry_get_text(GTK_ENTRY(e)) : std::string{};
@@ -141,89 +135,23 @@ void on_scan_remove(GtkWidget*, gpointer) {
     gtk_list_store_remove(g_store_scan, &it);
 }
 
-static void append_install_dir_flag(std::string& args, const std::string& inst_edit, std::string& err) {
-  std::string inst = persist::path_to_portable_utf8(inst_edit);
-  trim_ascii(inst);
-  if (inst.empty()) {
-    err = "Install Dir empty (--install-dir-name required)";
-    return;
-  }
-  const std::string leaf = persist::intermediate_leaf_from_build_dir_field(inst);
-  if (leaf.empty()) {
-    err = "Invalid install dir / leaf for --install-dir-name";
-    return;
-  }
-  args += " --install-dir-name ";
-  args += persist::shell_single_quote(leaf);
-}
-
 void run_up_line_async(const std::string& args_no_exe) {
-  if (g_busy.exchange(true)) {
-    log_line("[busy] previous run still in progress");
-    g_busy = false;
-    return;
-  }
   const std::string cwd = persist::path_to_portable_utf8(get_entry(g_entry_cwd));
-  if (cwd.empty()) {
-    log_line("[error] Set CWD first.");
-    g_busy = false;
+  const auto maybe_cwd = shell::try_acquire_run_context(g_up_exe, cwd, g_busy, [](const std::string& s) { log_line(s); });
+  if (!maybe_cwd)
     return;
-  }
-  if (!std::filesystem::exists(g_up_exe)) {
-    log_line("[error] `up` not found next to this executable.");
-    g_busy = false;
-    return;
-  }
-
-  std::string extra = get_entry(g_entry_extra);
-  trim_ascii(extra);
-
-  std::thread([args_no_exe, cwd, extra]() {
-    const std::filesystem::path cwd_p(cwd);
-    std::string cmd = persist::shell_single_quote(g_up_exe.generic_string()) + " " + args_no_exe;
-    if (!extra.empty())
-      cmd += " " + extra;
-    std::string out;
-    int code = -1;
-    const bool ok = persist::run_shell_in_dir(cwd_p, cmd, out, code);
-    if (!ok)
-      log_line("[error] failed to spawn shell");
-    else {
-      if (!out.empty())
-        log_line(out);
-      log_line("[exit " + std::to_string(code) + "]");
-    }
-    g_busy = false;
-    g_idle_add(
-        +[](gpointer) -> gboolean {
-          set_status("Ready");
-          return FALSE;
-        },
-        nullptr);
-  }).detach();
+  const std::string extra = get_entry(g_entry_extra);
+  shell::run_up_command_in_detached_thread(g_up_exe, *maybe_cwd, args_no_exe, extra, g_busy,
+                                         [](const std::string& s) { log_line(s); },
+                                         []() {
+                                           g_idle_add(
+                                               +[](gpointer) -> gboolean {
+                                                 set_status("Ready");
+                                                 return FALSE;
+                                               },
+                                               nullptr);
+                                         });
   set_status("Running up…");
-}
-
-// 返回非空则为完整 configure 参数行（不含可执行文件路径）；失败时写日志并返回空。
-std::string build_configure_args_line() {
-  const std::string cwd = persist::path_to_portable_utf8(get_entry(g_entry_cwd));
-  if (cwd.empty()) {
-    log_line("[error] Set CWD first.");
-    return {};
-  }
-  std::string leaf;
-  std::string qerr;
-  if (!persist::query_print_build_dir_name(g_up_exe, std::filesystem::path(cwd), get_entry(g_entry_build), g_persist,
-                                              leaf, qerr)) {
-    log_line("[error] print-build-dir-name: " + qerr);
-    return {};
-  }
-  std::string args = "configure";
-  persist::append_scan_args_utf8(args, collect_scans(), cwd);
-  persist::append_configure_env_opts(g_persist, args);
-  args += " --build-dir-name ";
-  args += persist::shell_single_quote(leaf);
-  return args;
 }
 
 #if UP_ENABLE_REVERSE
@@ -233,7 +161,9 @@ void on_reverse(GtkWidget*, gpointer) {
 #endif
 
 void on_configure(GtkWidget*, gpointer) {
-  const std::string cfg = build_configure_args_line();
+  const std::string cwd = persist::path_to_portable_utf8(get_entry(g_entry_cwd));
+  const std::string cfg = shell::build_configure_args_line(g_up_exe, cwd, get_entry(g_entry_build), collect_scans(),
+                                                            g_persist, [](const std::string& s) { log_line(s); });
   if (cfg.empty())
     return;
   run_up_line_async(cfg);
@@ -253,15 +183,14 @@ void on_build(GtkWidget*, gpointer) {
 
 void on_run(GtkWidget*, gpointer) {
   std::string tgt = get_entry(g_entry_run);
-  trim_ascii(tgt);
+  shell::trim_ascii_inplace(tgt);
   if (tgt.empty()) {
     log_line("[error] Run target empty.");
     return;
   }
   std::string err;
   std::string args = "run";
-  append_install_dir_flag(args, get_entry(g_entry_install), err);
-  if (!err.empty()) {
+  if (!shell::append_install_dir_flag(args, get_entry(g_entry_install), err)) {
     log_line("[error] " + err);
     return;
   }
@@ -272,11 +201,10 @@ void on_run(GtkWidget*, gpointer) {
 
 void on_test(GtkWidget*, gpointer) {
   std::string tgt = get_entry(g_entry_test);
-  trim_ascii(tgt);
+  shell::trim_ascii_inplace(tgt);
   std::string err;
   std::string args = "test";
-  append_install_dir_flag(args, get_entry(g_entry_install), err);
-  if (!err.empty()) {
+  if (!shell::append_install_dir_flag(args, get_entry(g_entry_install), err)) {
     log_line("[error] " + err);
     return;
   }
@@ -290,8 +218,7 @@ void on_test(GtkWidget*, gpointer) {
 void on_pack(GtkWidget*, gpointer) {
   std::string err;
   std::string args = "pack";
-  append_install_dir_flag(args, get_entry(g_entry_install), err);
-  if (!err.empty()) {
+  if (!shell::append_install_dir_flag(args, get_entry(g_entry_install), err)) {
     log_line("[error] " + err);
     return;
   }

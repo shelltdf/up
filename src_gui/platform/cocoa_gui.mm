@@ -5,16 +5,17 @@
 #include "platform/cocoa_gui.hpp"
 
 #include "gui_persist.hpp"
+#include "gui_shell_actions.hpp"
 
 #include <atomic>
 #include <filesystem>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace up::gui::platform::cocoa {
 
 namespace persist = up::gui::persist;
+namespace shell = up::gui::shell;
 
 std::atomic<bool> g_busy{false};
 
@@ -32,13 +33,6 @@ NSTableView* g_table_scan;
 NSMutableArray<NSString*>* g_scan_rows;
 NSTextView* g_log;
 NSTextField* g_status;
-
-static void trim_ascii(std::string& s) {
-  while (!s.empty() && (s.front() == ' ' || s.front() == '\t'))
-    s.erase(0, 1);
-  while (!s.empty() && (s.back() == ' ' || s.back() == '\t'))
-    s.pop_back();
-}
 
 static std::string ns_to_utf8(NSString* s) {
   if (!s)
@@ -84,81 +78,16 @@ static void save_ui() {
   persist::save_settings(g_settings_file, g_persist);
 }
 
-static void append_install_dir_flag(std::string& args, const std::string& inst_edit, std::string& err) {
-  std::string inst = persist::path_to_portable_utf8(inst_edit);
-  trim_ascii(inst);
-  if (inst.empty()) {
-    err = "Install Dir empty";
-    return;
-  }
-  const std::string leaf = persist::intermediate_leaf_from_build_dir_field(inst);
-  if (leaf.empty()) {
-    err = "Invalid install dir leaf";
-    return;
-  }
-  args += " --install-dir-name ";
-  args += persist::shell_single_quote(leaf);
-}
-
 static void run_up_async(const std::string& args_no_exe) {
-  if (g_busy.exchange(true)) {
-    log_line("[busy] previous run still in progress");
-    g_busy = false;
-    return;
-  }
   const std::string cwd = persist::path_to_portable_utf8(ns_to_utf8([g_tf_cwd stringValue]));
-  if (cwd.empty()) {
-    log_line("[error] Set CWD first.");
-    g_busy = false;
+  const auto maybe_cwd = shell::try_acquire_run_context(g_up_exe, cwd, g_busy, [](const std::string& s) { log_line(s); });
+  if (!maybe_cwd)
     return;
-  }
-  if (!std::filesystem::exists(g_up_exe)) {
-    log_line("[error] `up` not found next to this executable.");
-    g_busy = false;
-    return;
-  }
-  std::string extra = ns_to_utf8([g_tf_extra stringValue]);
-  trim_ascii(extra);
-
-  std::thread([args_no_exe, cwd, extra]() {
-    const std::filesystem::path cwd_p(cwd);
-    std::string cmd = persist::shell_single_quote(g_up_exe.generic_string()) + " " + args_no_exe;
-    if (!extra.empty())
-      cmd += " " + extra;
-    std::string out;
-    int code = -1;
-    const bool ok = persist::run_shell_in_dir(cwd_p, cmd, out, code);
-    if (!ok)
-      log_line("[error] failed to spawn shell");
-    else {
-      if (!out.empty())
-        log_line(out);
-      log_line("[exit " + std::to_string(code) + "]");
-    }
-    g_busy = false;
-    set_status("Ready");
-  }).detach();
+  const std::string extra = ns_to_utf8([g_tf_extra stringValue]);
+  shell::run_up_command_in_detached_thread(
+      g_up_exe, *maybe_cwd, args_no_exe, extra, g_busy, [](const std::string& s) { log_line(s); },
+      []() { set_status("Ready"); });
   set_status("Running up…");
-}
-
-static std::string build_configure_args_line() {
-  const std::string cwd = persist::path_to_portable_utf8(ns_to_utf8([g_tf_cwd stringValue]));
-  if (cwd.empty()) {
-    log_line("[error] Set CWD first.");
-    return {};
-  }
-  std::string leaf, qerr;
-  if (!persist::query_print_build_dir_name(g_up_exe, std::filesystem::path(cwd), ns_to_utf8([g_tf_build stringValue]),
-                                              g_persist, leaf, qerr)) {
-    log_line("[error] print-build-dir-name: " + qerr);
-    return {};
-  }
-  std::string args = "configure";
-  persist::append_scan_args_utf8(args, collect_scans(), cwd);
-  persist::append_configure_env_opts(g_persist, args);
-  args += " --build-dir-name ";
-  args += persist::shell_single_quote(leaf);
-  return args;
 }
 
 @interface UpGuiCtrl : NSObject <NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate>
@@ -229,7 +158,10 @@ static void upgui_apply_open_panel_directory(NSOpenPanel* p, NSString* primaryPa
 
 - (void)doConfigure:(id)sender {
   (void)sender;
-  const std::string cfg = build_configure_args_line();
+  const std::string cwd = persist::path_to_portable_utf8(ns_to_utf8([g_tf_cwd stringValue]));
+  const std::string cfg = shell::build_configure_args_line(g_up_exe, cwd, ns_to_utf8([g_tf_build stringValue]),
+                                                            collect_scans(), g_persist,
+                                                            [](const std::string& s) { log_line(s); });
   if (cfg.empty())
     return;
   run_up_async(cfg);
@@ -251,14 +183,13 @@ static void upgui_apply_open_panel_directory(NSOpenPanel* p, NSString* primaryPa
 - (void)doRun:(id)sender {
   (void)sender;
   std::string tgt = ns_to_utf8([g_tf_run stringValue]);
-  trim_ascii(tgt);
+  shell::trim_ascii_inplace(tgt);
   if (tgt.empty()) {
     log_line("[error] Run target empty.");
     return;
   }
   std::string err, args = "run";
-  append_install_dir_flag(args, ns_to_utf8([g_tf_install stringValue]), err);
-  if (!err.empty()) {
+  if (!shell::append_install_dir_flag(args, ns_to_utf8([g_tf_install stringValue]), err)) {
     log_line("[error] " + err);
     return;
   }
@@ -270,10 +201,9 @@ static void upgui_apply_open_panel_directory(NSOpenPanel* p, NSString* primaryPa
 - (void)doTest:(id)sender {
   (void)sender;
   std::string tgt = ns_to_utf8([g_tf_test stringValue]);
-  trim_ascii(tgt);
+  shell::trim_ascii_inplace(tgt);
   std::string err, args = "test";
-  append_install_dir_flag(args, ns_to_utf8([g_tf_install stringValue]), err);
-  if (!err.empty()) {
+  if (!shell::append_install_dir_flag(args, ns_to_utf8([g_tf_install stringValue]), err)) {
     log_line("[error] " + err);
     return;
   }
@@ -287,8 +217,7 @@ static void upgui_apply_open_panel_directory(NSOpenPanel* p, NSString* primaryPa
 - (void)doPack:(id)sender {
   (void)sender;
   std::string err, args = "pack";
-  append_install_dir_flag(args, ns_to_utf8([g_tf_install stringValue]), err);
-  if (!err.empty()) {
+  if (!shell::append_install_dir_flag(args, ns_to_utf8([g_tf_install stringValue]), err)) {
     log_line("[error] " + err);
     return;
   }

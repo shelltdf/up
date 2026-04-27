@@ -4,13 +4,25 @@
 #include <cstdio>
 #include <fstream>
 #include <sstream>
+#include <string>
+#include <vector>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#else
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
 #else
 #include <unistd.h>
 #endif
 #include <sys/wait.h>
+#endif
 
 static void trim_in_place(std::string& s) {
   while (!s.empty() && (s.front() == ' ' || s.front() == '\t'))
@@ -55,25 +67,40 @@ std::string shell_single_quote(const std::string& s) {
 }
 
 std::filesystem::path executable_parent_dir() {
+#if defined(_WIN32)
+  wchar_t wbuf[4096]{};
+  constexpr DWORD kBuf = static_cast<DWORD>(sizeof(wbuf) / sizeof(wbuf[0]));
+  const DWORD n = GetModuleFileNameW(nullptr, wbuf, kBuf);
+  if (n == 0 || n >= kBuf)
+    return {};
+  std::filesystem::path p(std::wstring(wbuf, n));
+  if (p.has_parent_path())
+    return p.parent_path();
+  return {};
+#elif defined(__APPLE__)
   std::string exe;
-#if defined(__APPLE__)
   char buf[4096];
   uint32_t sz = sizeof(buf);
   if (_NSGetExecutablePath(buf, &sz) != 0)
     return {};
   exe = buf;
+  std::filesystem::path p(exe);
+  if (p.has_parent_path())
+    return p.parent_path();
+  return {};
 #else
+  std::string exe;
   char buf[4096];
   const ssize_t n = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
   if (n <= 0)
     return {};
   buf[static_cast<size_t>(n)] = '\0';
   exe.assign(buf, static_cast<size_t>(n));
-#endif
   std::filesystem::path p(exe);
   if (p.has_parent_path())
     return p.parent_path();
   return {};
+#endif
 }
 
 std::filesystem::path settings_path_near_executable() {
@@ -207,6 +234,141 @@ void append_scan_args_utf8(std::string& args, const std::vector<std::string>& sc
   }
 }
 
+#if defined(_WIN32)
+namespace {
+
+std::string ps_single_quote_literal(const std::string& utf8) {
+  std::string o = "'";
+  for (unsigned char uc : utf8) {
+    const char c = static_cast<char>(uc);
+    if (c == '\'')
+      o += "''";
+    else
+      o += c;
+  }
+  o += '\'';
+  return o;
+}
+
+struct CliSeg {
+  std::string text;
+  bool was_single_quoted{};
+};
+
+// 将 `shell_single_quote` 拼出的 POSIX 单引号命令行拆成若干段；曾处于单引号内的段需转为 PS 单引号字面量。
+std::vector<CliSeg> posix_cli_segments(const std::string& line) {
+  std::vector<CliSeg> out;
+  size_t i = 0;
+  const size_t n = line.size();
+  while (i < n) {
+    while (i < n && (line[i] == ' ' || line[i] == '\t'))
+      ++i;
+    if (i >= n)
+      break;
+    if (line[i] == '\'') {
+      ++i;
+      std::string tok;
+      while (i < n) {
+        if (i + 3 < n && line[i] == '\'' && line[i + 1] == '\\' && line[i + 2] == '\'' && line[i + 3] == '\'') {
+          tok += '\'';
+          i += 4;
+          continue;
+        }
+        if (line[i] == '\'') {
+          ++i;
+          break;
+        }
+        tok += line[i++];
+      }
+      out.push_back({std::move(tok), true});
+      continue;
+    }
+    size_t j = i;
+    while (j < n && line[j] != ' ' && line[j] != '\t')
+      ++j;
+    out.push_back({line.substr(i, j - i), false});
+    i = j;
+  }
+  return out;
+}
+
+std::string posix_sh_cmd_to_ps_invocation(const std::string& sh_cmdline) {
+  const auto segs = posix_cli_segments(sh_cmdline);
+  if (segs.empty())
+    return {};
+  std::string ps;
+  ps.reserve(sh_cmdline.size() + segs.size() * 4);
+  for (size_t t = 0; t < segs.size(); ++t) {
+    if (t)
+      ps += ' ';
+    if (segs[t].was_single_quoted)
+      ps += ps_single_quote_literal(segs[t].text);
+    else
+      ps += segs[t].text;
+  }
+  return "& " + ps;
+}
+
+std::string base64_encode_utf16le_bytes(const unsigned char* bytes, size_t len) {
+  static const char tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  std::string out;
+  out.reserve((len + 2) / 3 * 4);
+  for (size_t i = 0; i < len; i += 3) {
+    const unsigned a = i < len ? bytes[i] : 0u;
+    const unsigned b = i + 1 < len ? bytes[i + 1] : 0u;
+    const unsigned c = i + 2 < len ? bytes[i + 2] : 0u;
+    const unsigned n = (a << 16) | (b << 8) | c;
+    out += tbl[(n >> 18) & 63u];
+    out += tbl[(n >> 12) & 63u];
+    out += (i + 1 < len) ? tbl[(n >> 6) & 63u] : '=';
+    out += (i + 2 < len) ? tbl[n & 63u] : '=';
+  }
+  return out;
+}
+
+}  // namespace
+
+bool run_shell_in_dir(const std::filesystem::path& cwd, const std::string& shell_cmdline, std::string& combined_out,
+                      int& exit_code) {
+  combined_out.clear();
+  exit_code = -1;
+  const std::string cwd_s = cwd.empty() ? "." : cwd.generic_string();
+  const std::string invoke = posix_sh_cmd_to_ps_invocation(shell_cmdline);
+  if (invoke.empty() && !shell_cmdline.empty())
+    return false;
+  const std::string ps_script =
+      "Set-Location " + ps_single_quote_literal(cwd_s) + "; " + invoke + "; exit $LASTEXITCODE";
+  const int wlen =
+      MultiByteToWideChar(CP_UTF8, 0, ps_script.c_str(), static_cast<int>(ps_script.size()), nullptr, 0);
+  if (wlen <= 0)
+    return false;
+  std::vector<wchar_t> wbuf(static_cast<size_t>(wlen));
+  if (MultiByteToWideChar(CP_UTF8, 0, ps_script.c_str(), static_cast<int>(ps_script.size()), wbuf.data(), wlen) != wlen)
+    return false;
+  const auto* wbytes = reinterpret_cast<const unsigned char*>(wbuf.data());
+  const size_t wbytes_len = static_cast<size_t>(wlen) * sizeof(wchar_t);
+  const std::string b64 = base64_encode_utf16le_bytes(wbytes, wbytes_len);
+  const std::string full = "powershell.exe -NoProfile -NonInteractive -EncodedCommand " + b64;
+  FILE* pipe = _popen(full.c_str(), "rb");
+  if (!pipe)
+    return false;
+  char buf[4096];
+  for (;;) {
+    const size_t nr = fread(buf, 1, sizeof(buf), pipe);
+    if (nr == 0)
+      break;
+    combined_out.append(buf, nr);
+  }
+  const int st = _pclose(pipe);
+  if (st == -1)
+    exit_code = -1;
+  else
+    exit_code = (st >> 8) & 0xFF;
+  return true;
+}
+
+#else
+
 bool run_shell_in_dir(const std::filesystem::path& cwd, const std::string& shell_cmdline, std::string& combined_out,
                       int& exit_code) {
   combined_out.clear();
@@ -226,6 +388,8 @@ bool run_shell_in_dir(const std::filesystem::path& cwd, const std::string& shell
     exit_code = 128 + WTERMSIG(st);
   return true;
 }
+
+#endif
 
 std::string intermediate_leaf_from_build_dir_field(const std::string& field) {
   std::string s = field;
