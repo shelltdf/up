@@ -15,9 +15,9 @@
 | [hello_data_files/](hello_data_files/) | 演示 `xml/json/svg` 数据文件随安装产物落盘并由可执行程序启动加载。 |
 | [meta_codegen/](meta_codegen/) | 演示 `moc/uic/rc` 风格代码生成工具：`.h -> .meta.cpp`、`.ui -> .h+.cpp`、`.rc -> .h+.cpp`。 |
 | [plugin_runtime/](plugin_runtime/) | 演示插件共享库动态加载：默认导出 `init/update/shutdown/info` 并由测试程序运行。 |
-| [native_cmake_vendor/](native_cmake_vendor/) | **遗留实现回归**：`package.xml` 中 **`<cmake source_dir="..."/>`** + `ExternalProject`；**非**产品推荐路径（见 `doc/zh/package-target-xml-spec.md` 文首）。 |
+| [smoke_minimal_exe/](smoke_minimal_exe/) | **最小包冒烟**：仅可执行目标。 |
 | [prebuilt_static_stub/](prebuilt_static_stub/) | 演示 **`imported_static_library`** + **`<prebuilt import_lib="..."/>`**：链入预编译的 `stub_import.lib`（Windows MSVC x64 已提交 `lib/import/`；可再用 `lib/CMakeLists.txt` 重生）。 |
-| third-party CMake SDK（外部目录） | **推荐**：包外 `cmake --install` 后**手写** `imported_installed_*` / `imported_*`（见 [`doc/zh/getting-started.md`](../doc/zh/getting-started.md)）。**遗留** `up reverse` 行为见 [`doc/zh/package-target-xml-spec.md`](../doc/zh/package-target-xml-spec.md) §11。 |
+| third-party CMake SDK（外部目录） | **推荐**：包外 `cmake --install` 后**手写** `imported_installed_*` / `imported_*`（见 [`doc/zh/getting-started.md`](../doc/zh/getting-started.md)）。 |
 
 ### 包依赖关系
 
@@ -31,7 +31,7 @@ flowchart LR
   hello_data_files["hello_data_files"]
   meta_codegen["meta_codegen"]
   plugin_runtime["plugin_runtime"]
-  native_cmake_vendor["native_cmake_vendor"]
+  smoke_minimal_exe["smoke_minimal_exe"]
   prebuilt_static_stub["prebuilt_static_stub"]
   thirdPartyCmakeSdk["third_party_cmake_sdk (external)"]
   hello_demo --> hello_simple_lib
@@ -48,7 +48,7 @@ flowchart LR
 - `hello_data_files`：无包级依赖（资源文件安装与运行时加载示例）。
 - `meta_codegen`：无包级依赖（代码生成工具示例）。
 - `plugin_runtime`：无包级依赖（插件动态加载示例）。
-- `native_cmake_vendor`：无包级依赖（原生 CMake 子工程接入示例）。
+- `smoke_minimal_exe`：无包级依赖（最小可执行目标布局示例）。
 - `prebuilt_static_stub`：无包级依赖（预编译静态库导入示例）。
 - `third_party_cmake_sdk`（external）：外部目录示例节点，不属于仓库内 `test_projects/` 子目录；实际依赖关系取决于被导入 SDK 的 `package.xml/target.xml`。
 
@@ -63,7 +63,7 @@ flowchart LR
 
 1. `package.xml`
    - 声明包级依赖：`<dependency name="..."/>`
-   - **不推荐**包级 **`<cmake source_dir="..."/>`**；优先包外安装上游后再在本包 `target.xml` 声明产物（**遗留**场景仍见 `native_cmake_vendor`）。
+   - 在包外构建/安装上游后在本包 `target.xml` 用 **`imported_installed_*`** 等声明产物。
 2. `target.xml`
    - 预编译库：使用 `imported_static_library` / `imported_shared_library` + `<prebuilt .../>`
    - 上游安装产物包装：使用 `imported_installed_static_library` / `imported_installed_shared_library` + `<install artifact="..."/>`

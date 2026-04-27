@@ -80,11 +80,6 @@ void build_window() {
   NSMenuItem* actTop = [[NSMenuItem alloc] initWithTitle:@"Actions" action:nil keyEquivalent:@""];
   NSMenu* actMenu = [[NSMenu alloc] initWithTitle:@"Actions"];
   NSMenuItem* m;
-#if UP_ENABLE_REVERSE
-  m = [[NSMenuItem alloc] initWithTitle:@"Reverse" action:@selector(doReverse:) keyEquivalent:@"j"];
-  [m setTarget:ctrl];
-  [actMenu addItem:m];
-#endif
   m = [[NSMenuItem alloc] initWithTitle:@"Configure" action:@selector(doConfigure:) keyEquivalent:@"k"];
   [m setTarget:ctrl];
   [actMenu addItem:m];
@@ -110,15 +105,8 @@ void build_window() {
   NSButton* b3 = makeBtn(@"Run", ctrl, @selector(doRun:));
   NSButton* b4 = makeBtn(@"Test", ctrl, @selector(doTest:));
   NSButton* b5 = makeBtn(@"Pack", ctrl, @selector(doPack:));
-#if UP_ENABLE_REVERSE
-  NSButton* b0 = makeBtn(@"Reverse", ctrl, @selector(doReverse:));
-#endif
   CGFloat x = 20;
-#if UP_ENABLE_REVERSE
-  for (NSButton* b in @[ b0, b1, b2, b3, b4, b5 ]) {
-#else
   for (NSButton* b in @[ b1, b2, b3, b4, b5 ]) {
-#endif
     [b setFrame:NSMakeRect(x, y, 100, 28)];
     [root addSubview:b];
     x += 108;

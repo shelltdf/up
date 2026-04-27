@@ -17,7 +17,6 @@ enum : WORD { kUpGuiAppIconResourceId = 1 };
 constexpr int IDC_PATH = 101;
 constexpr int IDC_BROWSE = 102;
 constexpr int IDC_CONFIGURE = 103;
-constexpr int IDC_REVERSE = 139;
 constexpr int IDC_LIST = 141;
 constexpr int IDC_LIST_HINT = 142;
 constexpr int IDC_BUILD = 104;

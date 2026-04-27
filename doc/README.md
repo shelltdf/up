@@ -1,6 +1,6 @@
 # `doc/` 文档索引
 
-本目录为 **实现侧补充文档**（与 `ai-software-engineering/` 四阶段文档互补）。**产品方向**：**纯手写** **`package.xml` / `target.xml`**；**`up reverse`** 与 **`package.xml` 的 `<cmake/>`** 见 **[zh/package-target-xml-spec.md](zh/package-target-xml-spec.md)** 文首与 §11（遗留说明）。
+本目录为 **实现侧补充文档**（与 `ai-software-engineering/` 四阶段文档互补）。**产品方向**：**纯手写** **`package.xml` / `target.xml`**（见 **[zh/package-target-xml-spec.md](zh/package-target-xml-spec.md)** 文首、**`up spec`**）。
 
 **`doc/zh/` 与 `doc/en/` 文件名一一对应**：英文侧除 **`en/user-manual.md`** 为完整稿外，其余 **`en/*.md`** 当前为**入口页**（链到中文正文或 `up spec`），便于双语目录对齐与后续补译。
 

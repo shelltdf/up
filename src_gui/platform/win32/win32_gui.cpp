@@ -2065,7 +2065,7 @@ bool GuiMergeableCacheKeyUtf8(const std::string& k) {
   };
   if (meta.count(k) != 0)
     return false;
-  if (k.rfind("UP_", 0) == 0 || k.rfind("UPSTREAM_", 0) == 0)
+  if (k.rfind("UP_", 0) == 0)
     return true;
   for (size_t i = 0; i < k.size(); ++i) {
     const unsigned char c = static_cast<unsigned char>(k[i]);
@@ -2698,9 +2698,6 @@ void SetUiRunning(bool running) {
   g_running = running;
   const BOOL en = running ? FALSE : TRUE;
   if (g_toolbar) {
-#if UP_ENABLE_REVERSE
-    SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_REVERSE, static_cast<LPARAM>(!running));
-#endif
     SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_LIST, static_cast<LPARAM>(!running));
     SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_CONFIGURE, static_cast<LPARAM>(!running));
     SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_BUILD, static_cast<LPARAM>(!running));
@@ -2737,9 +2734,6 @@ void SetUiRunning(bool running) {
     EnableMenuItem(menu, IDM_EXIT, ena);
     EnableMenuItem(menu, IDM_ABOUT, running ? gray : ena);
     EnableMenuItem(menu, IDM_UP_HELP, running ? gray : ena);
-#if UP_ENABLE_REVERSE
-    EnableMenuItem(menu, IDC_REVERSE, running ? gray : ena);
-#endif
     EnableMenuItem(menu, IDC_LIST, running ? gray : ena);
     EnableMenuItem(menu, IDC_CONFIGURE, running ? gray : ena);
     EnableMenuItem(menu, IDC_BUILD, running ? gray : ena);
@@ -3174,9 +3168,6 @@ void CreateMainMenu(HWND hwnd) {
   AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(file), T(L"文件(&F)", L"&File"));
 
   HMENU tools = CreateMenu();
-#if UP_ENABLE_REVERSE
-  AppendMenuW(tools, MF_STRING, IDC_REVERSE, T(L"逆向(&J)", L"re&verse"));
-#endif
   AppendMenuW(tools, MF_STRING, IDC_LIST, T(L"列表(&L)", L"&list"));
   AppendMenuW(tools, MF_STRING, IDC_CONFIGURE, T(L"配置(&C)", L"&configure"));
   AppendMenuW(tools, MF_STRING, IDC_BUILD, T(L"编译(&B)", L"&build"));
@@ -4446,9 +4437,6 @@ void CreateToolbarButtons(HWND tb) {
     const wchar_t* text;
   };
   const Entry entries[] = {
-#if UP_ENABLE_REVERSE
-      {IDC_REVERSE, STD_FILEOPEN, T(L"逆向", L"reverse")},
-#endif
       {IDC_LIST, STD_COPY, T(L"列表", L"list")},
       {IDC_CONFIGURE, STD_PROPERTIES, T(L"配置", L"configure")},
       {IDC_BUILD, STD_REPLACE, T(L"编译", L"build")},
@@ -4972,12 +4960,6 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         SendMessageW(g_scan_list, LB_SETCURSEL, static_cast<WPARAM>(dst), 0);
         return 0;
       }
-#if UP_ENABLE_REVERSE
-      if (id == IDC_REVERSE) {
-        RunUpAsync(L"reverse");
-        return 0;
-      }
-#endif
       if (id == IDC_CONFIGURE) {
         if (ShowConfigureOptionDialog(hwnd))
           RunUpAsync(L"configure");

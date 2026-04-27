@@ -74,15 +74,6 @@ std::string cmake_escape_string_value(const std::string& v) {
   return o;
 }
 
-std::string cmake_list_to_externalproject_pipe_list(const std::string& list_semicolon_separated) {
-  std::string out = list_semicolon_separated;
-  for (char& c : out) {
-    if (c == ';')
-      c = '|';
-  }
-  return out;
-}
-
 }  // namespace
 
 std::string build_cmake_build_command(const BuildBackendContext& ctx) {
@@ -94,8 +85,6 @@ std::string build_cmake_build_command(const BuildBackendContext& ctx) {
   }
   for (const auto& kv : ctx.opts) {
     if (kv.first.rfind("UP_", 0) != 0)
-      continue;
-    if (kv.first.rfind("UPSTREAM_", 0) == 0)
       continue;
     if (kv.first == "UP_CMAKE_PREFIX_PATH")
       continue;
@@ -129,44 +118,12 @@ std::string build_cmake_configure_command(const ConfigureBackendContext& ctx) {
 }
 
 int write_cmake_lists(const ConfigureGraphModel& model) {
-  const unsigned ep_jobs = model.parallel_compile_jobs ? model.parallel_compile_jobs : 1u;
   std::ostringstream cm;
   int command_idx = 0;
   cm << "cmake_minimum_required(VERSION 3.20)\n";
   cm << "project(" << model.package_name << " LANGUAGES C CXX)\n";
   cm << "set(CMAKE_CXX_STANDARD 17)\n";
   cm << "set(CMAKE_CXX_STANDARD_REQUIRED ON)\n";
-
-  const std::string cfg_label = (model.config_mode == "debug") ? "Debug" : "Release";
-
-  if (!model.external_cmake.empty()) {
-    cm << "include(ExternalProject)\n";
-    for (const auto& ep : model.external_cmake) {
-      const std::string bdir = to_posix_path_string(ep.binary_dir);
-      const std::string sdir = to_posix_path_string(ep.source_dir);
-      const std::string idir = to_posix_path_string(ep.install_prefix);
-      cm << "ExternalProject_Add(" << ep.ep_target_name << "\n";
-      cm << "  SOURCE_DIR \"" << sdir << "\"\n";
-      cm << "  BINARY_DIR \"" << bdir << "\"\n";
-      cm << "  LIST_SEPARATOR \"|\"\n";
-      cm << "  CMAKE_ARGS\n";
-      cm << "    \"-DCMAKE_INSTALL_PREFIX=" << cmake_escape_string_value(idir) << "\"\n";
-      cm << "    \"-DCMAKE_PREFIX_PATH="
-         << cmake_escape_string_value(cmake_list_to_externalproject_pipe_list(model.cmake_prefix_path)) << "\"\n";
-      if (!model.cmake_parent_multi_config)
-        cm << "    \"-DCMAKE_BUILD_TYPE=" << cfg_label << "\"\n";
-      for (const auto& kv : ep.upstream_cmake_args) {
-        cm << "    \"-D" << kv.first << "=" << cmake_escape_string_value(kv.second) << "\"\n";
-      }
-      cm << "  BUILD_COMMAND \"${CMAKE_COMMAND}\" --build \"" << bdir << "\" --config " << cfg_label << " --parallel "
-         << ep_jobs << "\n";
-      cm << "  INSTALL_COMMAND \"${CMAKE_COMMAND}\" --install \"" << bdir << "\" --config " << cfg_label << "\n";
-      cm << ")\n";
-    }
-    cm << "add_custom_target(up_external_cmake_aggregate)\n";
-    for (const auto& ep : model.external_cmake)
-      cm << "add_dependencies(up_external_cmake_aggregate " << ep.ep_target_name << ")\n";
-  }
 
   const std::optional<std::filesystem::path> pkg_src_root = infer_common_source_root(model);
 
@@ -205,8 +162,6 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
       cm << "target_include_directories(" << t.name << " INTERFACE \""
           << to_posix_path_string(std::filesystem::absolute(*pkg_src_root)) << "\")\n";
     }
-    if (t.imported_from_install_prefix && !model.external_cmake.empty())
-      cm << "add_dependencies(" << t.name << " up_external_cmake_aggregate)\n";
   }
 
   for (const auto& t : model.targets) {
@@ -247,8 +202,6 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
         cm << "add_custom_command(TARGET " << t.name << " POST_BUILD COMMAND " << s.postprocess_command << ")\n";
       }
     }
-    if (!model.external_cmake.empty())
-      cm << "add_dependencies(" << t.name << " up_external_cmake_aggregate)\n";
   }
 
   for (const auto& t : model.targets) {
@@ -293,8 +246,6 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
         cm << " \"" << cmake_escape_string_value(d) << "\"";
       cm << ")\n";
     }
-    if (!model.external_cmake.empty())
-      cm << "add_dependencies(" << t.name << " up_external_cmake_aggregate)\n";
   }
 
   cm << "include(CTest)\n";

@@ -10,14 +10,12 @@
 ## 源码布局（概念映射）
 
 - `src/exe/`：入口、全局参数（如 `--verbose`）、子命令分发。
-- `src/lib/engine/commands/`：各子命令实现（configure、build、run、test、pack、spec；可选 `reverse`）。
+- `src/lib/engine/commands/`：各子命令实现（configure、build、run、test、pack、spec、list 等）。
 - `src/lib/engine/backends/`：CMake / Ninja / CTest / 归档等后端适配。
 - `src/lib/infra/`：路径、i18n、控制台 UTF-8 等横切能力。
 - `src_gui/`：GUI 与设置持久化，调用 CLI。
 
 ## 可选编译能力
-
-CMake 选项 **`UP_ENABLE_REVERSE`**（默认 **OFF**）控制是否编译并启用 **`reverse`**（逆向）子命令及 GUI 中相关入口；关闭时 CLI 对 `reverse` 返回明确错误提示。
 
 ## 中间产物目录（cwd 相对）
 

@@ -15,7 +15,6 @@
 | **`package.xml` / `target.xml` 的 `<vars>`** | 包级/目标级**默认值**；可被下层覆盖。 |
 | **`up configure --opt KEY=VALUE`** | 工作区覆盖；与缓存合并时**后出现者优先**（同 `up_cache.txt` 内多行同键时通常以后者为准，具体以合并实现为准）。 |
 | **`.intermediate/build/<叶子>/up_cache.txt`** | configure 结束时写入；含固定元数据行 + **整份合并后的选项映射**（键值对）。 |
-| **`UPSTREAM_*`** | **遗留**：仅当 **`package.xml` 仍使用 `<cmake/>`** 包级子工程时，透传给上游 CMake 的 `-D...` 风格参数（前缀 `UPSTREAM_` 在传递时剥离）。**推荐工作流**为纯手写 XML + 包外 install，可不使用此类键。 |
 
 **合并顺序（`@` / `when` / 包级 `config_files`）**：内置 → 包 `<vars>` → 目标 `<vars>` → `--opt` / `up_cache.txt`（后者覆盖前者）。详见 `package-target-xml-spec.md` §3.5。
 
@@ -69,7 +68,7 @@
 | `UP_CMAKE_PREFIX_PATH` | — | `CMAKE_PREFIX_PATH` 类前缀（configure 写入缓存等） |
 | `UP_BUILD_PARALLEL` | `UP_BUILD_JOBS` | 并行编译线程数（二者为别名；缺省由 configure 按 CPU 数写入） |
 
-**还可写入**：所有 **`UP_*`**、**`UPSTREAM_*`**，以及符合 C 标识符规则的 **自定义键**（用于 XML `<vars>` 默认值覆盖、模板占位等）；禁止使用的保留键以实现校验为准（参见 `up spec` 内说明）。
+**还可写入**：所有 **`UP_*`**，以及符合 C 标识符规则的 **自定义键**（用于 XML `<vars>` 默认值覆盖、模板占位等）；禁止使用的保留键以实现校验为准（参见 `up spec` 内说明）。
 
 ---
 
@@ -85,15 +84,7 @@
 
 ---
 
-## 6. `UPSTREAM_*`（遗留：`<cmake/>` 子工程）
-
-- **产品方向**：新工程**不必**使用 **`<cmake/>`**；本节仅说明若维护仍含 **`<cmake/>`** 的旧 `package.xml` 时的键行为。  
-- 键名以 **`UPSTREAM_`** 开头的内容会作为上游 CMake 的 **`-D`** 参数传入（去掉前缀后的名字由 CMake 后端约定）。  
-- 若宿主 **`up`** 以 **`UP_DISABLE_PACKAGE_XML_CMAKE=ON`** 构建，则 **`<cmake/>` 不解析**（见 `up spec` / 构建说明）。
-
----
-
-## 7. 环境变量（与 CLI 并列，非 `up_cache` 键）
+## 6. 环境变量（与 CLI 并列，非 `up_cache` 键）
 
 | 变量 | 作用 |
 |------|------|
@@ -103,7 +94,7 @@
 
 ---
 
-## 8. up-gui 写入的 `up_gui_settings.txt`（UTF-8）
+## 7. up-gui 写入的 `up_gui_settings.txt`（UTF-8）
 
 与 **`up configure --opt`** 对齐的持久化键（节选，完整见 `src_gui/core/gui_persist.hpp`）：
 
@@ -121,13 +112,13 @@ GUI 会将上述项转成 **`--opt UP_*=...`** 片段参与 configure（与命�
 
 ---
 
-## 9. 自动占位（模板中有、表中无）
+## 8. 自动占位（模板中有、表中无）
 
 对 **`<config_files>`** 模板：若出现 **`@NAME@` / `${NAME}`** 且合并表中尚无 `NAME`，实现会 **以空串加入表** 并删掉占位符（不保留字面 `${NAME}`）。需要在 XML `<vars>` 或 `--opt` 中显式赋值才能得到非空展开。见 `package-target-xml-spec.md` §3.5。
 
 ---
 
-## 10. 相关文档
+## 9. 相关文档
 
 - `package-target-xml-spec.md` — XML、`when`、合并顺序
 - `user-manual.md` — `configure` / `build` / `run` 与 `arch`、`--install-dir-name`

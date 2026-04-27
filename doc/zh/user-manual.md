@@ -5,7 +5,7 @@
 > **文档索引**（`doc/zh` / `doc/en` 全部入口表）：[`../README.md`](../README.md)
 
 - 分步入门（Hello World → 库/宏/条件/第三方/移植）：[`getting-started.md`](getting-started.md)（英文对照页：[`../en/getting-started.md`](../en/getting-started.md)）
-- 产品方向（**纯手写** XML；**不**推 `reverse` / `<cmake/>`）：[`package-target-xml-spec.md`](package-target-xml-spec.md) 文首（英文：[`../en/package-target-xml-spec.md`](../en/package-target-xml-spec.md)）
+- 产品方向（**纯手写** XML）：[`package-target-xml-spec.md`](package-target-xml-spec.md) 文首（英文：[`../en/package-target-xml-spec.md`](../en/package-target-xml-spec.md)）
 - 设计文档：[`DESIGN.md`](../../DESIGN.md)
 - XML 规范：[`package-target-xml-spec.md`](package-target-xml-spec.md)
 - 示例工程：[`test_projects/README.md`](../../test_projects/README.md)
@@ -21,7 +21,7 @@
 | 支持多种目标类型 | 可执行程序 / 库 / 插件 / 资源文件 | 支持 `executable`、`static_library`、`shared_library` 等目标类型，并可组织插件与资源文件等工程产物。 |
 | 配置过程支持变量操作 | 全局变量 + 用户自定义变量 + 变量驱动 target 行为 | 系统会注入默认全局变量，用户可定义变量并在配置阶段参与目标行为控制，例如按 `win32/linux` 条件切换源码、依赖或构建选项。 |
 | 基于现有建造系统和编译器环境 + 不设立复杂规则不增加学习难度 | 复用 CMake / Ninja 与现有编译器链路 | 不额外发明复杂 DSL 或新规则体系，尽量沿用团队已有构建习惯，降低迁移与学习成本。 |
-| 全流程命令 + 全平台开发 + 全平台发布 | configure / build / test / run / pack；**`reverse`（遗留）** | 覆盖从扫描、构建、测试到运行与打包的完整流程。**推荐**纯手写 **`package.xml` / `target.xml`**（见 **`package-target-xml-spec.md`** 文首）；**`reverse`** 仅可选编译，**不**作为默认迁移手段。 |
+| 全流程命令 + 全平台开发 + 全平台发布 | configure / build / test / run / pack | 覆盖从扫描、构建、测试到运行与打包的完整流程。**推荐**纯手写 **`package.xml` / `target.xml`**（见 **`package-target-xml-spec.md`** 文首）。 |
 | 最简单的外部依赖关系扩展 | 通过设置 `scan dir` 搜索外部包建立依赖关系 | 当前可把外部包目录加入扫描来源来建立包依赖；后续可扩展为 `git clone` 或下载并解压 `zip` 后自动纳入 `scan` 来源。 |
 | 可扩展元编程工具接入 | 支持 `moc` / `uic` / `rc` 等工具模式 | 可将代码生成工具接入包体系，支持输入文件转换、生成产物管理与测试验证。 |
 
@@ -133,21 +133,13 @@ $ARCH = .\_build\Release\up.exe print-build-dir-name
   - `shared_library`
   - `asset_bundle`（仅安装资源，无编译单元）
   - `imported_static_library` / `imported_shared_library`：预置二进制 SDK，配合 `<prebuilt .../>`（路径相对 `target.xml` 目录）。完整示例见 [`test_projects/prebuilt_static_stub/`](../../test_projects/prebuilt_static_stub/README.md)（内含已提交的 MSVC `stub_import.lib`；子库输出目录使用 `lib/import/` 以免被仓库根 `.gitignore` 的 `dist/` 规则误忽略）。
-  - `imported_installed_static_library` / `imported_installed_shared_library`：声明**已安装到本包安装前缀**（`CMAKE_INSTALL_PREFIX`）下的库；**推荐**在包外先 `cmake --install`（或等价安装），再手写 `<install artifact="..."/>`（`artifact` / 可选 `interface_include` 均相对 `CMAKE_INSTALL_PREFIX`）。遗留场景下也可与同包 **`<cmake/>`** 子工程的 install 衔接。Windows 下 shared 还需 `implib="..."`。此类目标不能与磁盘预置的 `<prebuilt/>` 混用。
-
-### 3.1b 遗留：原生 CMake 子工程（`<cmake/>`）
-
-> **产品方向**：**不推荐**在新 `package.xml` 中使用 **`<cmake/>`**；请优先**包外**构建/安装上游，再用 **`imported_installed_*`** 描述产物（见 **`getting-started.md`**）。
-
-在 `package.xml` 中可增加一行 **`<cmake source_dir="相对路径"/>`**（相对 `package.xml` 所在目录），指向已有 `CMakeLists.txt` 的上游工程。`configure` 生成的聚合工程会通过 **`ExternalProject_Add`** 先配置、构建并安装该子工程（安装前缀与本包 `.intermediate/install/<arch>/` 一致），再构建本包内由 `target.xml` 描述的目标。传给上游 CMake 的可选缓存变量可使用 **`UPSTREAM_`** 前缀（例如 `up configure --opt UPSTREAM_BUILD_TESTS=OFF`），实现内会去掉前缀后作为 `-D` 传入子工程。
-
-限制：**仅 CMake 聚合后端**支持 `<cmake/>`；`UP_TARGET_BUILD_SYSTEM=ninja` 时会报错。
+  - `imported_installed_static_library` / `imported_installed_shared_library`：声明**已安装到本包安装前缀**（`CMAKE_INSTALL_PREFIX`）下的库；**推荐**在包外先 `cmake --install`（或等价安装），再手写 `<install artifact="..."/>`（`artifact` / 可选 `interface_include` 均相对 `CMAKE_INSTALL_PREFIX`）。Windows 下 shared 还需 `implib="..."`。此类目标不能与磁盘预置的 `<prebuilt/>` 混用。
 
 规则约束：`up` / `up-gui` 不对任何具体第三方代码库做内置特判；依赖关系、安装产物、头文件目录等信息都必须通过 `package.xml` / `target.xml` 显式声明。
 
-### 3.1c `CMAKE_PREFIX_PATH` 合并
+### 3.1b `CMAKE_PREFIX_PATH` 合并
 
-聚合工程（以及**若仍存在**的 **`<cmake/>`** 子工程）会带上 **`CMAKE_PREFIX_PATH`**，由以下部分**去重后**拼接（分号分隔，与 CMake 列表一致）：
+聚合工程会带上 **`CMAKE_PREFIX_PATH`**，由以下部分**去重后**拼接（分号分隔，与 CMake 列表一致）：
 
 1. 当前 `cwd` 下本配置的安装前缀 **`.intermediate/install/<arch>/`**（始终排在最前，便于优先找到本工作区已安装的包）。
 2. **`--opt UP_CMAKE_PREFIX_PATH=路径1;路径2`** 中的额外前缀（如第三方 SDK 的 CMake 包根）；相对路径按 **`cwd`** 解析。
@@ -203,9 +195,7 @@ cmake -S . -B _build -G "Visual Studio 17 2022" -A x64
 cmake --build _build --config Release
 ```
 
-可选：如需编译出带 **`up reverse`** 的宿主，请在首次配置时追加 **`-DUP_ENABLE_REVERSE=ON`**。**产品方向**为手写 **`package.xml` / `target.xml`**，不必开启此项。
-
-历史上曾使用子命令 **`project`** / 选项 **`--project-dir`**，当前版本已删除且无别名；若仍使用 **`reverse`**，请配合 **`--source-dir`（或 `-C`）**。
+历史上曾使用子命令 **`project`** / 选项 **`--project-dir`**，当前版本已删除且无别名。
 
 方式 B：Python 脚本
 
@@ -236,7 +226,6 @@ $ARCH = .\_build\Release\up.exe print-build-dir-name
 - `up pack --install-dir-name <名>...`
 - `up list [--format tree|json|xml] [--xml <path>] [--json <path>] [--quiet]`
 - `up spec` / `up print-build-dir-name`
-- `up reverse ...`（**遗留**；**需**宿主 `up` 以 **`-DUP_ENABLE_REVERSE=ON`** 构建；否则子命令不可用）— **不推荐**作为新项目入口；行为摘要见 **`package-target-xml-spec.md` §11**。
 
 `list` 参数行为摘要：
 

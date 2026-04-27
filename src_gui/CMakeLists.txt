@@ -71,11 +71,6 @@ if(MSVC)
   target_compile_definitions(up-gui PRIVATE _CRT_SECURE_NO_WARNINGS)
   target_compile_options(up-gui PRIVATE /utf-8)
 endif()
-if(UP_ENABLE_REVERSE)
-  target_compile_definitions(up-gui PRIVATE UP_ENABLE_REVERSE=1)
-else()
-  target_compile_definitions(up-gui PRIVATE UP_ENABLE_REVERSE=0)
-endif()
 
 # GTK/Cocoa load up_gui.png from the executable directory; keep in sync with install rule.
 add_custom_command(

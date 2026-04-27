@@ -65,13 +65,6 @@ using up::gui::platform::cocoa::utf8_to_ns;
   }
 }
 
-#if UP_ENABLE_REVERSE
-- (void)doReverse:(id)sender {
-  (void)sender;
-  run_up_async("reverse");
-}
-#endif
-
 - (void)doConfigure:(id)sender {
   (void)sender;
   const std::string cwd = persist::path_to_portable_utf8(ns_to_utf8([cs().tf_cwd stringValue]));

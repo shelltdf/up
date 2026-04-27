@@ -27,7 +27,6 @@ $ARCH = .\path\to\up.exe print-build-dir-name
 
 向标准输出打印内嵌的规范文本，便于无仓库 `doc/` 副本时由工具消费；不改变工作区文件。
 
-## `reverse`（逆向）子命令
+## ~~`reverse`（逆向）~~（已移除）
 
-- 预处理/探测外部工程并生成 `package.xml` 与 `.targets/` 等；实现位于 `src/lib/engine/reverse/*`（条件编译）。
-- **若二进制未带 `UP_ENABLE_REVERSE=1`**：`up reverse` 固定失败并提示使用 `-DUP_ENABLE_REVERSE=ON` 重编译。
+- 历史版本曾提供 **`up reverse`** 与 **`UP_ENABLE_REVERSE`** 构建开关；当前仓库**已删除**该子命令及 `src/lib/engine/reverse/` 实现。工程迁移请手写 **`package.xml` / `target.xml`**（见 `doc/zh/package-target-xml-spec.md` 文首）。

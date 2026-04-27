@@ -10,9 +10,6 @@ void on_browse_cwd(GtkWidget*, gpointer);
 void on_scan_add(GtkWidget*, gpointer);
 void on_scan_remove(GtkWidget*, gpointer);
 void run_up_line_async(const std::string& args_no_exe);
-#if UP_ENABLE_REVERSE
-void on_reverse(GtkWidget*, gpointer);
-#endif
 void on_configure(GtkWidget*, gpointer);
 void on_build(GtkWidget*, gpointer);
 void on_run(GtkWidget*, gpointer);

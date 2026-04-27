@@ -45,9 +45,6 @@ void gtk_application_activate(GtkApplication* app, gpointer) {
     g_signal_connect(it, "activate", G_CALLBACK(cb), nullptr);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu_actions), it);
   };
-#if UP_ENABLE_REVERSE
-  add_menu("_Reverse", on_reverse);
-#endif
   add_menu("_Configure", on_configure);
   add_menu("_Build", on_build);
   add_menu("_Run", on_run);
@@ -62,9 +59,6 @@ void gtk_application_activate(GtkApplication* app, gpointer) {
     g_signal_connect(b, "clicked", G_CALLBACK(cb), nullptr);
     gtk_toolbar_insert(GTK_TOOLBAR(bar), b, -1);
   };
-#if UP_ENABLE_REVERSE
-  add_tb("Reverse", on_reverse);
-#endif
   add_tb("Configure", on_configure);
   add_tb("Build", on_build);
   add_tb("Run", on_run);

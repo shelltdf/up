@@ -8,8 +8,7 @@
 ### 产品方向（推荐工作流）
 
 - **推荐**：用户**纯手写** **`package.xml`** 与 **`target.xml`**，显式描述源文件、`<headers>`、`<defines>`、`<dependency>`、预置库（**`<prebuilt>`** / **`imported_*`**）等；分步说明见 **[getting-started.md](getting-started.md)**。
-- **不作为默认路径**：**`up reverse`**（从现有 CMake/工程自动产出 XML）与 **`package.xml` 中的 `<cmake/>`**（包级聚合上游 CMake 子工程）视为**历史/可选能力**：实现中可能仍存在解析与生成逻辑，但**产品文档与教程不再把它们当作迁移或集成的首选**。
-- **集成上游 CMake 第三方库时**：建议在 **包外** 用上游自带 CMake 完成 **`cmake --install` 到固定前缀**，再在 `up` 侧用 **`imported_installed_*` + `<install …/>`**（或 **`imported_*` + `<prebuilt>`**）手写声明安装产物与头文件路径；避免依赖自动逆向或包内 `<cmake/>` 聚合。
+- **集成上游 CMake 第三方库时**：在 **包外** 用上游自带 CMake 完成 **`cmake --install` 到固定前缀**，再在 `up` 侧用 **`imported_installed_*` + `<install …/>`**（或 **`imported_*` + `<prebuilt>`**）手写声明安装产物与头文件路径。
 
 ---
 
@@ -75,8 +74,8 @@
     - **`asset_bundle`**：仅资源安装，不参与编译链接。
     - **`imported_static_library`**：磁盘预置静态库（需配 `<prebuilt .../>`）。
     - **`imported_shared_library`**：磁盘预置动态库（需配 `<prebuilt .../>`）。
-    - **`imported_installed_static_library`**：声明**已安装到本包安装前缀**（`CMAKE_INSTALL_PREFIX`）下的静态库产物；**推荐**在包外先 `cmake --install` 再手写 `<install artifact=\"...\"/>`。遗留路径下也可与同包 **`<cmake/>`** 子工程的 install 衔接。
-    - **`imported_installed_shared_library`**：同上，针对动态库；Windows 常需 **`implib`**。遗留路径可与 **`<cmake/>`** 衔接。
+    - **`imported_installed_static_library`**：声明**已安装到本包安装前缀**（`CMAKE_INSTALL_PREFIX`）下的静态库产物；**推荐**在包外先 `cmake --install` 再手写 `<install artifact=\"...\"/>`。
+    - **`imported_installed_shared_library`**：同上，针对动态库；Windows 常需 **`implib`**。
 
 类型与关键子标签约束（当前实现）：
 
@@ -165,7 +164,7 @@
 ### 2.4 包级变量 `<vars>`（可选）
 
 - 块 **`<vars>...</vars>`**，内为自闭合 **`<var name="KEY" value="VAL"/>`**（`value` 可省略表示空字符串）。
-- 每个 **KEY** 表示**默认值**，供本包下所有 `target.xml` 在 **`@KEY@` 替换**与 **`when`** 中使用；同一 KEY 还可在 **`up configure --opt KEY=...`** 或 **`up_cache.txt`** 中写入（键须符合实现允许的格式：所有 `UP_*` / `UPSTREAM_*`，以及除保留键外的 C 风格标识符），**configure 阶段最后应用，覆盖 XML 默认值**（见 §3.5 合并顺序）。
+- 每个 **KEY** 表示**默认值**，供本包下所有 `target.xml` 在 **`@KEY@` 替换**与 **`when`** 中使用；同一 KEY 还可在 **`up configure --opt KEY=...`** 或 **`up_cache.txt`** 中写入（键须符合实现允许的格式：所有 `UP_*`，以及除保留键外的 C 风格标识符），**configure 阶段最后应用，覆盖 XML 默认值**（见 §3.5 合并顺序）。
 
 ### 2.5 包级编译宏 `<defines>`（可选）
 
@@ -233,7 +232,7 @@
 - **`${NAME}`**（CMake **`configure_file`** 风格）：与 **`@NAME@`** 使用**同一套**合并后的变量表；`NAME` 须为 C 标识符（`${` 与 `}` 之间允许首尾空白）。**先做占位符收集**：模板里出现但表中**没有**的 `NAME` 会**以空串加入表**，再交替替换，故未在 XML / `--opt` 声明的占位符会变成**空展开**（不再保留 `${NAME}`）；需要非空内容必须在 **`<vars>`** 或 **`--opt`** 中提供。不解析 **`$<...>`** 生成器表达式。处理顺序：**反复交替 `@NAME@` 与 `${NAME}` 至不再变化（有上限）**，最后再做 **`#cmakedefine`**。
 - **`#cmakedefine` / `#cmakedefine01`**：在上述占位符替换之后，按与 CMake **`configure_file`** 相近的**子集**处理（见 `src/lib/engine/xml/var_subst.cpp` 中 `apply_cmakedefine_directives`）：未出现在合并变量表、或值为空 / `0` / `false` / `off` / `no` 视为假；`#cmakedefine01` 展开为 **`#define NAME 0`** 或 **`1`**；`#cmakedefine NAME` 为真则 **`#define NAME`**，否则 **`/* #undef NAME */`**；带尾部内容的 **`#cmakedefine NAME …`** 为真则输出 **`#define NAME …`**。用于 zlib 等 **`zconf.h.in`** 类模板；**不是**完整 CMake 生成器。
 
-**CMake 与 Ninja**：两后端均直接消费 **已由 up 写出的生成文件**（与普通源文件相同），当前实现**不**为此生成 CMake 的 `configure_file()`。若需要完整上游 CMake `configure_file` 语义，请在**包外**用上游工程处理，或（遗留路径）使用 **`<cmake/>`** 子工程（见文首「产品方向」）。
+**CMake 与 Ninja**：两后端均直接消费 **已由 up 写出的生成文件**（与普通源文件相同），当前实现**不**为此生成 CMake 的 `configure_file()`。若需要完整上游 CMake `configure_file` 语义，请在**包外**用上游工程处理。
 
 #### `<sources>` 上的 `when`
 
@@ -288,21 +287,3 @@
 | 数据结构 | `src/lib/engine/xml/simple_xml.hpp`（`PackageDesc` / `TargetDesc`） |
 
 后续若引入 XSD/JSON Schema，可在本文件顶部增加版本号与变更记录。
-
----
-
-## 11. 遗留：`up reverse` 对 CMake 的默认生成行为（补充）
-
-> **说明**：本节描述 **`up reverse`** 在启用 **`UP_ENABLE_REVERSE=ON`** 构建时的行为，仅供对照旧工作流或维护实现；**不推荐**作为新项目的入口。新工程请手写 XML（见文首「产品方向」）。
-
-- 当探测到 CMake 工程时，`up reverse` 默认会：
-  - 生成 `package.xml`（包含 `<cmake source_dir="..."/>`）
-  - 尝试解析 `install(TARGETS ...)`，自动生成 `imported_installed_*` 的 `target.xml`（默认写到 `.targets/<name>/target.xml`）
-  - 尝试解析 `find_package(...)`，自动写入包级 `<dependency .../>`：
-    - `find_package(Xxx REQUIRED ...)` -> `<dependency name="xxx" optional="false"/>`
-    - 其它 `find_package(Xxx ...)` -> `<dependency name="xxx" optional="true"/>`
-- 规则边界：`up` / `up-gui` 不内置针对具体第三方项目（库名、仓库名、目录布局）的特判逻辑；行为必须由 `package.xml` / `target.xml` 显式配置驱动。
-- 目标名优先使用 CMake target 名（必要时做 sanitize / 去重）。
-- 包名默认优先取 `CMakeLists.txt` 中 `project(...)` 名；若无法解析则回退目录名（`--package-name` 仍最高优先）。
-- `install(TARGETS ...)` 解析不到库规则时，仅生成 `package.xml` 并输出提示；可手工补充 `target.xml`。
-- 对声明的依赖包，若可从其 `imported_installed_*` 目标推导出安装库/头路径，`configure` 会向主包上游 CMake 额外注入常见缓存变量（如 `<PKG>_LIBRARY` / `<PKG>_LIBRARY_DEBUG` / `<PKG>_INCLUDE_DIR` 等）以辅助 `find_package`；Windows 下优先使用 `implib` 或 `.lib`，避免把 `.dll` 注入链接库变量。

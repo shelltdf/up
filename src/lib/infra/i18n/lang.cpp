@@ -71,11 +71,6 @@ void print_usage(std::ostream& os) {
                            "  up run --install-dir-name <名> <可执行目标名>  （<名> 为 .intermediate/install 下的子目录名）\n"
                            "  up test --install-dir-name <名> [测试目标名]\n"
                            "  up pack --install-dir-name <名>...  （可重复，多架构）\n"
-#if UP_ENABLE_REVERSE
-                           "  up reverse [--dry-run] [--force] [--cmake-query [--cmake-query-build-dir <path>] [--cmake-query-keep-build]]\n"
-                           "             [--cmake-no-file-api] [--source-dir|-C <path>] [--output-dir <path>] [--package-name <name>]\n"
-                           "    (CMake 默认顺序: 安装规则扫描 -> File API(cmake) -> 源码启发式; --cmake-no-file-api 跳过 File API)\n"
-#endif
                            "  up --help | -h | help\n";
 #ifdef _WIN32
     if (try_write_utf8_to_console(os, zh_usage))
@@ -95,11 +90,6 @@ void print_usage(std::ostream& os) {
           "  up run --install-dir-name <leaf> <target_executable_name>  (<leaf> under .intermediate/install)\n"
           "  up test --install-dir-name <leaf> [test_target_name]\n"
           "  up pack --install-dir-name <leaf>...  (repeatable; multi-arch)\n"
-#if UP_ENABLE_REVERSE
-          "  up reverse [--dry-run] [--force] [--cmake-query [--cmake-query-build-dir <path>] [--cmake-query-keep-build]]\n"
-          "             [--cmake-no-file-api] [--source-dir|-C <path>] [--output-dir <path>] [--package-name <name>]\n"
-          "    (CMake default: install scan -> File API (runs cmake) -> source heuristics; --cmake-no-file-api skips File API)\n"
-#endif
           "  up --help | -h | help\n";
   }
 }

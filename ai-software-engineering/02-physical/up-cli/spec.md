@@ -4,7 +4,7 @@
 
 - **`0`**：成功、或仅打印用法/help。
 - **`1`**：未知子命令等一般错误。
-- **`2`**：参数缺失/非法、缺少 `up_cache.txt`、`reverse` 被禁用等可恢复错误。
+- **`2`**：参数缺失/非法、缺少 `up_cache.txt` 等可恢复错误。
 
 ## 子命令与实现源文件（主要）
 
@@ -17,7 +17,6 @@
 | `pack` | `src/lib/engine/commands/pack.cpp` |
 | `spec` | `src/lib/engine/commands/spec.cpp` |
 | `list` | `src/lib/engine/commands/list.cpp` |
-| `reverse` | `src/lib/engine/commands/reverse.cpp` 等（`#if UP_ENABLE_REVERSE`） |
 | `print-build-dir-name` | `src/exe/main.cpp` |
 
 ## 物理目录分层约束

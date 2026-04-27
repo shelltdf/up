@@ -1,33 +1,5 @@
-# `up reverse` fixtures
+# 小型工程样例目录
 
-Manual checks (from repository root, using built `up.exe`):
+本目录保留 **CMake / Autotools / QMake** 等**极简**工程树，仅供人工对照或文档说明；**不包含**可执行的 `up` 自动化流程。
 
-```bat
-cd test_projects\project_fixtures\cmake_hello
-..\..\..\_build\Release\up.exe reverse --dry-run
-```
-
-Expect: probe CMake, `fixture_hello` target with `main.cpp`.
-
-```bat
-cd test_projects\project_fixtures\zlib_style
-..\..\..\_build\Release\up.exe reverse --dry-run
-```
-
-Expect: source-tree heuristic, one `static_library` with `a.c` and `b.c`.
-
-```bat
-cd test_projects\project_fixtures\autotools_min
-..\..\..\_build\Release\up.exe reverse --dry-run
-```
-
-Expect: Autotools, executable `demo` with `main.c`.
-
-```bat
-cd test_projects\project_fixtures\qmake_min
-..\..\..\_build\Release\up.exe reverse --dry-run
-```
-
-Expect: QMake, executable `qdemo` with `main.cpp`.
-
-Use `--output-dir` to generate into a temp directory; add `--force` if re-running against an existing `package.xml`.
+历史说明：仓库曾提供 **`up reverse`** 子命令用于从这些树草稿化 XML，该子命令**已删除**。

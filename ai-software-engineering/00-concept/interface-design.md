@@ -22,7 +22,6 @@ up [--verbose|-v] <subcommand> ...
 | `pack` | **`--install-dir-name <name>`**（可重复） | 将对应安装树打入归档。 |
 | `spec` | 无 | 向 stdout 输出内嵌的英文 XML 规则说明（供工具/AI）。 |
 | `print-build-dir-name` | `[--build-dir-name <leaf>]`、`[--opt ...]` | 打印当前配置对应的 **`arch`** 字符串（供脚本承接 `run`/`test`/`pack`）。 |
-| `reverse` | 多选项（CMake 探测相关，逆向生成描述） | **仅当**构建时启用 **`UP_ENABLE_REVERSE=ON`**；否则报错并提示重编译。 |
 
 ## 路径与编码约束（接口契约）
 

@@ -79,12 +79,6 @@ void run_up_line_async(const std::string& args_no_exe) {
   set_status("Running up…");
 }
 
-#if UP_ENABLE_REVERSE
-void on_reverse(GtkWidget*, gpointer) {
-  run_up_line_async("reverse");
-}
-#endif
-
 void on_configure(GtkWidget*, gpointer) {
   const std::string cwd = persist::path_to_portable_utf8(get_entry(gs().entry_cwd));
   const std::string cfg = shell::build_configure_args_line(gs().up_exe, cwd, get_entry(gs().entry_build), collect_scans(),

@@ -5,7 +5,7 @@ This manual is for first-time users of `up`. It helps you understand and run `up
 > **Documentation index** (full `doc/zh` / `doc/en` table): [`../README.md`](../README.md)
 
 - Step-by-step tutorial: [`../zh/getting-started.md`](../zh/getting-started.md) (English entry: [`getting-started.md`](getting-started.md))
-- Product direction (**hand-written** `package.xml` / `target.xml`; **not** promoting `reverse` / `<cmake/>`): intro of [`../zh/package-target-xml-spec.md`](../zh/package-target-xml-spec.md)
+- Product direction (**hand-written** `package.xml` / `target.xml`): intro of [`../zh/package-target-xml-spec.md`](../zh/package-target-xml-spec.md)
 - Design document: [`DESIGN.md`](../DESIGN.md)
 - XML spec: [`../zh/package-target-xml-spec.md`](../zh/package-target-xml-spec.md) (English entry: [`package-target-xml-spec.md`](package-target-xml-spec.md))
 - Example projects: [`test_projects/README.md`](../test_projects/README.md)
@@ -111,23 +111,13 @@ Backend behavior:
   - `shared_library`
   - `asset_bundle` (install-only resources, no compile units)
   - `imported_static_library` / `imported_shared_library` (prebuilt SDKs; use `<prebuilt .../>`, paths relative to `target.xml` unless absolute). See [`test_projects/prebuilt_static_stub/`](../test_projects/prebuilt_static_stub/README.md) for an end-to-end sample (ships an MSVC `stub_import.lib`; the stub CMake writes to `lib/import/` so it is not ignored by the repo-root `dist/` `.gitignore` rule).
-  - `imported_installed_static_library` / `imported_installed_shared_library`: declare libraries **already installed** under this package’s install prefix (`CMAKE_INSTALL_PREFIX`). **Recommended:** run **`cmake --install`** (or vendor SDK) **outside** `up`, then hand-write `<install artifact="..."/>` (and `implib` on Windows for shared). A legacy workflow may still chain the same with an in-package **`<cmake/>`** subtree.
-
-### 3.1b Legacy: native CMake subtree (`<cmake/>`)
-
-> **Product direction:** **Do not** rely on **`<cmake/>`** for new `package.xml` files; prefer **hand-written** `package.xml` / `target.xml` and out-of-band installs (see **[`../zh/getting-started.md`](../zh/getting-started.md)** and the intro of **[`../zh/package-target-xml-spec.md`](../zh/package-target-xml-spec.md)**).
-
-In `package.xml` you may add **`<cmake source_dir="relative/path"/>`** (relative to the directory containing `package.xml`). That directory must contain a `CMakeLists.txt`. The aggregate CMake backend builds it with **`ExternalProject_Add`** before compiling targets declared in this package, using the same install prefix as `.intermediate/install/<arch>/`.
-
-Optional cache variables for the subtree use the **`UPSTREAM_`** prefix, e.g. `up configure --opt UPSTREAM_BUILD_TESTS=OFF` becomes `-DBUILD_TESTS=OFF` in the child CMake.
-
-**Limitation:** `<cmake/>` is supported only with **`UP_TARGET_BUILD_SYSTEM=cmake`**. Ninja mode reports an error.
+  - `imported_installed_static_library` / `imported_installed_shared_library`: declare libraries **already installed** under this package’s install prefix (`CMAKE_INSTALL_PREFIX`). **Recommended:** run **`cmake --install`** (or vendor SDK) **outside** `up`, then hand-write `<install artifact="..."/>` (and `implib` on Windows for shared).
 
 Rule boundary: `up` / `up-gui` must stay generic and do not embed per-project special cases. Dependency wiring, install artifacts, and include directories must be expressed explicitly via `package.xml` / `target.xml`.
 
-### 3.1c `CMAKE_PREFIX_PATH` merging
+### 3.1b `CMAKE_PREFIX_PATH` merging
 
-The generated super-build (and **any remaining** **`<cmake/>`** external projects) receive **`CMAKE_PREFIX_PATH`** built as:
+The generated super-build receives **`CMAKE_PREFIX_PATH`** built as:
 
 1. This configure’s install prefix (`.intermediate/install/<arch>/` for the current `cwd`), **always first**.
 2. Extra directories from **`--opt UP_CMAKE_PREFIX_PATH=dir1;dir2`** (semicolon-separated). Relative entries are resolved against **`cwd`**.
@@ -183,9 +173,7 @@ cmake -S . -B _build -G "Visual Studio 17 2022" -A x64
 cmake --build _build --config Release
 ```
 
-Optional: add **`-DUP_ENABLE_REVERSE=ON`** on the first `cmake` line to build a host that includes the legacy **`up reverse`** subcommand. **Product direction** is hand-written `package.xml` / `target.xml`; you do not need this flag for normal use.
-
-The legacy **`project`** subcommand and **`--project-dir`** flag are removed with no alias; if you still use **`reverse`**, pair it with **`--source-dir`** (or **`-C`**).
+The legacy **`project`** subcommand and **`--project-dir`** flag are removed with no alias.
 
 Option B: Python scripts
 
@@ -214,7 +202,6 @@ Common commands (see also `up --help`):
 - `up pack --install-dir-name <name>...`
 - `up list [--format tree|json|xml] [--xml <path>] [--json <path>] [--quiet]`
 - `up spec` / `up print-build-dir-name`
-- `up reverse ...` (**legacy**; **requires** a host `up` built with **`-DUP_ENABLE_REVERSE=ON`**) — **not** recommended for new projects; see **`package-target-xml-spec.md` §11** for a short behavior summary.
 
 `list` option behavior summary:
 

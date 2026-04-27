@@ -1,5 +1,5 @@
 ﻿#include <cstdio>
 int main() {
-  std::puts("native_cmake_vendor app");
+  std::puts("smoke_minimal_exe");
   return 0;
 }

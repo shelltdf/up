@@ -9,7 +9,7 @@ namespace {
 // English-only: embedded copy of rules aligned with doc/zh/package-target-xml-spec.md for AI/tools without repo .md.
 // Split into named chunks: MSVC ~16kB string literal limit; edit the slice you need.
 constexpr const char* kXmlSpecEnThroughSection3 =
-  R"SPEC(UP_XML_SPEC_REVISION=16
+  R"SPEC(UP_XML_SPEC_REVISION=19
 
 # up — package.xml and target.xml (machine-oriented summary)
 
@@ -39,13 +39,8 @@ After authoring XML, always validate with:
 | File | Location | Role |
 |------|----------|------|
 )SPEC"
-#if !UP_DISABLE_PACKAGE_XML_CMAKE
-  R"SPEC(| package.xml | One per **package root** (same tree as targets below) | Package `name`, optional `version`, **package-level** `<dependency/>`, optional `<cmake/>`, optional `<vars>` / `<defines>`. |
+  R"SPEC(| package.xml | One per **package root** (same tree as targets below) | Package `name`, optional `version`, **package-level** `<dependency/>`, optional `<vars>` / `<defines>`. |
 )SPEC"
-#else
-  R"SPEC(| package.xml | One per **package root** (same tree as targets below) | Package `name`, optional `version`, **package-level** `<dependency/>`, optional `<vars>` / `<defines>`. (Package `<cmake/>` is **disabled** in this `up.exe` — **UP_DISABLE_PACKAGE_XML_CMAKE**.) |
-)SPEC"
-#endif
   R"SPEC(| target.xml | **Exactly one** per **target directory** (each target lives in its own subdirectory) | Target `name`, `type`, sources, optional `<headers>`/assets, **target-level** `<dependency/>`. |
 
 Rules:
@@ -68,24 +63,6 @@ Rules:
 - If a `target.xml` uses `OtherPkg:SomeLib`, that `OtherPkg` **must** be listed here (non-optional), or configure fails.
 
 )SPEC"
-#if !UP_DISABLE_PACKAGE_XML_CMAKE
-  R"SPEC(
-
-### Optional native CMake subtree
-- `<cmake source_dir="relative/path"/>` — directory (relative to **package.xml parent**) containing upstream
-  `CMakeLists.txt`. Used by the CMake backend when generating the aggregate project.
-
-)SPEC"
-#else
-  R"SPEC(
-
-### Package.xml `<cmake/>` (compile-time disabled in this binary)
-
-- **UP_DISABLE_PACKAGE_XML_CMAKE** is **ON**: `package.xml` **`<cmake/>` is not parsed**; configure does **not** wire
-  ExternalProject / upstream CMake from that tag. Rebuild `up` with **`-DUP_DISABLE_PACKAGE_XML_CMAKE=OFF`** to enable.
-
-)SPEC"
-#endif
   R"SPEC(### Optional package variables `<vars>`
 - Block: `<vars>...</vars>` with self-closing entries `<var name="KEY" value="VAL"/>` (`value` may be omitted for empty).
 - Each pair is a **default** for `KEY` for all targets in the package (for `@KEY@` / `when=`); the same key may be
@@ -98,7 +75,7 @@ Rules:
 
 - `up configure --opt KEY=value` (or `KEY=value` lines in `up_cache.txt`) supplies entries merged into the same option
   map as `UP_*` build switches.
-- Keys accepted into that map: any **`UP_*`** or **`UPSTREAM_*`**, plus any **C identifier** (`[A-Za-z_][A-Za-z0-9_]*`)
+- Keys accepted into that map: any **`UP_*`**, plus any **C identifier** (`[A-Za-z_][A-Za-z0-9_]*`)
   except reserved cache metadata (`cwd`, `arch`, `package`, `generated_file`, `scan_roots`, `up.cache.version`).
 - These entries apply **after** package and target `<vars>` in the template/`when` merge, so they **override** XML
   defaults for the same name.
@@ -203,7 +180,7 @@ outside the forms above.
 | asset_bundle | may be empty | no | no | Need at least one of sources / assets / `<headers>`. |
 | imported_static_library | not required | **required** | no | Paths relative to `target.xml` dir unless absolute. |
 | imported_shared_library | not required | **required** | no | On Windows, dll + import `.lib` must be resolvable. |
-| imported_installed_static_library | not required | no | **required** | `artifact` relative to `CMAKE_INSTALL_PREFIX` after upstream install. |
+| imported_installed_static_library | not required | no | **required** | `artifact` relative to `CMAKE_INSTALL_PREFIX` (populate prefix by out-of-band install / CI). |
 | imported_installed_shared_library | not required | no | **required** | Windows: need `implib` for the import library. |
 
 ### Sources
@@ -233,18 +210,11 @@ outside the forms above.
   **`#define NAME 0|1`**. This helps zlib-style `zconf.h` templates; it is **not** a full CMake `configure_file` engine.
 
 )SPEC"
-#if !UP_DISABLE_PACKAGE_XML_CMAKE
   R"SPEC(**Backends (CMake vs Ninja):** both backends consume the **already generated** file as a normal source path. `up` does
 **not** emit CMake `configure_file()` for these entries; both backends treat the output like any other source file. For
-  full upstream CMake `configure_file` semantics, keep using a native `<cmake/>` subtree.
+  full upstream CMake `configure_file` semantics, run that step **outside** `up` and commit or stage the generated headers.
 
 )SPEC"
-#else
-  R"SPEC(**Backends (CMake vs Ninja):** both backends consume the **already generated** file as a normal source path. `up` does
-**not** emit CMake `configure_file()` for these entries; both backends treat the output like any other source file.
-
-)SPEC"
-#endif
   R"SPEC(### Headers block (`<headers>`) — compile + install layout
 - Self-closing entries under `<headers>` (`<includes>` is not supported):
   - `<dir from="rel/path" to="optional_include_subdir"/>`
@@ -312,10 +282,6 @@ package.xml:
 <package name="my_app" version="0.1.0">
   <dependency name="my_sdk" optional="false"/>
 )SPEC"
-#if !UP_DISABLE_PACKAGE_XML_CMAKE
-  R"SPEC(  <cmake source_dir="."/>
-)SPEC"
-#endif
   R"SPEC(</package>
 ```
 
@@ -346,10 +312,6 @@ blocks you do not need. Some combinations are **mutually exclusive by `type`** (
   <dependency name="other_pkg" optional="false"/>
   <dependency name="maybe_pkg" optional="true"/>
 )SPEC"
-#if !UP_DISABLE_PACKAGE_XML_CMAKE
-  R"SPEC(  <cmake source_dir="vendor/upstream_cmake"/>
-)SPEC"
-#endif
   R"SPEC(  <vars>
     <var name="MY_DEFAULT" value="from_package_xml"/>
     <var name="FLAG_ONLY"/>

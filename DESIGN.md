@@ -52,9 +52,6 @@
 | `run` | 运行已编译完成的目标（如 `exe`）。 |
 | `test` | 运行单元测试；**无参数时运行全部**测试。 |
 | `pack` | 将编译结果打包为目标形态（安装程序、apk 等，依后端而定）。 |
-| `reverse` | **遗留/可选**：从 **cwd** 中已有 CMake 等工程**试探性**生成 `package.xml` / `target.xml`（需 **`UP_ENABLE_REVERSE=ON`** 构建宿主）。**产品方向**为**纯手写** XML，见 **`doc/zh/package-target-xml-spec.md`** 文首；本命令不作为新项目的推荐入口。 |
-
-**`reverse` 与 CMake File API（遗留）：** 若仍启用 **`up reverse`**，默认可能调用 **`cmake`** 读取 **File API（codemodel）**；`--cmake-no-file-api` 会跳过该子进程，仅做安装规则与 **CMakeLists** 启发式扫描，结果常不完整。**不推荐**依赖此路径做工程迁移。
 
 ### 2.1 configure 要点
 
@@ -128,7 +125,7 @@
 | 阶段 | 内容 |
 |------|------|
 | P0 | CLI 子命令骨架、`.intermediate` 目录约定、`package.xml` / 子目录 `target.xml` 最小解析、configure 生成 CMake、build 调用 cmake、test 调用 ctest。 |
-| P1 | 多包依赖图、完整 **arch** 元组、缓存文件、路径校验与 i18n 文案；**`reverse` 仅作遗留能力**，迁移以**手写** `package.xml` / `target.xml` 为主（见 `doc/zh/getting-started.md`）。 |
+| P1 | 多包依赖图、完整 **arch** 元组、缓存文件、路径校验与 i18n 文案；工程迁移以**手写** `package.xml` / `target.xml` 为主（见 `doc/zh/getting-started.md`）。 |
 | P2 | Ninja/sln 生成器、元工具链插件、moc/uic 类管线。 |
 | P3 | `up-gui.exe`、pack 多形态、模板市场/用户模板。 |
 

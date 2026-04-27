@@ -32,8 +32,6 @@ bool DomDocument::build(const BuildDomOptions& options, DomDocument& out, std::s
     node->version_ = pkg.version;
     node->package_xml_path_ = pkg_path;
     node->dependencies_ = pkg.dependencies;
-    if (pkg.external_cmake.has_value())
-      node->external_cmake_source_dir_ = pkg.external_cmake->source_dir;
     for (const auto& kv : pkg.vars) {
       VarEntry e;
       e.name = kv.first;

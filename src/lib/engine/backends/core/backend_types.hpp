@@ -62,7 +62,7 @@ struct ConfigureTargetModel {
   /** CMake `target_link_libraries`: target name + visibility keyword (private|public|interface). */
   std::vector<std::pair<std::string, std::string>> links;
   bool imported_prebuilt = false;
-  // True: IMPORTED_* paths are ${CMAKE_INSTALL_PREFIX}/<rel> after ExternalProject install.
+  // True: IMPORTED_* paths are ${CMAKE_INSTALL_PREFIX}/<rel> (installed artifact layout).
   bool imported_from_install_prefix = false;
   std::string install_rel_artifact;
   std::string install_rel_interface_include;
@@ -88,14 +88,6 @@ struct ConfigureInstallFileRule {
   std::string postprocess_command;
 };
 
-struct ConfigureExternalCmake {
-  std::string ep_target_name;
-  std::filesystem::path source_dir;
-  std::filesystem::path binary_dir;
-  std::filesystem::path install_prefix;
-  std::vector<std::pair<std::string, std::string>> upstream_cmake_args;  // -DName=Value after UPSTREAM_ strip
-};
-
 struct ConfigureGraphModel {
   std::string build_system;
   std::string package_name;
@@ -103,7 +95,7 @@ struct ConfigureGraphModel {
   std::filesystem::path build_root;
   std::filesystem::path out_dir;
   std::filesystem::path install_root;
-  /** Parallel jobs baked into ExternalProject BUILD_COMMAND (from merged UP_* options). */
+  /** Parallel jobs for aggregate `cmake --build` / ninja rules (from merged UP_* options). */
   unsigned parallel_compile_jobs = 1;
   std::vector<ConfigureTargetModel> targets;
   std::vector<std::string> install_exe_names;
@@ -111,7 +103,6 @@ struct ConfigureGraphModel {
   std::vector<ConfigureInstallFileRule> install_file_rules;
   std::vector<ConfigureInstallDirRule> asset_dir_rules;
   std::vector<ConfigureInstallFileRule> asset_file_rules;
-  std::vector<ConfigureExternalCmake> external_cmake;
   std::string cmake_prefix_path;
   bool cmake_parent_multi_config = false;
 };

@@ -9,8 +9,8 @@
 - **包**：含 **`package.xml`** 的目录为包根；其下每个构建目标独占**一个子目录**，内有 **`target.xml`**。
 - **扫描**：在含 `package.xml` 的树的**上一级**（或任意 cwd + `--scan`）执行 **`up configure`**。
 - **构建 / 运行**：`up build` 须带 **`--build-dir-name`**；`up run` 须带 **`--install-dir-name`**（值为 `.intermediate/install/` 下**架构子目录名**，见 **`script-tutorial.md` §1**）。
-- **产品方向**：**纯手写** **`package.xml` / `target.xml`**；**不**把 **`up reverse`** 或 **`package.xml` 的 `<cmake/>`** 当作默认迁移手段（见 **`package-target-xml-spec.md`** 文首）。
-- **延伸阅读**：[internal-variables.md](internal-variables.md)（变量）、[script-messages.md](script-messages.md)（**`trigger` 消息表**与脚本 var）、[script-tutorial.md](script-tutorial.md)（预处理 / Qt / 遗留 `<cmake/>`）、[package-target-xml-spec.md](package-target-xml-spec.md)（`when` / `config_files` / `<dependency>`）；英文目录见 [`../en/`](../en/)。
+- **产品方向**：**纯手写** **`package.xml` / `target.xml`**（见 **`package-target-xml-spec.md`** 文首）。**`up reverse` 子命令已移除**。
+- **延伸阅读**：[internal-variables.md](internal-variables.md)（变量）、[script-messages.md](script-messages.md)（**`trigger` 消息表**与脚本 var）、[script-tutorial.md](script-tutorial.md)（预处理 / Qt）、[package-target-xml-spec.md](package-target-xml-spec.md)（`when` / `config_files` / `<dependency>`）；英文目录见 [`../en/`](../en/）。
 
 ---
 
@@ -161,25 +161,25 @@ hello_pkg/
 
 ## 第 8 步：第三方库 — 包外 `install` + 手写 **`imported_installed_*`**
 
-适用于：上游是 **CMake**（或其它构建），你已在 **包外** 把库 **`install` 到与本包一致的安装前缀**（或与 **`artifact=`** 相对关系一致的路径），希望在 `up` 里只**声明**产物，而**不**在 `package.xml` 里使用 **`<cmake/>`** 聚合子工程。
+适用于：上游是 **CMake**（或其它构建），你已在 **包外** 把库 **`install` 到与本包一致的安装前缀**（或与 **`artifact=`** 相对关系一致的路径），希望在 `up` 里只**声明**产物。
 
 1. **不要**依赖自动逆向：在仓库旁或 CI 中单独对上游执行 **`cmake --install`**（或上游官方安装包），得到 `.lib` / `.so` / 头文件等固定布局。
 2. 在本包 **`target.xml`** 中声明 **`imported_installed_static_library` / `imported_installed_shared_library`**，用 **`<install artifact="..." />`**（及 Windows 下 **`implib`** 等）指向**相对 `CMAKE_INSTALL_PREFIX`** 的安装路径；见 **`package-target-xml-spec.md`** 类型表。
 3. 用 **`<headers>`** 或 **`interface_include`**（若适用）暴露给消费方。
 4. 可执行目标 **`<dependency name="…"/>`** 链接该导入目标。
 
-**遗留对照**：仓库 **`test_projects/native_cmake_vendor/`** 仍含 **`<cmake/>`**，用于**实现回归**，**不代表**推荐工作流。若维护旧工程仍含 **`<cmake/>`** / **`UPSTREAM_*`**，见 **`internal-variables.md`** 与 **`script-tutorial.md` §6**。
+**对照**：仓库 **`test_projects/smoke_minimal_exe/`** 为**最小可执行目标**冒烟示例。
 
 ---
 
 ## 移植专题 A：把现有 **CMake** 工程迁到 `up`（纯手写）
 
-**推荐路径**（**不**使用 **`up reverse`**、**不**以 **`<cmake/>`** 为默认）：
+**推荐路径**：
 
 1. **阅读上游**：列出源文件、公共头、宏、`link_libraries`、安装规则；在 `up` 侧为每个编译单元建 **`target.xml`**，用 **`<sources>` / `<headers>` / `<defines>` / `<dependency>`** 重写依赖图。
 2. **第三方 / 子树**：若在包外已安装，用 **`imported_installed_*` + `<install …/>`**；若只有预编译 SDK，用 **`imported_*` + `<prebuilt>`**（见第 7 步）。
 3. **渐进迁移**：可先让主程序依赖 **`imported_*`** 包装现有二进制，再逐步把源码移入 **`static_library`** 目标。
-4. **历史说明**：**`up reverse`** 与 **`<cmake/>`** 的行为仍写在 **`package-target-xml-spec.md` §11** 与 **`script-tutorial.md` §6**，仅供对照旧仓库，**勿**作为新项目模板。
+4. **历史说明**：旧版若曾依赖已移除的子命令或内嵌构建描述，请按 **`up spec`** 与 **`package-target-xml-spec.md`** 改为纯手写 XML。
 
 ---
 

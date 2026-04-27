@@ -1,6 +1,6 @@
 # uni-package (up)
 
-**uni-package**（缩写 **`up`**）是一个面向「用数据结构驱动构建与包关系」的原型命令行工具：用 **`package.xml`** 与各目标子目录中的 **`target.xml`**（每目录至多一个）描述包与目标，`up` 负责扫描、生成 CMake 工程、构建、测试与运行。**推荐**用户**纯手写**上述 XML（见 **`doc/zh/getting-started.md`**、**`doc/zh/package-target-xml-spec.md`** 文首）；**`up reverse`** 与 **`package.xml` 的 `<cmake/>`** 为**遗留/可选**，文档不再作为默认迁移手段。新手从零上手建议先读 **[doc/zh/getting-started.md](doc/zh/getting-started.md)**（分步教程）与 **[doc/zh/user-manual.md](doc/zh/user-manual.md)**（中文）、**[doc/en/user-manual.md](doc/en/user-manual.md)**（English）；`package.xml` / `target.xml` 的字段与解析约定见 **[doc/zh/package-target-xml-spec.md](doc/zh/package-target-xml-spec.md)**；**内置变量、`up_cache` 与 `UP_*` 键**见 **[doc/zh/internal-variables.md](doc/zh/internal-variables.md)**；**从最小包到 `when`/预处理/子工程**见 **[doc/zh/script-tutorial.md](doc/zh/script-tutorial.md)**；**脚本消息 `trigger` 总表与 Lua 绑定语义**见 **[doc/zh/script-messages.md](doc/zh/script-messages.md)**；`doc/` 双语索引见 **[doc/README.md](doc/README.md)**。设计背景与完整约定见 **[DESIGN.md](DESIGN.md)**，思维导图见 **[mindmap.mmd](mindmap.mmd)**。近期变更记录见 **[CHANGELOG.md](CHANGELOG.md)**。
+**uni-package**（缩写 **`up`**）是一个面向「用数据结构驱动构建与包关系」的原型命令行工具：用 **`package.xml`** 与各目标子目录中的 **`target.xml`**（每目录至多一个）描述包与目标，`up` 负责扫描、生成 CMake 工程、构建、测试与运行。**推荐**用户**纯手写**上述 XML（见 **`doc/zh/getting-started.md`**、**`doc/zh/package-target-xml-spec.md`** 文首）。**`up reverse` 子命令已移除**；迁移请手写 **`package.xml` / `target.xml`**。新手从零上手建议先读 **[doc/zh/getting-started.md](doc/zh/getting-started.md)**（分步教程）与 **[doc/zh/user-manual.md](doc/zh/user-manual.md)**（中文）、**[doc/en/user-manual.md](doc/en/user-manual.md)**（English）；`package.xml` / `target.xml` 的字段与解析约定见 **[doc/zh/package-target-xml-spec.md](doc/zh/package-target-xml-spec.md)**；**内置变量、`up_cache` 与 `UP_*` 键**见 **[doc/zh/internal-variables.md](doc/zh/internal-variables.md)**；**从最小包到 `when`/预处理/子工程**见 **[doc/zh/script-tutorial.md](doc/zh/script-tutorial.md)**；**脚本消息 `trigger` 总表与 Lua 绑定语义**见 **[doc/zh/script-messages.md](doc/zh/script-messages.md)**；`doc/` 双语索引见 **[doc/README.md](doc/README.md)**。设计背景与完整约定见 **[DESIGN.md](DESIGN.md)**，思维导图见 **[mindmap.mmd](mindmap.mmd)**。近期变更记录见 **[CHANGELOG.md](CHANGELOG.md)**。
 
 ## 依赖
 
@@ -22,8 +22,6 @@ cmake --build _build --config Release
 - `up.lib`（静态库实现）
 
 位于 `_build\Release\`（Windows + Release 示例）。MSVC 下工程启用 **静态 CRT**（`/MT`）与 **`/utf-8`**，与 [DESIGN.md](DESIGN.md) 中对 `up.exe` 的取向一致。
-
-可选：首次 `cmake` 时加上 **`-DUP_ENABLE_REVERSE=ON`** 可编译出带 **`up reverse`** 子命令的宿主（**遗留**，用于对照旧工作流）。默认 **OFF** 时执行 `up reverse` 会提示需重编译。**产品方向**为手写 `package.xml` / `target.xml`，不必开启此项。
 
 也可用 Python 脚本（在仓库根目录）：
 
@@ -57,7 +55,6 @@ python package.py --with-dev
 | `up spec` | 向 stdout 输出内嵌的英文 `package.xml` / `target.xml` 规则说明（供工具/AI） |
 | `up list [--format tree\|json\|xml] [--xml <路径>] [--json <路径>] [--quiet]` | 输出当前 DOM 结构（默认 tree）；`--format` 控制 stdout 载荷；`--xml/--json` 导出文件；`--quiet` 抑制树形与导出提示。部分组合参数会给 warning 但不失败 |
 | `up print-build-dir-name [--build-dir-name <叶子>] [--opt ...]` | 打印当前配置对应的 **`<arch>`** 字符串（便于脚本传给 `run`/`test`/`pack` 的 `--install-dir-name`） |
-| `up reverse ...` | **遗留**：**仅当**构建时启用 **`-DUP_ENABLE_REVERSE=ON`**。曾用于从 CMake 工程试探性生成 `package.xml` / `target.xml`。**不推荐**作为新项目入口；请优先手写 XML（见 **`doc/zh/package-target-xml-spec.md`** 文首）。 |
 
 无子命令或未知子命令时会打印简短用法。
 
@@ -107,7 +104,7 @@ $ARCH = .\_build\Release\up.exe print-build-dir-name
 
 **`configure`** 仍会把本工作区 **`.intermediate/install/<arch>/`** 并入 **`CMAKE_PREFIX_PATH`**，并在多包场景下尽量为 **`find_package`** 推导常见缓存变量（若你仍在 CMake 聚合后端中消费上游 CMake 工程）。规则约束不变：**无**针对 zlib/FBX 等具体库名的内置特判，一切靠 XML 声明。
 
-最小示例（**不含** **`<cmake/>`**；`artifact` 相对安装前缀）：
+最小示例（`artifact` 相对安装前缀）：
 
 ```xml
 <!-- package.xml -->
@@ -155,7 +152,7 @@ $ARCH = .\_build\Release\up.exe print-build-dir-name
 
 `<arch>` 当前按组合信息生成（如 `windows_x86_64_cmake_msvc_dynamic_release` 或 `windows_x86_64_ninja_msvc_dynamic_release`），来源于 `UP_TARGET_*` 配置与主机工具链探测。中间目录名 **`.intermediate`** 与 [mindmap.mmd](mindmap.mmd) 一致，建议加入 `.gitignore`。
 
-**并行编译（加速 `up build`）**：`cmake --build` 与 `ninja install` 会带上并行度；**默认并行度**按本机**当前可见的逻辑处理器数**（Windows：`GetActiveProcessorCount` / `GetNativeSystemInfo`；Linux：`sysconf(_SC_NPROCESSORS_ONLN)`；macOS：`sysctl`；再回退 `std::thread::hardware_concurrency()`，仍未知则用 4），并写入 **`up_cache.txt`** 的 **`UP_BUILD_PARALLEL`** 与 **`UP_BUILD_JOBS`**（二者同值，与 ninja `-j` / cmake `--parallel` 一致；仍可在命令行只改其一）。可用 `up configure --opt UP_BUILD_PARALLEL=16` 覆盖；**不再读取** `CMAKE_BUILD_PARALLEL_LEVEL` 等环境变量。若包内仍含**遗留** **`<cmake/>`** 子工程，生成根 `CMakeLists.txt` 里 **ExternalProject** 的 `BUILD_COMMAND` 会在 **configure 当刻** 按当前选项把并行数写进脚本；若要改子工程并行度需重新 `configure`。
+**并行编译（加速 `up build`）**：`cmake --build` 与 `ninja install` 会带上并行度；**默认并行度**按本机**当前可见的逻辑处理器数**（Windows：`GetActiveProcessorCount` / `GetNativeSystemInfo`；Linux：`sysconf(_SC_NPROCESSORS_ONLN)`；macOS：`sysctl`；再回退 `std::thread::hardware_concurrency()`，仍未知则用 4），并写入 **`up_cache.txt`** 的 **`UP_BUILD_PARALLEL`** 与 **`UP_BUILD_JOBS`**（二者同值，与 ninja `-j` / cmake `--parallel` 一致；仍可在命令行只改其一）。可用 `up configure --opt UP_BUILD_PARALLEL=16` 覆盖；**不再读取** `CMAKE_BUILD_PARALLEL_LEVEL` 等环境变量。
 
 ## 仓库结构（摘要）
 

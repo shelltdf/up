@@ -5,7 +5,7 @@
 ## `up_cache.txt`
 
 - **位置**：`.intermediate/build/<leaf>/up_cache.txt`（`<leaf>` 与 `configure --build-dir-name` 对应，默认 `default`）。
-- **用途**：记录 `cwd`、`arch`、主包名、生成文件路径、`scan_roots` 以及以 `UP_` / `UPSTREAM_` 前缀为主的选项键值，供 `build` / `print-build-dir-name` 等读取。
+- **用途**：记录 `cwd`、`arch`、主包名、生成文件路径、`scan_roots` 以及以 `UP_` 前缀为主的选项键值（及符合 C 标识符的自定义键），供 `build` / `print-build-dir-name` 等读取。
 - **版本行**：`up.cache.version=1`（实现写入，用于未来演进）。
 
 ## GUI 设置

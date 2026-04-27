@@ -15,12 +15,6 @@ struct DefineEntry {
   std::string value;  // optional; empty => define name only (#ifdef NAME)
 };
 
-// Optional native CMake subtree (see package.xml <cmake/>).
-struct PackageExternalCmake {
-  // Directory containing upstream CMakeLists.txt, relative to package.xml parent directory.
-  std::string source_dir;
-};
-
 /** Template processed at `up configure` into `.intermediate/generated/` (package or target subtree; see docs). */
 struct ConfigFileEntry {
   std::string in;  // relative to package.xml parent (package) or target.xml directory (target)
@@ -39,7 +33,6 @@ struct PackageDesc {
   std::string name;
   std::string version;
   std::vector<std::pair<std::string, bool>> dependencies;  // name, optional
-  std::optional<PackageExternalCmake> external_cmake;
   /** `<vars><var name="KEY" value="VAL"/></vars>` — default for KEY; overridable via `up configure --opt` / up_cache (see merge order). */
   std::vector<std::pair<std::string, std::string>> vars;
   std::vector<ScriptEntry> scripts;
@@ -84,7 +77,7 @@ struct TargetDesc {
     std::string dll;
   };
 
-  // After <cmake> subtree installs to CMAKE_INSTALL_PREFIX, wrap an artifact path under that prefix.
+  // Artifact paths relative to CMAKE_INSTALL_PREFIX (populate by out-of-band install / CI).
   struct InstalledWrapDesc {
     std::string artifact;           // e.g. lib/foo.lib — relative to CMAKE_INSTALL_PREFIX
     std::string interface_include;  // e.g. include — optional, INTERFACE include dir under prefix

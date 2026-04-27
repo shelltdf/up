@@ -75,16 +75,6 @@ struct LoadedTarget {
   TargetDesc desc;
 };
 
-struct DepImportedHint {
-  std::string library_abs;
-  std::string include_abs;
-};
-
-DepImportedHint dep_imported_hint_from_targets(const std::string& dep_pkg_name,
-                                               const std::map<std::string, std::filesystem::path>& package_name_to_dir,
-                                               const std::vector<LoadedTarget>& all_targets,
-                                               const std::string& arch);
-
 bool split_dep_ref(const std::string& ref, const std::string& self_pkg, std::string& out_pkg, std::string& out_tgt) {
   const auto p = ref.find(':');
   if (p == std::string::npos) {
@@ -146,111 +136,9 @@ std::string normalize_install_rel_path(std::string s) {
   return s;
 }
 
-std::string cmake_var_prefix_from_dep_name(const std::string& dep_name) {
-  std::string out;
-  out.reserve(dep_name.size());
-  for (char c : dep_name) {
-    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))
-      out.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
-    else
-      out.push_back('_');
-  }
-  return out;
-}
-
-bool is_lib_rel_path(std::string abs_like) {
-  for (char& c : abs_like)
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  return abs_like.size() >= 4 && abs_like.substr(abs_like.size() - 4) == ".lib";
-}
-
-std::string infer_implib_from_dll(const std::filesystem::path& dep_prefix, const std::string& dll_abs_like) {
-  std::filesystem::path dll_path(dll_abs_like);
-  const std::filesystem::path stem = dll_path.stem();
-  const std::filesystem::path guess1 = std::filesystem::absolute(dep_prefix / "lib" / (stem.string() + ".lib")).lexically_normal();
-  const std::filesystem::path guess2 = std::filesystem::absolute(dll_path.parent_path() / (stem.string() + ".lib")).lexically_normal();
-  if (!stem.empty())
-    return to_posix_path_string(guess1);
-  return to_posix_path_string(guess2);
-}
-
-std::string sanitize_ep_base_name(std::string s, const char* fallback) {
-  for (char& c : s) {
-    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'))
-      c = '_';
-  }
-  if (s.empty())
-    s = fallback;
-  return s;
-}
-
-void append_upstream_opts_from_map(ConfigureExternalCmake& ec, const std::map<std::string, std::string>& opts) {
-  for (const auto& kv : opts) {
-    if (kv.first.rfind("UPSTREAM_", 0) != 0)
-      continue;
-    std::string k = kv.first.substr(9);
-    if (!k.empty())
-      ec.upstream_cmake_args.emplace_back(std::move(k), kv.second);
-  }
-}
-
-void append_dep_imported_hints(ConfigureExternalCmake& ec,
-                               const std::set<std::string>& declared_dep_pkgs,
-                               const std::map<std::string, std::filesystem::path>& package_name_to_dir,
-                               const std::vector<LoadedTarget>& all_targets,
-                               const std::string& arch) {
-  for (const auto& dep_pkg : declared_dep_pkgs) {
-    const auto hint = dep_imported_hint_from_targets(dep_pkg, package_name_to_dir, all_targets, arch);
-    const std::string prefix = cmake_var_prefix_from_dep_name(dep_pkg);
-    if (prefix.empty())
-      continue;
-    if (!hint.library_abs.empty()) {
-      ec.upstream_cmake_args.emplace_back(prefix + "_LIBRARY", hint.library_abs);
-      ec.upstream_cmake_args.emplace_back(prefix + "_LIBRARY_RELEASE", hint.library_abs);
-      ec.upstream_cmake_args.emplace_back(prefix + "_LIBRARY_DEBUG", hint.library_abs);
-      ec.upstream_cmake_args.emplace_back(prefix + "_LIBRARIES", hint.library_abs);
-    }
-    if (!hint.include_abs.empty()) {
-      ec.upstream_cmake_args.emplace_back(prefix + "_INCLUDE_DIR", hint.include_abs);
-      ec.upstream_cmake_args.emplace_back(prefix + "_INCLUDE_DIRS", hint.include_abs);
-    }
-  }
-}
-
-bool resolve_external_cmake_source_dir(const std::filesystem::path& package_dir,
-                                       const std::string& source_dir,
-                                       const char* invalid_message_prefix,
-                                       const std::string& invalid_message_detail,
-                                       std::filesystem::path& out_src_abs) {
-  std::filesystem::path src_abs = (package_dir / std::filesystem::path(source_dir)).lexically_normal();
-  std::error_code ec_path;
-  src_abs = std::filesystem::weakly_canonical(std::filesystem::absolute(src_abs), ec_path);
-  if (ec_path || !std::filesystem::is_directory(src_abs)) {
-    std::cerr << invalid_message_prefix << invalid_message_detail << "\n";
-    return false;
-  }
-  if (!std::filesystem::exists(src_abs / "CMakeLists.txt", ec_path)) {
-    std::cerr << "configure: <cmake> directory has no CMakeLists.txt: " << to_posix_path_string(src_abs) << "\n";
-    return false;
-  }
-  out_src_abs = std::move(src_abs);
-  return true;
-}
-
 bool configure_installed_import_target_model(const LoadedTarget& lt,
-                                             bool has_primary_external_cmake,
                                              bool imported_installed_shared,
                                              ConfigureTargetModel& tm) {
-  if (!has_primary_external_cmake) {
-    std::cerr << "configure: target \"" << lt.desc.name << "\" (" << lt.desc.type << ") ";
-#if UP_DISABLE_PACKAGE_XML_CMAKE
-    std::cerr << "uses imported_installed_* which needs an upstream install prefix; package.xml `<cmake/>` is "
-                 "**disabled in this build** (UP_DISABLE_PACKAGE_XML_CMAKE).\n";
-#else
-    std::cerr << "requires package.xml <cmake> so the upstream project installs into the same prefix first.\n";
-#endif
-    return false;
-  }
   if (!lt.desc.installed_wrap.has_value()) {
     std::cerr << "configure: target \"" << lt.desc.name << "\" (" << lt.desc.type << ") requires <install artifact=\"...\"/> in "
               << to_posix_path_string(lt.target_dir / "target.xml") << "\n";
@@ -282,59 +170,6 @@ bool configure_installed_import_target_model(const LoadedTarget& lt,
 #endif
   }
   return true;
-}
-
-DepImportedHint dep_imported_hint_from_targets(const std::string& dep_pkg_name,
-                                               const std::map<std::string, std::filesystem::path>& package_name_to_dir,
-                                               const std::vector<LoadedTarget>& all_targets,
-                                               const std::string& arch) {
-  DepImportedHint hint;
-  const auto pit = package_name_to_dir.find(dep_pkg_name);
-  if (pit == package_name_to_dir.end())
-    return hint;
-  const std::filesystem::path dep_prefix = std::filesystem::absolute(default_install_root(pit->second) / arch);
-  auto resolve_rel_abs = [&](const std::string& rel_raw) -> std::string {
-    const std::string rel = normalize_install_rel_path(rel_raw);
-    if (rel.empty())
-      return {};
-    const std::filesystem::path abs = std::filesystem::absolute(dep_prefix / std::filesystem::path(rel)).lexically_normal();
-    return to_posix_path_string(abs);
-  };
-  for (const auto& lt : all_targets) {
-    if (lt.package_name != dep_pkg_name)
-      continue;
-    if (lt.desc.type != "imported_installed_static_library" && lt.desc.type != "imported_installed_shared_library")
-      continue;
-    if (!lt.desc.installed_wrap.has_value() || lt.desc.installed_wrap->artifact.empty())
-      continue;
-    if (hint.include_abs.empty() && !lt.desc.installed_wrap->interface_include.empty())
-      hint.include_abs = resolve_rel_abs(lt.desc.installed_wrap->interface_include);
-    if (!lt.desc.installed_wrap->implib.empty()) {
-      const std::string implib_abs = resolve_rel_abs(lt.desc.installed_wrap->implib);
-      if (!implib_abs.empty()) {
-        hint.library_abs = implib_abs;
-        return hint;
-      }
-    }
-    const std::string art_abs = resolve_rel_abs(lt.desc.installed_wrap->artifact);
-    if (!art_abs.empty()) {
-      if (is_lib_rel_path(art_abs)) {
-        hint.library_abs = art_abs;
-        return hint;
-      }
-      std::string low = art_abs;
-      for (char& c : low)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-      if (low.size() >= 4 && low.substr(low.size() - 4) == ".dll") {
-        const std::string guessed = infer_implib_from_dll(dep_prefix, art_abs);
-        if (!guessed.empty()) {
-          hint.library_abs = guessed;
-          return hint;
-        }
-      }
-    }
-  }
-  return hint;
 }
 
 void append_cmake_prefix_unique(std::vector<std::filesystem::path>& dedup,
@@ -662,7 +497,7 @@ void write_packages_md(const std::filesystem::path& out_path,
   f << "\n## Declared template variables (`<vars>`)\n\n";
   f << "Each **name** / **value** pair is a **default** for `@NAME@` substitution and `when=` (after built-ins). "
        "At configure, **package** `<vars>` apply, then **target** `<vars>`, then **`--opt` / `up_cache.txt`** for the "
-       "same key (last wins). Allowed override keys include every `UP_*` / `UPSTREAM_*` option plus any **C-style "
+       "same key (last wins). Allowed override keys include every `UP_*` option plus any **C-style "
        "identifier** except reserved cache lines (`cwd`, `arch`, `package`, …); see `up spec`.\n\n";
   bool any_vars = false;
   for (const auto& pp : loaded_packages) {
@@ -1133,13 +968,6 @@ int run_configure(const ConfigureRequest& req) {
     }
   }
 
-#if !UP_DISABLE_PACKAGE_XML_CMAKE
-  if (primary_pkg.external_cmake.has_value() && equals_ci(build_system, "ninja")) {
-    std::cerr << "configure: package.xml <cmake> is not supported with UP_TARGET_BUILD_SYSTEM=ninja (use cmake).\n";
-    return 7;
-  }
-#endif
-
   std::set<std::string> declared_dep_pkgs;
   for (const auto& d : primary_pkg.dependencies) {
     if (!d.first.empty())
@@ -1225,7 +1053,7 @@ int run_configure(const ConfigureRequest& req) {
     std::cerr << "configure: no package resolved for current scan roots.\n";
     return 4;
   }
-  if (pkg_targets.empty() && !primary_pkg.external_cmake.has_value()) {
+  if (pkg_targets.empty()) {
     std::cerr << "configure: package has no target.xml under the same directory tree.\n";
     return 4;
   }
@@ -1525,69 +1353,6 @@ int run_configure(const ConfigureRequest& req) {
   graph_model.cmake_prefix_path =
       merge_cmake_prefix_path_value(std::filesystem::absolute(graph_model.install_root), dep_install_prefixes, opts, cwd);
 
-#if !UP_DISABLE_PACKAGE_XML_CMAKE
-  if (primary_pkg.external_cmake.has_value()) {
-    const std::string& sd = primary_pkg.external_cmake->source_dir;
-    std::filesystem::path src_abs;
-    if (!resolve_external_cmake_source_dir(pkg_dir, sd, "configure: <cmake> source_dir does not resolve to a directory: ",
-                                           sd, src_abs)) {
-      return 5;
-    }
-    ConfigureExternalCmake ec;
-    const std::string ep_base = sanitize_ep_base_name(primary_pkg.name, "pkg");
-    ec.ep_target_name = "up_ext_" + ep_base;
-    ec.source_dir = src_abs;
-    ec.binary_dir = std::filesystem::absolute(build_root / "external" / ep_base);
-    ec.install_prefix = std::filesystem::absolute(graph_model.install_root);
-    // Some upstream projects use unquoted ${CMAKE_DEBUG_POSTFIX} in SET_TARGET_PROPERTIES.
-    // Keep a safe non-empty default to avoid "incorrect number of arguments" when unset.
-    ec.upstream_cmake_args.push_back({"CMAKE_DEBUG_POSTFIX", "d"});
-    append_dep_imported_hints(ec, declared_dep_pkgs, package_name_to_dir, all_targets, arch);
-    append_upstream_opts_from_map(ec, opts);
-    graph_model.external_cmake.push_back(std::move(ec));
-  }
-  for (const auto& dep_pkg : declared_dep_pkgs) {
-    if (dep_pkg == primary_pkg.name)
-      continue;
-    const auto dit = package_name_to_desc.find(dep_pkg);
-    const auto pit = package_name_to_dir.find(dep_pkg);
-    if (dit == package_name_to_desc.end() || pit == package_name_to_dir.end())
-      continue;
-    if (!dit->second.external_cmake.has_value())
-      continue;
-    std::filesystem::path dep_src_abs;
-    if (!resolve_external_cmake_source_dir(pit->second, dit->second.external_cmake->source_dir,
-                                           "configure: dependency package <cmake> source_dir invalid: ", dep_pkg,
-                                           dep_src_abs)) {
-      return 5;
-    }
-    ConfigureExternalCmake ec;
-    const std::string ep_base = sanitize_ep_base_name(dep_pkg, "dep");
-    ec.ep_target_name = "up_ext_dep_" + ep_base;
-    ec.source_dir = dep_src_abs;
-    ec.binary_dir = std::filesystem::absolute(build_root / "external" / ("dep_" + ep_base));
-    ec.install_prefix = std::filesystem::absolute(default_install_root(pit->second) / arch);
-    // Keep the same safe default for dependency external projects.
-    ec.upstream_cmake_args.push_back({"CMAKE_DEBUG_POSTFIX", "d"});
-    bool dep_wants_static = false;
-    bool dep_wants_shared = false;
-    for (const auto& lt : all_targets) {
-      if (lt.package_name != dep_pkg)
-        continue;
-      if (lt.desc.type == "imported_installed_static_library")
-        dep_wants_static = true;
-      else if (lt.desc.type == "imported_installed_shared_library")
-        dep_wants_shared = true;
-    }
-    if (dep_wants_static)
-      ec.upstream_cmake_args.push_back({"BUILD_STATIC_LIBRARY", "ON"});
-    if (dep_wants_shared)
-      ec.upstream_cmake_args.push_back({"BUILD_DYNAMIC_LIBRARY", "ON"});
-    append_upstream_opts_from_map(ec, opts);
-    graph_model.external_cmake.push_back(std::move(ec));
-  }
-#endif
-
   auto resolve_existing_file = [&](const std::filesystem::path& target_dir, const std::string& rel_or_abs,
                                    const char* what) -> std::optional<std::filesystem::path> {
     if (rel_or_abs.empty())
@@ -1701,14 +1466,7 @@ int run_configure(const ConfigureRequest& req) {
     const bool imported_installed_shared = (lt.desc.type == "imported_installed_shared_library");
 
     if (imported_installed_static || imported_installed_shared) {
-      if (!configure_installed_import_target_model(
-              lt,
-#if UP_DISABLE_PACKAGE_XML_CMAKE
-              false,
-#else
-              primary_pkg.external_cmake.has_value(),
-#endif
-              imported_installed_shared, tm))
+      if (!configure_installed_import_target_model(lt, imported_installed_shared, tm))
         return 5;
     } else if (imported_static || imported_shared) {
       if (!lt.desc.prebuilt.has_value()) {

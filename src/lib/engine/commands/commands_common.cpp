@@ -39,7 +39,7 @@ bool up_mergeable_option_key(const std::string& k) {
   };
   if (meta.count(k) != 0)
     return false;
-  if (k.rfind("UP_", 0) == 0 || k.rfind("UPSTREAM_", 0) == 0)
+  if (k.rfind("UP_", 0) == 0)
     return true;
   static const std::regex id(R"rx(^[A-Za-z_][A-Za-z0-9_]*$)rx");
   return std::regex_match(k, id);

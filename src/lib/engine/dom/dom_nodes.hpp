@@ -44,7 +44,6 @@ public:
   const std::filesystem::path& package_xml_path() const noexcept { return package_xml_path_; }
   const std::string& version() const noexcept { return version_; }
   const std::vector<std::pair<std::string, bool>>& dependencies() const noexcept { return dependencies_; }
-  const std::string& external_cmake_source_dir() const noexcept { return external_cmake_source_dir_; }
   const std::vector<std::string>& config_files_in_to() const noexcept { return config_files_in_to_; }
   const std::vector<std::string>& defines() const noexcept { return defines_; }
 
@@ -52,7 +51,6 @@ private:
   std::filesystem::path package_xml_path_;
   std::string version_ = "0.0.0";
   std::vector<std::pair<std::string, bool>> dependencies_;
-  std::string external_cmake_source_dir_;
   std::vector<std::string> config_files_in_to_;
   std::vector<std::string> defines_;
 };

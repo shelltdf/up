@@ -152,22 +152,7 @@ XML 里写了 **`command="..."`** 时，该字符串即最终交给后端的命�
 
 ---
 
-## 6. 遗留：CMake 子工程 `<cmake/>`（不推荐）
-
-> **产品方向**：新工程请**纯手写** `package.xml` / `target.xml`，在包外用上游 CMake 完成构建与 **`install`**，再用 **`imported_installed_*`** 等描述产物（见 **`package-target-xml-spec.md`** 文首与 **`getting-started.md`**）。本节仅保留**实现仍支持的**形状摘要，便于阅读旧仓库或 `test_projects/native_cmake_vendor` 等回归用例。
-
-当需要 **上游完整 CMake 工程**（`ExternalProject` 等）时，在 **`package.xml`** 使用 **`<cmake/>`**（形状与限制见 **`up spec`** 与 `package-target-xml-spec.md`）。
-
-限制摘要：
-
-- **仅 `UP_TARGET_BUILD_SYSTEM=cmake` 时** 支持聚合 `<cmake/>`；**Ninja 顶层模式**下会报错。  
-- 若 **`UP_DISABLE_PACKAGE_XML_CMAKE=ON`** 的 `up.exe`，**`<cmake/>` 不解析**。
-
-子工程参数可通过 **`UPSTREAM_*`** 键传入（见 **`internal-variables.md` §6**）。
-
----
-
-## 7. 调试变量合并结果
+## 6. 调试变量合并结果
 
 - 每次 configure 后在 **`.intermediate/build/<叶子>/packages.md`** 查看包/目标及 **`<vars>` 与选项覆盖** 的摘要。  
 - 直接阅读 **`up_cache.txt`** 核对最终写入的 **`UP_*` 与自定义键**。  
@@ -175,18 +160,18 @@ XML 里写了 **`command="..."`** 时，该字符串即最终交给后端的命�
 
 ---
 
-## 8. 外部元编程工具：以 Qt **moc / uic / rcc** 为例
+## 7. 外部元编程工具：以 Qt **moc / uic / rcc** 为例
 
 本节的思路是：**不用** Qt CMake 的 `AUTOMOC` / `AUTOUIC` / `AUTORCC`（生成器当前也不会替你调用 `find_package(Qt6)`），而是把 **Qt 自带命令行工具**挂到 **§4** 的 **`preprocess`**（或 **`headers` / `assets` 上的 preprocess**）里，把「输入文件 → 生成 `.cpp` / `.h`」写清楚，再把生成物当作普通 **`<sources>` / `<headers>`** 参与编译或安装。
 
-### 8.1 通用约定
+### 7.1 通用约定
 
 1. **工作目录与路径**：`command` 由 **shell/cmd** 执行；请使用相对 **目标目录**（`target.xml` 所在目录）的可靠路径。**注意**：与 **`<config_files>`** 模板不同，`preprocess` 的 **`command` 字符串在 configure 阶段不会做 `@KEY@` / `${KEY}` 替换**；若要用「可配置 Qt 路径」，可依赖 **构建时 `PATH`**、写 **包装脚本**（脚本内读环境变量），或在 **`<vars>`** 中维护语义后由你在命令里手写可解析片段（例如仅 Unix 下用 `$QTDIR/bin/moc`，由 shell 展开）。
 2. **生成物必须显式列出**：例如 `moc` 写出 `gen/moc_widget.cpp`，则目标里要有 **`<file from="gen/moc_widget.cpp"/>`**（并保证 preprocess 先创建该文件）；不要假设「只编译 widget.cpp 就会自动带上 moc 输出」。
 3. **包含目录**：`uic` 生成的 `ui_*.h`、`moc` 生成文件若放在子目录，需 **`target.xml` 的 `<includes>`**（若项目支持）或包级约定，使编译器能找到 `#include "ui_mainwindow.h"` 等。
-4. **链接 Qt 库**：在 **`target.xml`** 的 **`<dependency name="…"/>`** 指向已安装好的 **导入库目标**（`imported_*`）或本包编译库；**推荐**在包外安装 Qt 再手写依赖，**不**以 **`<cmake/>`** 为默认路径（见 §6）；本节只解决「生成代码」一步。
+4. **链接 Qt 库**：在 **`target.xml`** 的 **`<dependency name="…"/>`** 指向已安装好的 **导入库目标**（`imported_*`）或本包编译库；**推荐**在包外安装 Qt 再手写依赖；本节只解决「生成代码」一步。
 
-### 8.2 **moc**（元对象编译器）
+### 7.2 **moc**（元对象编译器）
 
 典型做法：对含 `Q_OBJECT` 的头文件，在**真正编译该翻译单元之前**生成 `moc_*.cpp`。
 
@@ -206,7 +191,7 @@ XML 里写了 **`command="..."`** 时，该字符串即最终交给后端的命�
 
 - **方式 B**：对 **`widget.hpp`** 本身建一条 **仅用于触发 moc、不参与编译** 的条目在部分后端上不可行（头文件通常不在 `<sources>`）；更稳妥是 **方式 A** 或把 `widget.hpp` 放进 **`<headers>`** 并在 **`headers.preprocess`** 里生成 `gen/moc_widget.cpp`，再在 `<sources>` 里包含该 cpp。
 
-### 8.3 **uic**（UI 表单 → 头文件）
+### 7.3 **uic**（UI 表单 → 头文件）
 
 `.ui` 可放在目标目录，用 **`sources`** 或 **`assets`** 引用（以你希望的安装行为为准），在编译依赖该 UI 的 `.cpp` **之前**生成头文件：
 
@@ -220,7 +205,7 @@ XML 里写了 **`command="..."`** 时，该字符串即最终交给后端的命�
 
 `mainwindow.cpp` 内 `#include "gen/ui_mainwindow.h"`（路径与 **`target_include_directories`** / `<includes>` 对齐）。
 
-### 8.4 **rcc**（资源 → 源文件）
+### 7.4 **rcc**（资源 → 源文件）
 
 把 **`.qrc`** 放在 **`<assets>`** 或 **`<sources>`**（若仅生成中间 cpp、不安装 qrc），在 **`assets.preprocess`** 或 **`sources.preprocess`** 中调用 **`rcc`**：
 
@@ -234,22 +219,22 @@ XML 里写了 **`command="..."`** 时，该字符串即最终交给后端的命�
 
 然后在 **`<sources>`** 中加入 **`<file from="gen/qrc_app.cpp"/>`**。
 
-### 8.5 与 **`<var type="script" trigger="…">`** 组合
+### 7.5 与 **`<var type="script" trigger="…">`** 组合
 
 - 若某条 **`<preprocess/>` 不写 `command`**，可设 **`<var type="script" trigger="sources.preprocess" script_type="lua" value="…"/>`**，其 **`value` 即整条 shell 命令**（见 §4 表格）。适合把冗长命令集中在包级变量旁维护。
 - **不要**期望在已有 **`command="moc …"`** 的同一条目上再自动拼接 Lua：**有 XML 命令时不会读取脚本 var 作为补充**。
 
-### 8.6 后端差异（务必读）
+### 7.6 后端差异（务必读）
 
 - **Ninja**：对每个带 `preprocess` 的源，在编译该 `.o` 前生成 **stamp**，命令串来自 §4；**可执行目标与库目标行为一致**。
 - **CMake**（`src/lib/engine/backends/cmake/cmake_backend.cpp`）：当前仅为 **`static_library` / `shared_library`** 的 `<sources>` 生成 **`add_custom_command` + `add_dependencies`**，以及库上的 **`POST_BUILD`** postprocess；**`executable` 目标不会**为 `<sources>` 插入上述规则。若你使用 **CMake 作为 `UP` 生成后端**且目标是 **exe**，请任选其一：  
   - 把含 moc/uic/rcc 的代码放进 **`static_library` 子目标**，主程序 **`<dependency name="…"/>`** 链它；或  
   - 改用 **Ninja** 顶层构建；或  
-  - 在包外维护上游 Qt CMake 工程，**手写**本包 `target.xml` 描述对预安装库的消费（遗留场景下才考虑 **`<cmake/>`**，见 §6）。
+  - 在包外维护上游 Qt CMake 工程，**手写**本包 `target.xml` 描述对预安装库的消费。
 
 ---
 
-## 9. 相关链接
+## 8. 相关链接
 
 | 文档 | 内容 |
 |------|------|

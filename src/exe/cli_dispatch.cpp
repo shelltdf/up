@@ -11,9 +11,6 @@
 #include "paths.hpp"
 #include "run.hpp"
 #include "spec.hpp"
-#if UP_ENABLE_REVERSE
-#include "reverse.hpp"
-#endif
 #include "test.hpp"
 
 #include <cstdlib>
@@ -246,21 +243,6 @@ int run_up_cli(int argc, char** argv) {
     }
     return up::cmd_pack(cwd, install_dirs);
   }
-#if UP_ENABLE_REVERSE
-  if (cmd == "reverse") {
-    std::vector<std::string> pargs;
-    for (size_t i = 1; i < args.size(); ++i)
-      pargs.push_back(args[i]);
-    std::error_code ec_proj;
-    const auto cwd_for_reverse = std::filesystem::current_path(ec_proj);
-    return up::cmd_reverse(ec_proj ? cwd : cwd_for_reverse, pargs);
-  }
-#else
-  if (cmd == "reverse") {
-    std::cerr << "up: subcommand \"reverse\" is disabled in this build. Rebuild with -DUP_ENABLE_REVERSE=ON.\n";
-    return 2;
-  }
-#endif
 
   std::cerr << "unknown command: " << cmd << "\n";
   print_usage();

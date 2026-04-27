@@ -7,15 +7,6 @@ cmake -S . -B _build -G "Visual Studio 17 2022" -A x64
 cmake --build _build --config Release
 ```
 
-可选开启 **`reverse`（遗留逆向）** 子命令（会增加 `src/lib/engine/reverse/*` 等编译单元）。**产品方向**为纯手写 **`package.xml` / `target.xml`**，维护者日常构建**不必**开启：
-
-```powershell
-cmake -S . -B _build -G "Visual Studio 17 2022" -A x64 -DUP_ENABLE_REVERSE=ON
-cmake --build _build --config Release
-```
-
-或使用 `python build.py -- -DUP_ENABLE_REVERSE=ON` 将额外参数传给首次 configure。
-
 ## 安装与打包
 
 - `python install.py --prefix dist`：仅安装 **`up_runtime`** 分量（`up` + `up-gui`）。
