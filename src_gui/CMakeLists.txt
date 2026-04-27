@@ -13,6 +13,7 @@ if(WIN32)
     platform/win32_gui.cpp
     platform/win32_modal_file_dialog_center.cpp
     platform/win32_paths.cpp
+    platform/win32_run_process.cpp
     platform/win32_text_util.cpp
     platform/win32_window_placement.cpp
     resources/up_gui.rc
@@ -21,6 +22,12 @@ elseif(APPLE)
   set(UP_GUI_PLATFORM_SOURCES
     main/main_cocoa.mm
     platform/cocoa_gui.mm
+    platform/cocoa_gui_bridge.mm
+    platform/cocoa_gui_handlers.mm
+    platform/cocoa_gui_log.mm
+    platform/cocoa_gui_state.mm
+    platform/cocoa_gui_string.mm
+    platform/cocoa_gui_window.mm
   )
 else()
   find_package(PkgConfig REQUIRED)
@@ -28,6 +35,10 @@ else()
   set(UP_GUI_PLATFORM_SOURCES
     main/main_unix.cpp
     platform/gtk_gui.cpp
+    platform/gtk_gui_handlers.cpp
+    platform/gtk_gui_log.cpp
+    platform/gtk_gui_state.cpp
+    platform/gtk_gui_window.cpp
   )
 endif()
 set(UP_GUI_ALL_SOURCES ${UP_GUI_PLATFORM_SOURCES} ${UP_GUI_CORE_SOURCES})

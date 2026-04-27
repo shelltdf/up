@@ -16,6 +16,8 @@ namespace up::gui::platform::win32 {
 //   platform/win32_text_util.* — 本地时间戳、按字节读文件、极简 XML 属性、ASCII 小写；
 //   platform/win32_window_placement.* — 显示器工作区与「逻辑尺寸」窗口居中；
 //   platform/win32_modal_file_dialog_center.* — IFileOpenDialog / GetSaveFileName 的 WH_CBT 居中。
+//   platform/win32_gui_ids.hpp — 控件 ID、菜单 ID、自定义 WM_APP 消息与窗口类名（与 up_gui.rc 图标 ID 一致）。
+//   platform/win32_run_process.* — 子进程 UTF-8 输出按行分块（供 RunProcessCapture 等使用）。
 int run(HINSTANCE instance, int show_cmd);
 
 }  // namespace up::gui::platform::win32
