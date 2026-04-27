@@ -19,7 +19,7 @@
 |---|---|---|
 | 运行形态与最小依赖 | 命令行（CLI）+ 图形界面（GUI），只依赖操作系统与本机工具链 | 同一套能力同时提供 `gz.exe` 与 `gz-gui.exe` 两种入口，GUI 本质调用 CLI；不依赖额外服务端，在本机环境（编译器、构建工具）即可运行完整流程。 |
 | 包+目标的描述结构 | 包级/目标级依赖关系图 + `package.xml`/`target.xml` | 把工程管理抽象为“包 + 目标 + 依赖关系”，并通过 XML 数据描述构建行为；支持同包与跨包引用，不把依赖散落在脚本中，结构更清晰、可迁移。 |
-| 支持多种目标类型 | 可执行程序 / 库 / 插件 / 资源文件 | 支持 `executable`、`static_library`、`shared_library` 等目标类型，并可组织插件与资源文件等工程产物。 |
+| 支持多种目标类型 | 可执行程序 / 库 / 插件 / 资源文件 | 支持 `executable`、`library`（随 **`GZ_TARGET_DYNAMIC_LIBRARY`** 解析为静/动库）、`static_library`、`shared_library` 等目标类型，并可组织插件与资源文件等工程产物。 |
 | 配置过程支持变量操作 | 全局变量 + 用户自定义变量 + 变量驱动 target 行为 | 系统会注入默认全局变量，用户可定义变量并在配置阶段参与目标行为控制，例如按 `win32/linux` 条件切换源码、依赖或构建选项。 |
 | 基于现有建造系统和编译器环境 + 不设立复杂规则不增加学习难度 | 复用 CMake / Ninja 与现有编译器链路 | 不额外发明复杂 DSL 或新规则体系，尽量沿用团队已有构建习惯，降低迁移与学习成本。 |
 | 全流程命令 + 全平台开发 + 全平台发布 | configure / build / test / run / pack | 覆盖从扫描、构建、测试到运行与打包的完整流程。**推荐**纯手写 **`package.xml` / `target.xml`**（见 **`package-target-xml-spec.md`** 文首）。 |
@@ -132,10 +132,10 @@ $ARCH = .\_build\Release\gz.exe print-build-dir-name
 - **package**：由 `package.xml` 定义，表示一个包（带包级依赖）
 - **target**：由 `target.xml` 定义，表示构建目标
   - `executable`
-  - `static_library`
-  - `shared_library`
+  - `library`（configure 时按 **`GZ_TARGET_DYNAMIC_LIBRARY`** / **`GZ_DYNAMIC_LIBRARY`** 决定静态或动态原生库）
+  - `static_library` / `shared_library`（分别**强制**静态或动态，不受上述全局偏好覆盖）
   - `asset_bundle`（仅安装资源，无编译单元）
-  - `imported_static_library` / `imported_shared_library`：预置二进制 SDK，配合 `<prebuilt .../>`（路径相对 `target.xml` 目录）。完整示例见 [`test_projects/prebuilt_static_stub/`](../../test_projects/prebuilt_static_stub/README.md)（内含已提交的 MSVC `stub_import.lib`；子库输出目录使用 `lib/import/` 以免被仓库根 `.gitignore` 的 `dist/` 规则误忽略）。
+  - `prebuilt_static_library` / `prebuilt_shared_library`：预置二进制 SDK，配合 `<prebuilt .../>`（路径相对 `target.xml` 目录）。完整示例见 [`test_projects/prebuilt_static_stub/`](../../test_projects/prebuilt_static_stub/README.md)（内含已提交的 MSVC `stub_import.lib`；子库输出目录使用 `lib/import/` 以免被仓库根 `.gitignore` 的 `dist/` 规则误忽略）。
   - `imported_installed_static_library` / `imported_installed_shared_library`：声明**已安装到本包安装前缀**（`CMAKE_INSTALL_PREFIX`）下的库；**推荐**在包外先 `cmake --install`（或等价安装），再手写 `<install artifact="..."/>`（`artifact` / 可选 `interface_include` 均相对 `CMAKE_INSTALL_PREFIX`）。Windows 下 shared 还需 `implib="..."`。此类目标不能与磁盘预置的 `<prebuilt/>` 混用。
 
 规则约束：`gz` / `gz-gui` 不对任何具体第三方代码库做内置特判；依赖关系、安装产物、头文件目录等信息都必须通过 `package.xml` / `target.xml` 显式声明。
@@ -293,7 +293,7 @@ gz run --install-dir-name $ARCH rock_app_one
 #### 模板 D：导入第三方 CMake SDK（手写描述）
 
 1. 在**包外**对上游执行 **`cmake --install`**（或安装官方 SDK），得到确定的 `lib/`、`include/` 等布局。
-2. 在本工作区**手写** **`package.xml`** 与 **`target.xml`**：用 **`imported_installed_*` + `<install …/>`** 或 **`imported_*` + `<prebuilt>`** 描述库与头文件（见 **`getting-started.md`** 第 7～8 步）。
+2. 在本工作区**手写** **`package.xml`** 与 **`target.xml`**：用 **`imported_installed_*` + `<install …/>`** 或 **`prebuilt_*` + `<prebuilt>`** 描述库与头文件（见 **`getting-started.md`** 第 7～8 步）。
 3. **`gz configure` / `gz build`**（见 §4.3）；在消费方 **`target.xml`** 用 **`<dependency name="pkg:target"/>`** 引用。
 4. 纯库包（无 executable）也支持 configure/build。
 

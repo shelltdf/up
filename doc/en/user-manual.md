@@ -109,10 +109,10 @@ Backend behavior:
 - **package**: defined by `package.xml`
 - **target**: defined by `target.xml`
   - `executable`
-  - `static_library`
-  - `shared_library`
+  - `library` (at configure time becomes **`static_library`** or **`shared_library`** from **`GZ_TARGET_DYNAMIC_LIBRARY`** / **`GZ_DYNAMIC_LIBRARY`**)
+  - `static_library` / `shared_library` (each **forces** STATIC or SHARED; not overridden by the global preference above)
   - `asset_bundle` (install-only resources, no compile units)
-  - `imported_static_library` / `imported_shared_library` (prebuilt SDKs; use `<prebuilt .../>`, paths relative to `target.xml` unless absolute). See [`test_projects/prebuilt_static_stub/`](../test_projects/prebuilt_static_stub/README.md) for an end-to-end sample (ships an MSVC `stub_import.lib`; the stub CMake writes to `lib/import/` so it is not ignored by the repo-root `dist/` `.gitignore` rule).
+  - `prebuilt_static_library` / `prebuilt_shared_library` (prebuilt SDKs; use `<prebuilt .../>`, paths relative to `target.xml` unless absolute). See [`test_projects/prebuilt_static_stub/`](../test_projects/prebuilt_static_stub/README.md) for an end-to-end sample (ships an MSVC `stub_import.lib`; the stub CMake writes to `lib/import/` so it is not ignored by the repo-root `dist/` `.gitignore` rule).
   - `imported_installed_static_library` / `imported_installed_shared_library`: declare libraries **already installed** under this package’s install prefix (`CMAKE_INSTALL_PREFIX`). **Recommended:** run **`cmake --install`** (or vendor SDK) **outside** `gz`, then hand-write `<install artifact="..."/>` (and `implib` on Windows for shared).
 
 Rule boundary: `gz` / `gz-gui` must stay generic and do not embed per-project special cases. Dependency wiring, install artifacts, and include directories must be expressed explicitly via `package.xml` / `target.xml`.
@@ -268,7 +268,7 @@ The GUI passes selected settings to `gz.exe` via `--opt`.
 #### Template D: Import third-party CMake SDK (hand-written)
 
 1. **Outside** `gz`, run **`cmake --install`** on the vendor tree (or install a shipped SDK) so `lib/` / `include/` are stable.
-2. Hand-write **`package.xml`** / **`target.xml`**: use **`imported_installed_*` + `<install .../>`** or **`imported_*` + `<prebuilt>`** plus **`<headers>`** (see **[`../zh/getting-started.md`](../zh/getting-started.md)**).
+2. Hand-write **`package.xml`** / **`target.xml`**: use **`imported_installed_*` + `<install .../>`** or **`prebuilt_*` + `<prebuilt>`** plus **`<headers>`** (see **[`../zh/getting-started.md`](../zh/getting-started.md)**).
 3. Run **`gz configure` / `gz build`** (§4.3); consume from another package with `<dependency name="pkg:target"/>`.
 4. Library-only packages (no executable) are supported for configure/build.
 

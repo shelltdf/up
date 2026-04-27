@@ -600,8 +600,8 @@ void write_packages_md(const std::filesystem::path& out_path,
     f << "```\n";
   } else if (!intra_package_target_graph_pkg.empty() && graph_model.targets.size() == build_targets.size()) {
     auto is_lib_target = [](const std::string& ty) {
-      return ty == "static_library" || ty == "shared_library" || ty == "imported_static_library" ||
-             ty == "imported_shared_library" || ty == "imported_installed_static_library" ||
+      return ty == "static_library" || ty == "shared_library" || ty == "library" || ty == "prebuilt_static_library" ||
+             ty == "prebuilt_shared_library" || ty == "imported_installed_static_library" ||
              ty == "imported_installed_shared_library";
     };
     std::set<std::string> primary_lib_names;
@@ -638,7 +638,8 @@ void write_packages_md(const std::filesystem::path& out_path,
             "1. **By target type**: isolated **Executables** and **Libraries** index diagrams (no edges) so previews "
             "do not mix hundreds of unrelated nodes with arrows.\n"
             "2. **By library kind**: actual `exe → lib` edges are split into **compiled libraries** (`static_library` / "
-            "`shared_library`) vs **imported / installed** libraries; within each kind, Mermaid output is split only by "
+            "`shared_library` / `library` resolved at configure) vs **imported / installed** libraries; within each kind, "
+            "Mermaid output is split only by "
             "**edge count** (≤ 70 edges per block), with no target-name heuristics.\n\n";
       if (total_edges > k_link_edges_hard_cap) {
         f << "_Only the first " << k_link_edges_hard_cap << " edges (of " << total_edges << ") participate in the "
@@ -671,7 +672,7 @@ void write_packages_md(const std::filesystem::path& out_path,
           target_type_by_name[lt.desc.name] = lt.desc.type;
       }
       auto is_compiled_lib_type = [](const std::string& ty) {
-        return ty == "static_library" || ty == "shared_library";
+        return ty == "static_library" || ty == "shared_library" || ty == "library";
       };
 
       std::vector<std::pair<std::string, std::string>> edges_compiled;
@@ -690,7 +691,7 @@ void write_packages_md(const std::filesystem::path& out_path,
       }
 
       if (!edges_compiled.empty()) {
-        f << "### Link lines — compiled libraries (`static_library` / `shared_library`, " << edges_compiled.size()
+        f << "### Link lines — compiled libraries (`static_library` / `shared_library` / `library`, " << edges_compiled.size()
           << " edges)\n\n";
         emit_target_link_mermaid_diagrams(f, intra_package_target_graph_pkg, edges_compiled, k_edges_per_mermaid);
       }
@@ -957,8 +958,8 @@ int run_configure(const ConfigureRequest& req) {
   for (const auto& lt : pkg_targets) {
     if (!require_ascii_path(lt.target_dir))
       return 6;
-    if (lt.desc.type == "asset_bundle" || lt.desc.type == "imported_static_library" ||
-        lt.desc.type == "imported_shared_library" || lt.desc.type == "imported_installed_static_library" ||
+    if (lt.desc.type == "asset_bundle" || lt.desc.type == "prebuilt_static_library" ||
+        lt.desc.type == "prebuilt_shared_library" || lt.desc.type == "imported_installed_static_library" ||
         lt.desc.type == "imported_installed_shared_library")
       continue;
     for (const auto& s : lt.desc.sources) {
@@ -1001,8 +1002,8 @@ int run_configure(const ConfigureRequest& req) {
       }
       const auto& dep_lt = all_targets[it->second];
       const bool dep_is_link_lib =
-          (dep_lt.desc.type == "static_library" || dep_lt.desc.type == "shared_library" ||
-           dep_lt.desc.type == "imported_static_library" || dep_lt.desc.type == "imported_shared_library" ||
+          (dep_lt.desc.type == "static_library" || dep_lt.desc.type == "shared_library" || dep_lt.desc.type == "library" ||
+           dep_lt.desc.type == "prebuilt_static_library" || dep_lt.desc.type == "prebuilt_shared_library" ||
            dep_lt.desc.type == "imported_installed_static_library" ||
            dep_lt.desc.type == "imported_installed_shared_library");
       const bool dep_is_asset_bundle = (dep_lt.desc.type == "asset_bundle");
@@ -1214,8 +1215,8 @@ int run_configure(const ConfigureRequest& req) {
   };
 
   auto is_lib = [](const TargetDesc& t) {
-    return t.type == "static_library" || t.type == "shared_library" || t.type == "imported_static_library" ||
-           t.type == "imported_shared_library" || t.type == "imported_installed_static_library" ||
+    return t.type == "static_library" || t.type == "shared_library" || t.type == "library" || t.type == "prebuilt_static_library" ||
+           t.type == "prebuilt_shared_library" || t.type == "imported_installed_static_library" ||
            t.type == "imported_installed_shared_library";
   };
 
@@ -1459,16 +1460,18 @@ int run_configure(const ConfigureRequest& req) {
     ConfigureTargetModel tm;
     tm.name = lt.desc.name;
     tm.type = lt.desc.type;
+    if (tm.type == "library")
+      tm.type = (link_mode == "dynamic") ? "shared_library" : "static_library";
     const bool asset_only = (lt.desc.type == "asset_bundle");
-    const bool imported_static = (lt.desc.type == "imported_static_library");
-    const bool imported_shared = (lt.desc.type == "imported_shared_library");
+    const bool prebuilt_static = (lt.desc.type == "prebuilt_static_library");
+    const bool prebuilt_shared = (lt.desc.type == "prebuilt_shared_library");
     const bool imported_installed_static = (lt.desc.type == "imported_installed_static_library");
     const bool imported_installed_shared = (lt.desc.type == "imported_installed_shared_library");
 
     if (imported_installed_static || imported_installed_shared) {
       if (!configure_installed_import_target_model(lt, imported_installed_shared, tm))
         return 5;
-    } else if (imported_static || imported_shared) {
+    } else if (prebuilt_static || prebuilt_shared) {
       if (!lt.desc.prebuilt.has_value()) {
         std::cerr << "configure: target \"" << lt.desc.name << "\" (" << lt.desc.type << ") requires <prebuilt .../> in "
                   << to_posix_path_string(lt.target_dir / "target.xml") << "\n";
@@ -1476,10 +1479,10 @@ int run_configure(const ConfigureRequest& req) {
       }
       const TargetDesc::PrebuiltDesc& pb = *lt.desc.prebuilt;
       tm.imported_prebuilt = true;
-      if (imported_static) {
+      if (prebuilt_static) {
         const std::string primary = !pb.import_lib.empty() ? pb.import_lib : pb.location;
         if (primary.empty()) {
-          std::cerr << "configure: imported_static_library \"" << lt.desc.name << "\" needs prebuilt import_lib or location\n";
+          std::cerr << "configure: prebuilt_static_library \"" << lt.desc.name << "\" needs prebuilt import_lib or location\n";
           return 5;
         }
         auto f = resolve_existing_file(lt.target_dir, primary, "imported static library");
@@ -1490,12 +1493,12 @@ int run_configure(const ConfigureRequest& req) {
 #if defined(_WIN32)
         const std::string dll_path = !pb.dll.empty() ? pb.dll : pb.location;
         if (dll_path.empty()) {
-          std::cerr << "configure: imported_shared_library \"" << lt.desc.name
+          std::cerr << "configure: prebuilt_shared_library \"" << lt.desc.name
                     << "\" on Windows needs prebuilt dll= or location= (.dll)\n";
           return 5;
         }
         if (pb.import_lib.empty()) {
-          std::cerr << "configure: imported_shared_library \"" << lt.desc.name << "\" needs prebuilt import_lib= (.lib)\n";
+          std::cerr << "configure: prebuilt_shared_library \"" << lt.desc.name << "\" needs prebuilt import_lib= (.lib)\n";
           return 5;
         }
         auto df = resolve_existing_file(lt.target_dir, dll_path, "imported DLL");
@@ -1508,7 +1511,7 @@ int run_configure(const ConfigureRequest& req) {
 #else
         const std::string so_path = !pb.location.empty() ? pb.location : pb.import_lib;
         if (so_path.empty()) {
-          std::cerr << "configure: imported_shared_library \"" << lt.desc.name << "\" needs prebuilt location= or import_lib=\n";
+          std::cerr << "configure: prebuilt_shared_library \"" << lt.desc.name << "\" needs prebuilt location= or import_lib=\n";
           return 5;
         }
         auto sf = resolve_existing_file(lt.target_dir, so_path, "imported shared library");
@@ -1630,7 +1633,8 @@ int run_configure(const ConfigureRequest& req) {
     const auto pd_cf_it = package_name_to_desc.find(lt.package_name);
     const bool pkg_has_config_files =
         pd_cf_it != package_name_to_desc.end() && !pd_cf_it->second.config_files.empty();
-    if ((lt.desc.type == "executable" || lt.desc.type == "static_library" || lt.desc.type == "shared_library")) {
+    if ((lt.desc.type == "executable" || lt.desc.type == "static_library" || lt.desc.type == "shared_library" ||
+         lt.desc.type == "library")) {
       if (!lt.desc.config_files.empty()) {
         const std::filesystem::path gen_inc =
             std::filesystem::absolute(cwd / ".intermediate" / "generated" / lt.package_name / lt.desc.name);
@@ -1664,17 +1668,18 @@ int run_configure(const ConfigureRequest& req) {
         tm.links = eit->second;
       } else {
         // Avoid linking every library to every executable (can break when multiple library variants coexist).
-        // When GZ_TARGET_DYNAMIC_LIBRARY implies static link preference, only link static_library targets; vice versa.
+        // When GZ_TARGET_DYNAMIC_LIBRARY implies static link preference, only link static (or `library` resolved static)
+        // targets; vice versa. `static_library` / `shared_library` always match their kind regardless of global mode.
         tm.links.clear();
         for (const auto& pl : pkg_targets) {
           if (!is_lib(pl.desc))
             continue;
           if (link_mode == "static" &&
-              (pl.desc.type == "static_library" || pl.desc.type == "imported_static_library" ||
+              (pl.desc.type == "static_library" || pl.desc.type == "library" || pl.desc.type == "prebuilt_static_library" ||
                pl.desc.type == "imported_installed_static_library"))
             tm.links.emplace_back(pl.desc.name, "private");
           else if (link_mode == "dynamic" &&
-                   (pl.desc.type == "shared_library" || pl.desc.type == "imported_shared_library" ||
+                   (pl.desc.type == "shared_library" || pl.desc.type == "library" || pl.desc.type == "prebuilt_shared_library" ||
                     pl.desc.type == "imported_installed_shared_library"))
             tm.links.emplace_back(pl.desc.name, "private");
         }

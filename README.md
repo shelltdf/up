@@ -101,7 +101,7 @@ $ARCH = .\_build\Release\gz.exe print-build-dir-name
 **推荐流程**：
 
 1. 在包外对上游执行 **`cmake --install`**（或解压 SDK），得到确定的 `lib/`、`include/` 等目录。
-2. 在本仓库或你的工程里**手写** **`package.xml`**（包名、可选包级依赖）与 **`target.xml`**：用 **`imported_installed_*` + `<install artifact="..."/>`** 指向安装前缀下的 `.lib` / `.so`，或用 **`imported_*` + `<prebuilt>`** 指向 vendored 二进制；用 **`<headers>`** 暴露头文件。
+2. 在本仓库或你的工程里**手写** **`package.xml`**（包名、可选包级依赖）与 **`target.xml`**：用 **`imported_installed_*` + `<install artifact="..."/>`** 指向安装前缀下的 `.lib` / `.so`，或用 **`prebuilt_*` + `<prebuilt>`** 指向 vendored 二进制；用 **`<headers>`** 暴露头文件。
 3. **`gz configure --scan …`** → **`gz build --build-dir-name …`**；`run` / `test` / `pack` 仍使用 **`--install-dir-name $ARCH`**（`$ARCH` 来自 **`gz print-build-dir-name`** 或 **`gz_cache.txt` 的 `arch=`**）。
 
 **`configure`** 仍会把本工作区 **`.intermediate/install/<arch>/`** 并入 **`CMAKE_PREFIX_PATH`**，并在多包场景下尽量为 **`find_package`** 推导常见缓存变量（若你仍在 CMake 聚合后端中消费上游 CMake 工程）。规则约束不变：**无**针对 zlib/FBX 等具体库名的内置特判，一切靠 XML 声明。

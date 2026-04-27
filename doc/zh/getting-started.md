@@ -54,12 +54,12 @@ hello_pkg/
 
 ## 第 2 步：添加静态库，并让可执行文件使用它
 
-在同一包内再建子目录 **`mylib/`**，类型 **`static_library`**；可执行目标通过 **`<dependency name="库目标名"/>`** 显式链接，或依赖默认行为（见下）。
+在同一包内再建子目录 **`mylib/`**，类型 **`static_library`**（若需**随全局选项**在静/动库间切换，可改用 **`type="library"`**，见 **`package-target-xml-spec.md` §3.1**）；可执行目标通过 **`<dependency name="库目标名"/>`** 显式链接，或依赖默认行为（见下）。
 
 **要点（当前 CMake 生成语义）**：
 
 - 若可执行文件**没有任何** `<dependency>`，configure 会按 **`GZ_TARGET_DYNAMIC_LIBRARY`** 等策略**自动链接本包内符合条件的库**；若存在**任意**显式 `<dependency>`，则**只**使用你声明的链接关系（见 **`package-target-xml-spec.md` §3.6**）。
-- 库目标的 **`<headers>`** 与 **目标级 `<config_files>`** 生成目录会进入该库的 **include 路径**；在 CMake 后端中，原生 **`static_library` / `shared_library`** 使用 **`target_include_directories(... PUBLIC ...)`**，因此**链接该库**的可执行文件一般可直接 **`#include`** 库公开头文件及**该库** `config_files` 生成物（参见 **`test_projects/hello_simple_lib/`**）。
+- 库目标的 **`<headers>`** 与 **目标级 `<config_files>`** 生成目录会进入该库的 **include 路径**；在 CMake 后端中，原生 **`static_library` / `shared_library`**（以及由 **`library`** 解析得到的二者之一）使用 **`target_include_directories(... PUBLIC ...)`**，因此**链接该库**的可执行文件一般可直接 **`#include`** 库公开头文件及**该库** `config_files` 生成物（参见 **`test_projects/hello_simple_lib/`**）。
 
 参考：`test_projects/hello_simple_lib/`（包级 `defines` / `config_files` + 静态库 + 工具 exe + 测试）。
 
@@ -145,12 +145,12 @@ hello_pkg/
 
 ---
 
-## 第 7 步：第三方库 — 预编译二进制（`imported_*` + `<prebuilt>`）
+## 第 7 步：第三方库 — 预编译二进制（`prebuilt_*` + `<prebuilt>`）
 
 适用于：Vendor 提供 **`.lib` / `.a` / `.dll`+.lib / `.so`**，无需从源码编译。
 
-1. 新建目标 **`type="imported_static_library"`** 或 **`imported_shared_library`**。
-2. 填写 **`<prebuilt .../>`**：`imported_static_library` 常用 **`import_lib=`** 或 **`location=`**；Windows 下 **`imported_shared_library`** 需要 **`dll=`**（或 **`location=`** 指向 `.dll`）与 **`import_lib=`**（`.lib`）。详见 **`package-target-xml-spec.md`** 类型表。
+1. 新建目标 **`type="prebuilt_static_library"`** 或 **`prebuilt_shared_library`**。
+2. 填写 **`<prebuilt .../>`**：`prebuilt_static_library` 常用 **`import_lib=`** 或 **`location=`**；Windows 下 **`prebuilt_shared_library`** 需要 **`dll=`**（或 **`location=`** 指向 `.dll`）与 **`import_lib=`**（`.lib`）。详见 **`package-target-xml-spec.md`** 类型表。
 3. 用 **`<headers>`** 指到第三方头文件目录，便于消费者 **include**。
 4. 可执行文件 **`<dependency name="该导入目标名"/>`**。
 
@@ -178,22 +178,22 @@ hello_pkg/
 **推荐路径**：
 
 1. **阅读上游**：列出源文件、公共头、宏、`link_libraries`、安装规则；在 `gz` 侧为每个编译单元建 **`target.xml`**，用 **`<sources>` / `<headers>` / `<defines>` / `<dependency>`** 重写依赖图。
-2. **第三方 / 子树**：若在包外已安装，用 **`imported_installed_*` + `<install …/>`**；若只有预编译 SDK，用 **`imported_*` + `<prebuilt>`**（见第 7 步）。
-3. **渐进迁移**：可先让主程序依赖 **`imported_*`** 包装现有二进制，再逐步把源码移入 **`static_library`** 目标。
+2. **第三方 / 子树**：若在包外已安装，用 **`imported_installed_*` + `<install …/>`**；若只有预编译 SDK，用 **`prebuilt_*` + `<prebuilt>`**（见第 7 步）。
+3. **渐进迁移**：可先让主程序依赖 **`prebuilt_*`** 包装现有二进制，再逐步把源码移入 **`static_library`** 目标。
 4. **历史说明**：旧版若曾依赖已移除的子命令或内嵌构建描述，请按 **`gz spec`** 与 **`package-target-xml-spec.md`** 改为纯手写 XML。
 
 ---
 
 ## 移植专题 B：把 **Qt** 程序迁到 `gz`
 
-**思路**：Qt 由 **官方安装或包外 CMake install** 提供；`gz` **只手写**源、宏、**`<dependency>`** 指向 **`imported_*`** 或本包自编译库；**moc / uic / rcc** 用 **`<preprocess>`** 或包在 **`static_library`** 里以规避 CMake 后端对 **exe 源级 preprocess** 的限制。
+**思路**：Qt 由 **官方安装或包外 CMake install** 提供；`gz` **只手写**源、宏、**`<dependency>`** 指向 **`prebuilt_*`**（或 **`imported_installed_*`**）或本包自编译库；**moc / uic / rcc** 用 **`<preprocess>`** 或包在 **`static_library`** 里以规避 CMake 后端对 **exe 源级 preprocess** 的限制。
 
 | 原 CMake/Qt 概念 | 在 `gz` 中的对应 |
 |------------------|------------------|
 | `target_sources` / `add_executable` | **`<sources><file>…`** |
 | `target_include_directories` | **`<headers>`**（安装 + include 推导） |
 | `target_compile_definitions` | **`<defines>`** |
-| `find_package(Qt…)` + 链接 | **`<dependency>`** 指向 **`imported_*`**（或本包 **`static_library`/`shared_library`**）；**手写** Qt 安装前缀下的库与头 |
+| `find_package(Qt…)` + 链接 | **`<dependency>`** 指向 **`prebuilt_*`** / **`imported_installed_*`**（或本包 **`static_library`/`shared_library`**）；**手写** Qt 安装前缀下的库与头 |
 | `AUTOMOC` / `AUTOUIC` / `AUTORCC` | **手写** **`moc`/`uic`/`rcc`** 命令行，见 **`script-tutorial.md` §8** |
 
 ---
@@ -204,7 +204,7 @@ hello_pkg/
 |------|----------|
 | **Header-only** | 无链接目标：用 **`<headers>`** 暴露 include；或 **`asset_bundle`** / 安装规则按项目需要。 |
 | **官方提供 CMake + install** | **包外** `cmake --install` 到约定前缀，再 **`imported_installed_*` + `<install …/>`** 手写描述。 |
-| **仅预编译 .lib/.dll/.so** | **`imported_static_library` / `imported_shared_library`** + **`<prebuilt>`** + **`<headers>`**。 |
+| **仅预编译 .lib/.dll/.so** | **`prebuilt_static_library` / `prebuilt_shared_library`** + **`<prebuilt>`** + **`<headers>`**。 |
 | **需打补丁、多步配置** | 仍在**包外**脚本化上游构建；`gz` 侧用 **`preprocess`** 或 vendored 源码目标承接生成物，见 **`script-tutorial.md`**。 |
 | **与本仓库另一 `gz` 包协作** | 多包 **`<dependency name="包名"/>`** + **`包名:目标名`**。 |
 

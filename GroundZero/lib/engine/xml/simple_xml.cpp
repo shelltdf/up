@@ -211,6 +211,240 @@ void parse_stage_commands(const std::string& body, std::string& pre, std::string
     post.clear();
 }
 
+/** Every `<tag>...</tag>` pair in document order; `fn(body, err)` appends to model. Tag must be ASCII `[A-Za-z_][A-Za-z0-9_-]*`. */
+template <typename Fn>
+bool for_each_balanced_children(const std::string& raw, const char* tag, Fn&& fn, std::string& error) {
+  const std::string open = std::string("<") + tag;
+  const std::string close = std::string("</") + tag + ">";
+  const size_t open_len = open.size();
+  size_t pos = 0;
+  while (true) {
+    const size_t open_at = raw.find(open, pos);
+    if (open_at == std::string::npos)
+      break;
+    const size_t after_name = open_at + open_len;
+    if (after_name < raw.size()) {
+      const unsigned char uc = static_cast<unsigned char>(raw[after_name]);
+      if (std::isalnum(uc) || uc == '_' || uc == '-' || uc == ':') {
+        pos = open_at + 1;
+        continue;
+      }
+    }
+    const size_t gt = raw.find('>', open_at);
+    if (gt == std::string::npos) {
+      error = std::string("invalid <") + tag + "> (missing `>`)";
+      return false;
+    }
+    const size_t close_at = raw.find(close, gt + 1);
+    if (close_at == std::string::npos) {
+      error = std::string("unclosed <") + tag + "> (expected ") + close + ")";
+      return false;
+    }
+    const std::string body = raw.substr(gt + 1, close_at - gt - 1);
+    if (!fn(body, error))
+      return false;
+    pos = close_at + close.size();
+  }
+  return true;
+}
+
+bool append_sources_from_body(const std::string& body, TargetDesc& out, std::string& error) {
+  struct SourcePending {
+    size_t pos;
+    TargetDesc::SourceEntry se;
+  };
+  std::vector<SourcePending> ordered;
+  ordered.reserve(8);
+  std::regex src_void_re(R"rx(<\s*(file|glob)\s+([^>]+)/\s*>)rx");
+  for (std::sregex_iterator it(body.begin(), body.end(), src_void_re), end; it != end; ++it) {
+    TargetDesc::SourceEntry se;
+    se.kind = trim_copy((*it)[1].str());
+    const std::string attrs = (*it)[2].str();
+    if (!attr_string(attrs, "from", se.from)) {
+      error = "sources <" + se.kind + " .../> requires from=\"...\"";
+      return false;
+    }
+    se.from = trim_copy(se.from);
+    if (!attr_string(attrs, "when", se.when))
+      se.when.clear();
+    else
+      se.when = trim_copy(se.when);
+    if (se.from.empty()) {
+      error = "sources entry from cannot be empty";
+      return false;
+    }
+    ordered.push_back({static_cast<size_t>(std::distance(body.begin(), (*it)[0].first)), std::move(se)});
+  }
+  std::regex src_re(R"rx(<\s*(file|glob)\s*([^>]*)>([\s\S]*?)</\s*\1\s*>)rx");
+  for (std::sregex_iterator it(body.begin(), body.end(), src_re), end; it != end; ++it) {
+    TargetDesc::SourceEntry se;
+    se.kind = trim_copy((*it)[1].str());
+    const std::string attrs = (*it)[2].str();
+    std::string inner = (*it)[3].str();
+    parse_stage_commands(inner, se.preprocess_command, se.postprocess_command);
+    inner = std::regex_replace(inner, std::regex(R"rx(<\s*preprocess\s+[^>]*/>)rx"), "");
+    inner = std::regex_replace(inner, std::regex(R"rx(<\s*postprocess\s+[^>]*/>)rx"), "");
+    inner = trim_copy(inner);
+    if (!attr_string(attrs, "from", se.from))
+      se.from = inner;
+    se.from = trim_copy(se.from);
+    if (!attr_string(attrs, "when", se.when))
+      se.when.clear();
+    else
+      se.when = trim_copy(se.when);
+    if (se.from.empty()) {
+      error = "sources entry requires file path or from attribute";
+      return false;
+    }
+    ordered.push_back({static_cast<size_t>(std::distance(body.begin(), (*it)[0].first)), std::move(se)});
+  }
+  std::sort(ordered.begin(), ordered.end(), [](const SourcePending& a, const SourcePending& b) { return a.pos < b.pos; });
+  for (auto& sp : ordered) {
+    out.source_entries.push_back(std::move(sp.se));
+    if (out.source_entries.back().kind == "file")
+      out.sources.push_back(out.source_entries.back().from);
+  }
+  return true;
+}
+
+bool append_headers_from_body(const std::string& body, TargetDesc& out, std::string& error) {
+  std::regex item_re(R"rx(<\s*([A-Za-z_][A-Za-z0-9_]*)\s*([^>]*?)(?:/>|>([\s\S]*?)</\s*\1\s*>))rx");
+  for (std::sregex_iterator it(body.begin(), body.end(), item_re), end; it != end; ++it) {
+    TargetDesc::IncludeEntry inc;
+    inc.kind = trim_copy((*it)[1].str());
+    if (!(inc.kind == "dir" || inc.kind == "file" || inc.kind == "glob")) {
+      error = "unsupported <headers> entry: " + inc.kind + " (expected dir/file/glob)";
+      return false;
+    }
+    const std::string attrs = (*it)[2].str();
+    if (!attr_string(attrs, "from", inc.from)) {
+      error = "<headers> entry requires from attribute";
+      return false;
+    }
+    inc.from = trim_copy(inc.from);
+    if (inc.from.empty()) {
+      error = "<headers> entry from attribute cannot be empty";
+      return false;
+    }
+    if (!attr_string(attrs, "to", inc.to))
+      inc.to.clear();
+    else
+      inc.to = trim_copy(inc.to);
+    parse_stage_commands((*it)[3].str(), inc.preprocess_command, inc.postprocess_command);
+    if (!attr_string(attrs, "when", inc.when))
+      inc.when.clear();
+    else
+      inc.when = trim_copy(inc.when);
+    out.includes.push_back(std::move(inc));
+  }
+  std::regex old_style_re(R"rx(<\s*dir\s*>\s*[^<]+\s*</\s*dir\s*>)rx");
+  if (std::regex_search(body, old_style_re)) {
+    error = "old nested <dir>path</dir> syntax under <headers> is not supported; use <dir from=\"...\" to=\"...\"/>";
+    return false;
+  }
+  return true;
+}
+
+bool append_assets_from_body(const std::string& body, TargetDesc& out, std::string& error) {
+  std::regex item_re(R"rx(<\s*([A-Za-z_][A-Za-z0-9_]*)\s*([^>]*?)(?:/>|>([\s\S]*?)</\s*\1\s*>))rx");
+  for (std::sregex_iterator it(body.begin(), body.end(), item_re), end; it != end; ++it) {
+    TargetDesc::AssetEntry ae;
+    ae.kind = trim_copy((*it)[1].str());
+    if (!(ae.kind == "dir" || ae.kind == "file" || ae.kind == "glob")) {
+      error = "unsupported assets entry: " + ae.kind + " (expected dir/file/glob)";
+      return false;
+    }
+    const std::string attrs = (*it)[2].str();
+    if (!attr_string(attrs, "from", ae.from)) {
+      error = "assets entry requires from attribute";
+      return false;
+    }
+    ae.from = trim_copy(ae.from);
+    if (!attr_string(attrs, "to", ae.to))
+      ae.to.clear();
+    else
+      ae.to = trim_copy(ae.to);
+    parse_stage_commands((*it)[3].str(), ae.preprocess_command, ae.postprocess_command);
+    out.assets.push_back(std::move(ae));
+  }
+  return true;
+}
+
+void parse_all_prebuilt_void_tags(const std::string& raw, TargetDesc& out) {
+  const std::string open = "<prebuilt";
+  size_t scan = 0;
+  while (true) {
+    const size_t po = raw.find(open, scan);
+    if (po == std::string::npos)
+      break;
+    const size_t after = po + open.size();
+    if (after < raw.size()) {
+      const unsigned char uc = static_cast<unsigned char>(raw[after]);
+      if (std::isalnum(uc) || uc == '_' || uc == '-' || uc == ':') {
+        scan = po + 1;
+        continue;
+      }
+    }
+    const size_t gt = raw.find('>', po);
+    if (gt == std::string::npos)
+      break;
+    const std::string head = raw.substr(po, gt - po + 1);
+    TargetDesc::PrebuiltDesc pb;
+    attr_string(head, "import_lib", pb.import_lib);
+    attr_string(head, "location", pb.location);
+    attr_string(head, "dll", pb.dll);
+    pb.import_lib = trim_copy(pb.import_lib);
+    pb.location = trim_copy(pb.location);
+    pb.dll = trim_copy(pb.dll);
+    if (!pb.import_lib.empty() || !pb.location.empty() || !pb.dll.empty())
+      out.prebuilt = std::move(pb);
+    scan = gt + 1;
+  }
+}
+
+void parse_all_install_void_tags(const std::string& raw, TargetDesc& out) {
+  const std::string open = "<install";
+  size_t scan = 0;
+  while (true) {
+    const size_t io = raw.find(open, scan);
+    if (io == std::string::npos)
+      break;
+    const size_t after = io + open.size();
+    if (after < raw.size()) {
+      const unsigned char uc = static_cast<unsigned char>(raw[after]);
+      if (std::isalnum(uc) || uc == '_' || uc == '-' || uc == ':') {
+        scan = io + 1;
+        continue;
+      }
+    }
+    const size_t gt = raw.find('>', io);
+    if (gt == std::string::npos)
+      break;
+    const size_t next_io = raw.find(open, gt + 1);
+    const size_t zone_end = (next_io == std::string::npos) ? raw.size() : next_io;
+    const std::string head = raw.substr(io, gt - io + 1);
+    std::string art;
+    if (attr_string(head, "artifact", art)) {
+      TargetDesc::InstalledWrapDesc iw;
+      iw.artifact = trim_copy(art);
+      attr_string(head, "implib", iw.implib);
+      iw.implib = trim_copy(iw.implib);
+      const size_t iface_open = raw.find("<interface_include", gt + 1);
+      if (iface_open != std::string::npos && iface_open < zone_end) {
+        const size_t iface_gt = raw.find('>', iface_open);
+        if (iface_gt != std::string::npos && iface_gt < zone_end) {
+          const std::string ih = raw.substr(iface_open, iface_gt - iface_open + 1);
+          attr_string(ih, "dir", iw.interface_include);
+          iw.interface_include = trim_copy(iw.interface_include);
+        }
+      }
+      if (!iw.artifact.empty())
+        out.installed_wrap = std::move(iw);
+    }
+    scan = gt + 1;
+  }
+}
+
 }  // namespace
 
 bool load_package_xml(const std::filesystem::path& path, PackageDesc& out, std::string& error) {
@@ -245,44 +479,21 @@ bool load_package_xml(const std::filesystem::path& path, PackageDesc& out, std::
     out.dependencies.emplace_back(dep_name, optional);
   }
 
-  const size_t vars_open = raw.find("<vars");
-  if (vars_open != std::string::npos) {
-    const size_t vars_gt = raw.find('>', vars_open);
-    const size_t vars_close = raw.find("</vars>", vars_gt + 1);
-    if (vars_gt == std::string::npos || vars_close == std::string::npos) {
-      error = "invalid <vars> block in package.xml (expected </vars>)";
-      return false;
-    }
-    const std::string body = raw.substr(vars_gt + 1, vars_close - vars_gt - 1);
-    if (!parse_vars_body(body, out.vars, out.scripts, error))
-      return false;
-  }
-
-  const size_t pkg_defines_open = raw.find("<defines");
-  if (pkg_defines_open != std::string::npos) {
-    const size_t pkg_defines_gt = raw.find('>', pkg_defines_open);
-    const size_t pkg_defines_close = raw.find("</defines>", pkg_defines_gt + 1);
-    if (pkg_defines_gt == std::string::npos || pkg_defines_close == std::string::npos) {
-      error = "invalid <defines> block in package.xml (expected </defines>)";
-      return false;
-    }
-    const std::string body = raw.substr(pkg_defines_gt + 1, pkg_defines_close - pkg_defines_gt - 1);
-    if (!parse_defines_body(body, out.defines, error, "package.xml"))
-      return false;
-  }
-
-  const size_t pkg_cf_open = raw.find("<config_files");
-  if (pkg_cf_open != std::string::npos) {
-    const size_t pkg_cf_gt = raw.find('>', pkg_cf_open);
-    const size_t pkg_cf_close = raw.find("</config_files>", pkg_cf_gt + 1);
-    if (pkg_cf_gt == std::string::npos || pkg_cf_close == std::string::npos) {
-      error = "invalid <config_files> block in package.xml (expected </config_files>)";
-      return false;
-    }
-    const std::string body = raw.substr(pkg_cf_gt + 1, pkg_cf_close - pkg_cf_gt - 1);
-    if (!parse_config_files_body(body, out.config_files, error))
-      return false;
-  }
+  if (!for_each_balanced_children(
+          raw, "vars",
+          [&](const std::string& body, std::string& err) { return parse_vars_body(body, out.vars, out.scripts, err); },
+          error))
+    return false;
+  if (!for_each_balanced_children(
+          raw, "defines",
+          [&](const std::string& body, std::string& err) { return parse_defines_body(body, out.defines, err, "package.xml"); },
+          error))
+    return false;
+  if (!for_each_balanced_children(
+          raw, "config_files",
+          [&](const std::string& body, std::string& err) { return parse_config_files_body(body, out.config_files, err); },
+          error))
+    return false;
 
   error.clear();
   return true;
@@ -307,71 +518,16 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
   if (!attr_string(tgt_head, "type", out.type))
     out.type = "executable";
 
-  const size_t sources_open = raw.find("<sources");
-  if (sources_open != std::string::npos) {
-    const size_t sources_open_gt = raw.find('>', sources_open);
-    const size_t sources_close = raw.find("</sources>", sources_open_gt + 1);
-    if (sources_open_gt == std::string::npos || sources_close == std::string::npos) {
-      error = "invalid <sources> block";
-      return false;
-    }
-    const std::string body = raw.substr(sources_open_gt + 1, sources_close - sources_open_gt - 1);
-    struct SourcePending {
-      size_t pos;
-      TargetDesc::SourceEntry se;
-    };
-    std::vector<SourcePending> ordered;
-    ordered.reserve(8);
-    std::regex src_void_re(R"rx(<\s*(file|glob)\s+([^>]+)/\s*>)rx");
-    for (std::sregex_iterator it(body.begin(), body.end(), src_void_re), end; it != end; ++it) {
-      TargetDesc::SourceEntry se;
-      se.kind = trim_copy((*it)[1].str());
-      const std::string attrs = (*it)[2].str();
-      if (!attr_string(attrs, "from", se.from)) {
-        error = "sources <" + se.kind + " .../> requires from=\"...\"";
-        return false;
-      }
-      se.from = trim_copy(se.from);
-      if (!attr_string(attrs, "when", se.when))
-        se.when.clear();
-      else
-        se.when = trim_copy(se.when);
-      if (se.from.empty()) {
-        error = "sources entry from cannot be empty";
-        return false;
-      }
-      ordered.push_back({static_cast<size_t>(std::distance(body.begin(), (*it)[0].first)), std::move(se)});
-    }
-    std::regex src_re(R"rx(<\s*(file|glob)\s*([^>]*)>([\s\S]*?)</\s*\1\s*>)rx");
-    for (std::sregex_iterator it(body.begin(), body.end(), src_re), end; it != end; ++it) {
-      TargetDesc::SourceEntry se;
-      se.kind = trim_copy((*it)[1].str());
-      const std::string attrs = (*it)[2].str();
-      std::string inner = (*it)[3].str();
-      parse_stage_commands(inner, se.preprocess_command, se.postprocess_command);
-      inner = std::regex_replace(inner, std::regex(R"rx(<\s*preprocess\s+[^>]*/>)rx"), "");
-      inner = std::regex_replace(inner, std::regex(R"rx(<\s*postprocess\s+[^>]*/>)rx"), "");
-      inner = trim_copy(inner);
-      if (!attr_string(attrs, "from", se.from))
-        se.from = inner;
-      se.from = trim_copy(se.from);
-      if (!attr_string(attrs, "when", se.when))
-        se.when.clear();
-      else
-        se.when = trim_copy(se.when);
-      if (se.from.empty()) {
-        error = "sources entry requires file path or from attribute";
-        return false;
-      }
-      ordered.push_back({static_cast<size_t>(std::distance(body.begin(), (*it)[0].first)), std::move(se)});
-    }
-    std::sort(ordered.begin(), ordered.end(), [](const SourcePending& a, const SourcePending& b) { return a.pos < b.pos; });
-    for (auto& sp : ordered) {
-      out.source_entries.push_back(std::move(sp.se));
-      if (out.source_entries.back().kind == "file")
-        out.sources.push_back(out.source_entries.back().from);
-    }
-  } else {
+  bool any_sources_block = false;
+  if (!for_each_balanced_children(
+          raw, "sources",
+          [&](const std::string& body, std::string& err) {
+            any_sources_block = true;
+            return append_sources_from_body(body, out, err);
+          },
+          error))
+    return false;
+  if (!any_sources_block) {
     std::regex file_re(R"rx(<file\s*>\s*([^<]+)\s*</file\s*>)rx");
     for (std::sregex_iterator it(raw.begin(), raw.end(), file_re), end; it != end; ++it) {
       out.sources.push_back((*it)[1].str());
@@ -390,174 +546,44 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
     out.dependencies.push_back(std::move(de));
   }
 
-  const size_t defines_open = raw.find("<defines");
-  if (defines_open != std::string::npos) {
-    const size_t defines_open_gt = raw.find('>', defines_open);
-    const size_t defines_close = raw.find("</defines>", defines_open_gt + 1);
-    if (defines_open_gt == std::string::npos || defines_close == std::string::npos) {
-      error = "invalid <defines> block (expected </defines>)";
-      return false;
-    }
-    const std::string body = raw.substr(defines_open_gt + 1, defines_close - defines_open_gt - 1);
-    if (!parse_defines_body(body, out.defines, error, "target.xml"))
-      return false;
-  }
-
-  const size_t tgt_vars_open = raw.find("<vars");
-  if (tgt_vars_open != std::string::npos) {
-    const size_t tgt_vars_gt = raw.find('>', tgt_vars_open);
-    const size_t tgt_vars_close = raw.find("</vars>", tgt_vars_gt + 1);
-    if (tgt_vars_gt == std::string::npos || tgt_vars_close == std::string::npos) {
-      error = "invalid <vars> block in target.xml (expected </vars>)";
-      return false;
-    }
-    const std::string body = raw.substr(tgt_vars_gt + 1, tgt_vars_close - tgt_vars_gt - 1);
-    if (!parse_vars_body(body, out.vars, out.scripts, error))
-      return false;
-  }
-
-  const size_t cf_open = raw.find("<config_files");
-  if (cf_open != std::string::npos) {
-    const size_t cf_gt = raw.find('>', cf_open);
-    const size_t cf_close = raw.find("</config_files>", cf_gt + 1);
-    if (cf_gt == std::string::npos || cf_close == std::string::npos) {
-      error = "invalid <config_files> block (expected </config_files>)";
-      return false;
-    }
-    const std::string body = raw.substr(cf_gt + 1, cf_close - cf_gt - 1);
-    if (!parse_config_files_body(body, out.config_files, error))
-      return false;
-  }
+  if (!for_each_balanced_children(
+          raw, "defines",
+          [&](const std::string& body, std::string& err) { return parse_defines_body(body, out.defines, err, "target.xml"); },
+          error))
+    return false;
+  if (!for_each_balanced_children(
+          raw, "vars",
+          [&](const std::string& body, std::string& err) { return parse_vars_body(body, out.vars, out.scripts, err); },
+          error))
+    return false;
+  if (!for_each_balanced_children(
+          raw, "config_files",
+          [&](const std::string& body, std::string& err) { return parse_config_files_body(body, out.config_files, err); },
+          error))
+    return false;
 
   if (raw.find("<includes") != std::string::npos) {
     error = "target.xml no longer supports <includes>; use <headers>...</headers>";
     return false;
   }
-  const size_t headers_open = raw.find("<headers");
-  if (headers_open != std::string::npos) {
-    const size_t headers_open_gt = raw.find('>', headers_open);
-    if (headers_open_gt == std::string::npos) {
-      error = "invalid <headers> tag";
-      return false;
-    }
-    const size_t headers_close = raw.find("</headers>", headers_open_gt + 1);
-    if (headers_close == std::string::npos) {
-      error = "missing </headers> closing tag";
-      return false;
-    }
-    const std::string body = raw.substr(headers_open_gt + 1, headers_close - headers_open_gt - 1);
-    std::regex item_re(R"rx(<\s*([A-Za-z_][A-Za-z0-9_]*)\s*([^>]*?)(?:/>|>([\s\S]*?)</\s*\1\s*>))rx");
-    for (std::sregex_iterator it(body.begin(), body.end(), item_re), end; it != end; ++it) {
-      TargetDesc::IncludeEntry inc;
-      inc.kind = trim_copy((*it)[1].str());
-      if (!(inc.kind == "dir" || inc.kind == "file" || inc.kind == "glob")) {
-        error = "unsupported <headers> entry: " + inc.kind + " (expected dir/file/glob)";
-        return false;
-      }
-      const std::string attrs = (*it)[2].str();
-      if (!attr_string(attrs, "from", inc.from)) {
-        error = "<headers> entry requires from attribute";
-        return false;
-      }
-      inc.from = trim_copy(inc.from);
-      if (inc.from.empty()) {
-        error = "<headers> entry from attribute cannot be empty";
-        return false;
-      }
-      if (!attr_string(attrs, "to", inc.to))
-        inc.to.clear();
-      else
-        inc.to = trim_copy(inc.to);
-      parse_stage_commands((*it)[3].str(), inc.preprocess_command, inc.postprocess_command);
-      if (!attr_string(attrs, "when", inc.when))
-        inc.when.clear();
-      else
-        inc.when = trim_copy(inc.when);
-      out.includes.push_back(std::move(inc));
-    }
+  if (!for_each_balanced_children(
+          raw, "headers",
+          [&](const std::string& body, std::string& err) { return append_headers_from_body(body, out, err); }, error))
+    return false;
 
-    // old style is intentionally not supported anymore
-    std::regex old_style_re(R"rx(<\s*dir\s*>\s*[^<]+\s*</\s*dir\s*>)rx");
-    if (std::regex_search(body, old_style_re)) {
-      error = "old nested <dir>path</dir> syntax under <headers> is not supported; use <dir from=\"...\" to=\"...\"/>";
-      return false;
-    }
-  }
+  if (!for_each_balanced_children(
+          raw, "assets",
+          [&](const std::string& body, std::string& err) { return append_assets_from_body(body, out, err); }, error))
+    return false;
 
-  const size_t assets_open = raw.find("<assets");
-  if (assets_open != std::string::npos) {
-    const size_t assets_open_gt = raw.find('>', assets_open);
-    const size_t assets_close = raw.find("</assets>", assets_open_gt + 1);
-    if (assets_open_gt == std::string::npos || assets_close == std::string::npos) {
-      error = "invalid <assets> block";
-      return false;
-    }
-    const std::string body = raw.substr(assets_open_gt + 1, assets_close - assets_open_gt - 1);
-    std::regex item_re(R"rx(<\s*([A-Za-z_][A-Za-z0-9_]*)\s*([^>]*?)(?:/>|>([\s\S]*?)</\s*\1\s*>))rx");
-    for (std::sregex_iterator it(body.begin(), body.end(), item_re), end; it != end; ++it) {
-      TargetDesc::AssetEntry ae;
-      ae.kind = trim_copy((*it)[1].str());
-      if (!(ae.kind == "dir" || ae.kind == "file" || ae.kind == "glob")) {
-        error = "unsupported assets entry: " + ae.kind + " (expected dir/file/glob)";
-        return false;
-      }
-      const std::string attrs = (*it)[2].str();
-      if (!attr_string(attrs, "from", ae.from)) {
-        error = "assets entry requires from attribute";
-        return false;
-      }
-      ae.from = trim_copy(ae.from);
-      if (!attr_string(attrs, "to", ae.to))
-        ae.to.clear();
-      else
-        ae.to = trim_copy(ae.to);
-      parse_stage_commands((*it)[3].str(), ae.preprocess_command, ae.postprocess_command);
-      out.assets.push_back(std::move(ae));
-    }
-  }
+  parse_all_prebuilt_void_tags(raw, out);
+  parse_all_install_void_tags(raw, out);
 
-  const size_t prebuilt_open = raw.find("<prebuilt");
-  if (prebuilt_open != std::string::npos) {
-    const size_t prebuilt_gt = raw.find('>', prebuilt_open);
-    if (prebuilt_gt != std::string::npos) {
-      const std::string head = raw.substr(prebuilt_open, prebuilt_gt - prebuilt_open + 1);
-      TargetDesc::PrebuiltDesc pb;
-      attr_string(head, "import_lib", pb.import_lib);
-      attr_string(head, "location", pb.location);
-      attr_string(head, "dll", pb.dll);
-      pb.import_lib = trim_copy(pb.import_lib);
-      pb.location = trim_copy(pb.location);
-      pb.dll = trim_copy(pb.dll);
-      if (!pb.import_lib.empty() || !pb.location.empty() || !pb.dll.empty())
-        out.prebuilt = std::move(pb);
-    }
-  }
-
-  const size_t install_open = raw.find("<install");
-  if (install_open != std::string::npos) {
-    const size_t install_gt = raw.find('>', install_open);
-    if (install_gt != std::string::npos) {
-      const std::string head = raw.substr(install_open, install_gt - install_open + 1);
-      std::string art;
-      if (attr_string(head, "artifact", art)) {
-        TargetDesc::InstalledWrapDesc iw;
-        iw.artifact = trim_copy(art);
-        attr_string(head, "implib", iw.implib);
-        iw.implib = trim_copy(iw.implib);
-        const size_t iface_open = raw.find("<interface_include");
-        if (iface_open != std::string::npos) {
-          const size_t iface_gt = raw.find('>', iface_open);
-          if (iface_gt != std::string::npos) {
-            const std::string ih = raw.substr(iface_open, iface_gt - iface_open + 1);
-            attr_string(ih, "dir", iw.interface_include);
-            iw.interface_include = trim_copy(iw.interface_include);
-          }
-        }
-        if (!iw.artifact.empty())
-          out.installed_wrap = std::move(iw);
-      }
-    }
-  }
+  // Legacy type names (read-only compatibility); canonical names are prebuilt_* .
+  if (out.type == "imported_static_library")
+    out.type = "prebuilt_static_library";
+  else if (out.type == "imported_shared_library")
+    out.type = "prebuilt_shared_library";
 
   error.clear();
   return true;
@@ -613,7 +639,7 @@ bool write_target_xml(std::ostream& out, const TargetDesc& desc) {
   out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
   out << "<target name=\"" << xml_escape_text(desc.name) << "\" type=\"" << xml_escape_text(desc.type) << "\">\n";
   const bool skip_sources =
-      desc.type == "asset_bundle" || desc.type == "imported_static_library" || desc.type == "imported_shared_library" ||
+      desc.type == "asset_bundle" || desc.type == "prebuilt_static_library" || desc.type == "prebuilt_shared_library" ||
       desc.type == "imported_installed_static_library" || desc.type == "imported_installed_shared_library";
   if (!desc.vars.empty() || !desc.scripts.empty()) {
     out << "  <vars>\n";
@@ -733,7 +759,8 @@ bool write_target_xml(std::ostream& out, const TargetDesc& desc) {
       out << "/>\n";
     }
     out << "  </headers>\n";
-  } else if (desc.type == "executable" || desc.type == "static_library" || desc.type == "shared_library") {
+  } else if (desc.type == "executable" || desc.type == "library" || desc.type == "static_library" ||
+             desc.type == "shared_library") {
     out << "  <headers>\n";
     out << "    <dir from=\".\"/>\n";
     out << "  </headers>\n";

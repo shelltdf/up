@@ -131,7 +131,7 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
     if (!t.imported_prebuilt)
       continue;
     const bool sh =
-        (t.type == "imported_shared_library" || t.type == "imported_installed_shared_library");
+        (t.type == "prebuilt_shared_library" || t.type == "imported_installed_shared_library");
     cm << "add_library(" << t.name << " " << (sh ? "SHARED" : "STATIC") << " IMPORTED)\n";
     if (sh) {
       cm << "if(WIN32)\n";
@@ -266,7 +266,7 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
       continue;
     if (t.imported_from_install_prefix)
       continue;
-    if (t.type == "imported_shared_library") {
+    if (t.type == "prebuilt_shared_library") {
       cm << "if(WIN32)\n";
       if (!t.imported_dll.empty())
         cm << "  install(FILES \"" << cmake_escape_string_value(t.imported_dll) << "\" DESTINATION bin)\n";

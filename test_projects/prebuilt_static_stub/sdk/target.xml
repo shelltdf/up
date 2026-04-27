@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="UTF-8"?>
-<target name="tiny_vendor" type="imported_static_library">
+<target name="tiny_vendor" type="prebuilt_static_library">
   <headers>
     <dir from="../lib/inc" to="tiny"/>
   </headers>

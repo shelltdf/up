@@ -12,6 +12,8 @@
 
 ### Changed
 
+- **`target.xml` 磁盘预置库类型重命名**：**`imported_static_library` / `imported_shared_library`** 改为 **`prebuilt_static_library` / `prebuilt_shared_library`**（与 **`<prebuilt …/>`** 语义一致）；读入时仍接受旧 **`type`** 并规范化为新名。文档、**`gz spec`**、**`test_projects/prebuilt_*`** 已同步。
+- **`target.xml` `type="library"`**：configure 时按 **`GZ_TARGET_DYNAMIC_LIBRARY`**（及 **`GZ_DYNAMIC_LIBRARY`**）解析为 **`static_library`** 或 **`shared_library`** 再生成 CMake/Ninja；**`static_library` / `shared_library`** 仍强制固定链接形态。详见 **`doc/zh/package-target-xml-spec.md`**、**`doc/zh/internal-variables.md`**、**`doc/zh/cli-reference.md`**（**`configure`** 节）、**`doc/zh/user-manual.md`**、**`doc/zh/getting-started.md`**、**`doc/zh/script-tutorial.md`**、**`doc/en/user-manual.md`** 与 **`gz spec`**；示例包 **`test_projects/hello_library_type/`**。
 - **`gz reverse`**：子命令及 **`GroundZero/lib/engine/reverse/`**、**`GZ_ENABLE_REVERSE`** 构建开关**已删除**；CLI / **gz-gui** 不再暴露逆向入口。工程迁移请手写 **`package.xml` / `target.xml`**。
 - **旧版包级内嵌上游 CMake 与 ExternalProject 聚合路径**：已从解析与 CMake 生成中**完全移除**；**`imported_installed_*`** 仅依赖包外安装与手写 **`target.xml`** 声明。
 - **实现侧文档**：用户可读正文统一在 **`doc/zh/`**（中文）与 **`doc/en/`**（英文入口/全文）；**`doc/README.md`** 为双语索引。已移除 `doc/` 根目录下与 `zh/` 重复的同名跳转 `.md`，根 **`README.md`** / **`DESIGN.md`** 等改为直接链接 **`doc/zh/...`**（用户手册另链 **`doc/en/user-manual.md`**）。

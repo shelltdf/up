@@ -60,7 +60,7 @@
 |------------|------------|----------|
 | `GZ_TARGET_CPU_ARCH` | `GZ_CPU_ARCH` | 目标 CPU 标签（参与 `arch` 组合） |
 | `GZ_TARGET_SYSTEM` | `GZ_SYSTEM` | 目标系统标签 |
-| `GZ_TARGET_DYNAMIC_LIBRARY` | `GZ_DYNAMIC_LIBRARY` | `ON`/`OFF` 等，动态/静态链接倾向 |
+| `GZ_TARGET_DYNAMIC_LIBRARY` | `GZ_DYNAMIC_LIBRARY` | `ON`/`OFF` 等，参与 **`arch`** 组合中的 dynamic/static 段，并决定 **`target.xml` 中 `type="library"`** 在 configure 时解析为动态库还是静态库（**`static_library` / `shared_library` 不受此项覆盖**，始终固定形态）。详见 [`package-target-xml-spec.md`](package-target-xml-spec.md) §3.1。 |
 | `GZ_TARGET_DEBUG` | `GZ_DEBUG` | `ON`/`OFF` 等，Debug/Release |
 | `GZ_TARGET_BUILD_SYSTEM` | `GZ_BUILD_SYSTEM` | `cmake` 或 `ninja` |
 | `GZ_TARGET_CRT` | `GZ_CRT` | Windows CRT 模式，如 `dynamic_md` |

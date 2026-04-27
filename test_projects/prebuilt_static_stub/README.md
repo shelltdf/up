@@ -1,6 +1,6 @@
 ﻿# prebuilt_static_stub
 
-Demonstrates **`imported_static_library`** with **`<prebuilt import_lib="..."/>`**: a small C static library is built **once** into `lib/import/` (see `lib/CMakeLists.txt`; this folder name avoids matching the repo-root `.gitignore` rule `dist/`), then the main `gz` package links it as an **IMPORTED** target without compiling its sources in the aggregate `CMakeLists.txt`.
+Demonstrates **`prebuilt_static_library`** with **`<prebuilt import_lib="..."/>`**: a small C static library is built **once** into `lib/import/` (see `lib/CMakeLists.txt`; this folder name avoids matching the repo-root `.gitignore` rule `dist/`), then the main `gz` package links it as an **IMPORTED** target without compiling its sources in the aggregate `CMakeLists.txt`.
 
 ## Regenerate the stub import library (optional)
 

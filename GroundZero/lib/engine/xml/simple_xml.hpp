@@ -85,9 +85,10 @@ struct TargetDesc {
   };
 
   std::string name;
-  std::string type;  // executable | static_library | shared_library | asset_bundle |
-                      // imported_static_library | imported_shared_library |
+  std::string type;  // executable | library | static_library | shared_library | asset_bundle |
+                      // prebuilt_static_library | prebuilt_shared_library |
                       // imported_installed_static_library | imported_installed_shared_library
+                      // (load_target_xml also accepts legacy imported_{static,shared}_library)
   std::vector<std::string> sources;
   std::vector<SourceEntry> source_entries;
   std::optional<PrebuiltDesc> prebuilt;

@@ -7,8 +7,8 @@
 
 ### 产品方向（推荐工作流）
 
-- **推荐**：用户**纯手写** **`package.xml`** 与 **`target.xml`**，显式描述源文件、`<headers>`、`<defines>`、`<dependency>`、预置库（**`<prebuilt>`** / **`imported_*`**）等；分步说明见 **[getting-started.md](getting-started.md)**。
-- **集成上游 CMake 第三方库时**：在 **包外** 用上游自带 CMake 完成 **`cmake --install` 到固定前缀**，再在 `gz` 侧用 **`imported_installed_*` + `<install …/>`**（或 **`imported_*` + `<prebuilt>`**）手写声明安装产物与头文件路径。
+- **推荐**：用户**纯手写** **`package.xml`** 与 **`target.xml`**，显式描述源文件、`<headers>`、`<defines>`、`<dependency>`、**`<prebuilt …/>`** 与 **`prebuilt_static_library` / `prebuilt_shared_library`** 等；分步说明见 **[getting-started.md](getting-started.md)**。
+- **集成上游 CMake 第三方库时**：在 **包外** 构建或安装后，将 **`.lib` / `.a` / `.dll` / `.so`** 等置于本仓库可引用路径（或固定 SDK 目录），再在 **`target.xml`** 用 **`prebuilt_static_library` / `prebuilt_shared_library`** + **`<prebuilt …/>`** 指向这些**磁盘路径**（相对 **`target.xml`** 所在目录或绝对路径）。
 
 ---
 
@@ -21,6 +21,17 @@
 
 - **归属**：`target.xml` 必须位于某一 `package.xml` 所在目录的**子树内**；`configure` 会把 target 归到路径上**最近**的包根下（见 `configure.cpp` 中 `nearest_package_parent`）。
 - **扫描**：`gz configure` 在扫描根（默认 cwd，或 `--scan` 指定目录）下**递归**查找所有 `package.xml` 与 `target.xml`。
+
+### 1.1 同名块可多次出现（合并顺序）
+
+在 **`package.xml`** 的 **`<package>`** 内、以及 **`target.xml`** 的 **`<target>`** 内，下列**成对闭合**子块可出现**任意多次**（按**文档中出现顺序**依次解析，结果**追加**到同一列表或同一合并语义；块内条目相对顺序仍按各块内规则）：
+
+- **`package.xml`**：**`<vars>`**、**`<defines>`**、**`<config_files>`**
+- **`target.xml`**：**`<sources>`**、**`<headers>`**、**`<assets>`**、**`<vars>`**、**`<defines>`**、**`<config_files>`**
+
+**自闭合/无体标签**（如 **`<prebuilt …/>`**、**`<install …/>`**、**`<dependency …/>`**）可出现多次：**`<prebuilt/>`**、**`<install/>`** 以**最后一次**有效声明覆盖模型中的预置库 / 安装包装信息；**`<dependency/>`** 仍为全文正则匹配，顺序即依赖列表顺序。
+
+**裸 `<file>…</file>`**（无 **`<sources>`** 包裹）：仅当文件中**不存在任何** **`<sources>…</sources>`** 块时，才对全文匹配裸 `<file>`；只要出现过至少一个 `<sources>` 块，则**只**从各 `<sources>` 块体收集源，**不再**从块外收集裸 `<file>`。
 
 ---
 
@@ -69,24 +80,22 @@
 - **可选属性**
   - **`type`**：目标类型。省略时默认为 **`executable`**。实现识别（大小写按生成后端使用前为准，建议小写）：
     - **`executable`**：可执行程序。
-    - **`static_library`**：静态库。
-    - **`shared_library`**：动态库。
-    - **`asset_bundle`**：仅资源安装，不参与编译链接。
-    - **`imported_static_library`**：磁盘预置静态库（需配 `<prebuilt .../>`）。
-    - **`imported_shared_library`**：磁盘预置动态库（需配 `<prebuilt .../>`）。
-    - **`imported_installed_static_library`**：声明**已安装到本包安装前缀**（`CMAKE_INSTALL_PREFIX`）下的静态库产物；**推荐**在包外先 `cmake --install` 再手写 `<install artifact=\"...\"/>`。
-    - **`imported_installed_shared_library`**：同上，针对动态库；Windows 常需 **`implib`**。
+    - **`library`**：由**工作区选项**决定生成静态库还是动态库：与 **`GZ_TARGET_DYNAMIC_LIBRARY`**（及兼容键 **`GZ_DYNAMIC_LIBRARY`**）一致——为真时按动态库参与构建与链接，为假时按静态库。用于默认服从全局/用户选择的常规库目标。
+    - **`static_library`**：**强制**静态库；**不**因上述全局动态/静态偏好而改变链接形态（用于必须固定为静态的特殊约束）。
+    - **`shared_library`**：**强制**动态库；**不**因全局偏好而改变（用于必须固定为动态的特殊约束）。
+    - **`asset_bundle`**：不参与编译链接；安装内容由 **`sources` / `<assets>…</assets>` / `<headers>`** 三者至少其一描述（见下表），其中 **`asset_bundle`** 的典型用法是 **`<assets>`**。
+    - **`prebuilt_static_library`**：**`<prebuilt …/>`** 指向磁盘上的预置静态库（`.lib` / `.a` 等）；路径相对 **`target.xml`** 所在目录或绝对路径。
+    - **`prebuilt_shared_library`**：**`<prebuilt …/>`** 指向磁盘上的预置动态库；Windows 需可解析 **`.dll`**（**`dll=`** / **`location=`**）与 **import `.lib`**（**`import_lib=`**）。
+    - **兼容（读入）**：旧名 **`imported_static_library`** / **`imported_shared_library`** 仍被接受，读入后规范化为 **`prebuilt_static_library`** / **`prebuilt_shared_library`**；新工程请直接使用 **`prebuilt_*`**。
 
 类型与关键子标签约束（当前实现）：
 
-| type | `<sources>` | `<prebuilt/>` | `<install .../>` | 备注 |
-|------|-------------|---------------|------------------|------|
-| `executable` / `static_library` / `shared_library` | 需要（至少解析到一个源文件） | 否 | 否 | 常规编译目标 |
-| `asset_bundle` | 可空 | 否 | 否 | 需至少有 `sources` / `assets` / `<headers>` 之一 |
-| `imported_static_library` | 不需要 | 需要 | 否 | 路径相对 `target.xml`（或绝对路径） |
-| `imported_shared_library` | 不需要 | 需要 | 否 | Windows 需可解析 dll + import lib |
-| `imported_installed_static_library` | 不需要 | 否 | 需要 | `artifact` 相对 `CMAKE_INSTALL_PREFIX` |
-| `imported_installed_shared_library` | 不需要 | 否 | 需要 | Windows 需 `implib` |
+| type | `<sources>` | `<prebuilt/>` | 备注 |
+|------|-------------|---------------|------|
+| `executable` / `library` / `static_library` / `shared_library` | 需要（至少解析到一个源文件） | 否 | 常规编译目标；`library` 在 configure 时按 `GZ_TARGET_DYNAMIC_LIBRARY` 解析为静态或动态库产物 |
+| `asset_bundle` | 可空 | 否 | 需至少有 `sources` / `assets` / `<headers>` 之一 |
+| `prebuilt_static_library` | 不需要 | 需要 | 路径相对 `target.xml`（或绝对路径） |
+| `prebuilt_shared_library` | 不需要 | 需要 | Windows 需可解析 dll + import lib |
 
 ### 3.2 源文件 `<file> ... </file>`
 
@@ -100,11 +109,11 @@
 </sources>
 ```
 
-说明：**当前解析器不依赖 `<sources>` 父节点**，只要文件中存在符合模式的 `<file>...</file>` 即会收录；使用 `<sources>` 仅为可读性与与 DESIGN 叙述一致。
+说明：若文件中**没有任何** **`<sources>…</sources>`** 块，解析器会对**全文**匹配裸 **`<file>…</file>`** 并收录；若存在至少一个 **`<sources>`** 块，则**仅**解析各 **`<sources>`** 块体内的条目，**忽略块外**裸 `<file>`。多个 **`<sources>`** 块按 §1.1 顺序合并。
 
 ### 3.3 头文件输入与安装输出 `<headers>`
 
-`<headers>` 统一使用 **`from/to`** 自闭合条目，支持三种类型：
+**`<headers>…</headers>`** 可出现多个（见 §1.1）。`<headers>` 统一使用 **`from/to`** 自闭合条目，支持三种类型：
 
 - **`<dir from="..." to="..."/>`**
 - **`<file from="..." to="..."/>`**
@@ -142,14 +151,14 @@
 
 ### 3.4 编译宏 `<defines>`
 
-- 可选块：**`<defines>`** … **`</defines>`**，内为若干自闭合 **`<define name="..." value="..."/>`**。
+- 可选块：**`<defines>`** … **`</defines>`**（可出现多个，见 §1.1），内为若干自闭合 **`<define name="..." value="..."/>`**。
 - **`name`**：必填，须为 **C 标识符**（`[A-Za-z_][A-Za-z0-9_]*`），对应预处理器宏名。
 - **`value`**：可选。省略时仅定义宏名（等价于 `#ifdef NAME` 为真、未赋替换文本）；给出时生成 **`NAME=value`**。
 - **`value` 字符集**（当前实现）：仅允许字母、数字及 **`._+-/`**（不允许空格，以便 Ninja/MSVC 命令行稳定传递）。
 
 **生成行为**：
 
-- **CMake**：对 `executable` / `static_library` / `shared_library` 生成 **`target_compile_definitions(<target> PRIVATE ...)`**（导入库 / `asset_bundle` 等不参与编译的目标忽略本块）。
+- **CMake**：对 `executable` / `library` / `static_library` / `shared_library` 生成 **`target_compile_definitions(<target> PRIVATE ...)`**（导入库 / `asset_bundle` 等不参与编译的目标忽略本块；**`library`** 在 configure 内已解析为静/动库后再生成）。
 - **Ninja**：在同一目标的各 `cxx` 编译命令上追加 **`/D...`**（Windows `cl`）或 **`-D...`**（类 Unix）。
 
 示例：
@@ -163,21 +172,21 @@
 
 ### 2.4 包级变量 `<vars>`（可选）
 
-- 块 **`<vars>...</vars>`**，内为自闭合 **`<var name="KEY" value="VAL"/>`**（`value` 可省略表示空字符串）。
+- 块 **`<vars>...</vars>`**（可出现多个，见 §1.1），内为自闭合 **`<var name="KEY" value="VAL"/>`**（`value` 可省略表示空字符串）。
 - 每个 **KEY** 表示**默认值**，供本包下所有 `target.xml` 在 **`@KEY@` 替换**与 **`when`** 中使用；同一 KEY 还可在 **`gz configure --opt KEY=...`** 或 **`gz_cache.txt`** 中写入（键须符合实现允许的格式：所有 `GZ_*`，以及除保留键外的 C 风格标识符），**configure 阶段最后应用，覆盖 XML 默认值**（见 §3.5 合并顺序）。
 
 ### 2.5 包级编译宏 `<defines>`（可选）
 
-- 与 **`target.xml` 中 `<defines>`** 同形：**`<defines>...</defines>`** 内若干 **`<define name="标识符" value="..."/>`**（`name`、`value` 规则与目标级一致，见 §3.4）。
-- **作用域**：作用于本包内所有 **`executable` / `static_library` / `shared_library`** 目标的编译命令；**先于**各目标自身的 `<defines>` 注入（目标级宏在命令行上靠后，一般由编译器后写覆盖同名宏）。
+- 与 **`target.xml` 中 `<defines>`** 同形：**`<defines>...</defines>`**（可出现多个，见 §1.1）内若干 **`<define name="标识符" value="..."/>`**（`name`、`value` 规则与目标级一致，见 §3.4）。
+- **作用域**：作用于本包内所有 **`executable` / `library` / `static_library` / `shared_library`** 目标的编译命令；**先于**各目标自身的 `<defines>` 注入（目标级宏在命令行上靠后，一般由编译器后写覆盖同名宏；**`library`** 同上，在 configure 内解析后再注入）。
 
 ### 2.6 包级配置模板 `<config_files>`（可选）
 
-- 与 **`target.xml` 中 `<config_files>`** 同形：**`<config_files>...</config_files>`** 内若干 **`<file in="相对路径" to="相对路径"/>`**（`in`、`to` 均必填）。
+- 与 **`target.xml` 中 `<config_files>`** 同形：**`<config_files>...</config_files>`**（可出现多个，见 §1.1）内若干 **`<file in="相对路径" to="相对路径"/>`**（`in`、`to` 均必填）。
 - **`in`**：相对 **`package.xml` 所在目录**（包根）。
 - **`to`**：相对 **`.intermediate/generated/<包名>/_package/`**（实现保留目录名 **`_package`**；请勿在本包内再使用同名编译目标目录以免混淆）。
 - **`@NAME@` / `${NAME}` 替换**：使用 **内置变量 + `package.xml` 中 `<vars>` + 本包内所有 `target.xml` 的 `<vars>`**（按 `configure` 收集目标的顺序依次叠加；**同名键以后写入者为准**，含同一 `<vars>` 块内靠后的 `<var/>`）+ **`--opt` / `gz_cache.txt`**。内置 **`GZ_TARGET_NAME` 在包级模板中默认为空串**，除非某个目标用 `<var name="GZ_TARGET_NAME" …/>` 覆盖。
-- **生成时机**：`configure` 对每个含条目的包生成一次；生成文件加入本包内**每一个** **`executable` / `static_library` / `shared_library`** 目标的编译源列表，并把 **`generated/<包名>/_package/`** 加入这些目标的编译期 **include 路径**。
+- **生成时机**：`configure` 对每个含条目的包生成一次；生成文件加入本包内**每一个** **`executable` / `library` / `static_library` / `shared_library`** 目标的编译源列表，并把 **`generated/<包名>/_package/`** 加入这些目标的编译期 **include 路径**（**`library`** 解析后同上）。
 
 ### 2.7 脚本型 `<var type="script">`（消息 / trigger）
 
@@ -227,8 +236,8 @@
 
 #### `<config_files>`（类 configure_file 的最小子集）
 
-- **目标级**（`target.xml`）：块 **`<config_files>...</config_files>`**，内为 **`<file in="模板相对路径" to="输出相对路径"/>`**（`in`、`to` 均必填）。`in` 相对 **`target.xml` 所在目录**；`to` 相对 **`.intermediate/generated/<包名>/<目标名>/`**，且须为安全相对路径（**不得**含 `..` 段、不得为绝对路径）。**`@NAME@`** 使用 **§3.5 完整变量层**。生成文件加入**该目标**的编译源列表，并把 **`generated/<包名>/<目标名>/`** 加入该目标的 **编译期 include 路径**。
-- **包级**（`package.xml`）：形状相同；`in` 相对 **包根**；`to` 相对 **`.intermediate/generated/<包名>/_package/`**（保留名 **`_package`**）。**`@NAME@` / `${NAME}`** 使用 **包级 `<vars>` + 本包内全部目标的 `<vars>`**（顺序与叠加规则见上）+ 工作区；**`GZ_TARGET_NAME`** 默认为空。生成文件加入本包内**所有**原生编译目标的源列表，并把 **`generated/<包名>/_package/`** 加入这些目标的 **include 路径**。
+- **目标级**（`target.xml`）：块 **`<config_files>...</config_files>`**（可出现多个，见 §1.1），内为 **`<file in="模板相对路径" to="输出相对路径"/>`**（`in`、`to` 均必填）。`in` 相对 **`target.xml` 所在目录**；`to` 相对 **`.intermediate/generated/<包名>/<目标名>/`**，且须为安全相对路径（**不得**含 `..` 段、不得为绝对路径）。**`@NAME@`** 使用 **§3.5 完整变量层**。生成文件加入**该目标**的编译源列表，并把 **`generated/<包名>/<目标名>/`** 加入该目标的 **编译期 include 路径**。
+- **包级**（`package.xml`）：形状相同（可出现多个，见 §1.1）；`in` 相对 **包根**；`to` 相对 **`.intermediate/generated/<包名>/_package/`**（保留名 **`_package`**）。**`@NAME@` / `${NAME}`** 使用 **包级 `<vars>` + 本包内全部目标的 `<vars>`**（顺序与叠加规则见上）+ 工作区；**`GZ_TARGET_NAME`** 默认为空。生成文件加入本包内**所有**原生编译目标的源列表，并把 **`generated/<包名>/_package/`** 加入这些目标的 **include 路径**。
 - **`${NAME}`**（CMake **`configure_file`** 风格）：与 **`@NAME@`** 使用**同一套**合并后的变量表；`NAME` 须为 C 标识符（`${` 与 `}` 之间允许首尾空白）。**先做占位符收集**：模板里出现但表中**没有**的 `NAME` 会**以空串加入表**，再交替替换，故未在 XML / `--opt` 声明的占位符会变成**空展开**（不再保留 `${NAME}`）；需要非空内容必须在 **`<vars>`** 或 **`--opt`** 中提供。不解析 **`$<...>`** 生成器表达式。处理顺序：**反复交替 `@NAME@` 与 `${NAME}` 至不再变化（有上限）**，最后再做 **`#cmakedefine`**。
 - **`#cmakedefine` / `#cmakedefine01`**：在上述占位符替换之后，按与 CMake **`configure_file`** 相近的**子集**处理（见 `GroundZero/lib/engine/xml/var_subst.cpp` 中 `apply_cmakedefine_directives`）：未出现在合并变量表、或值为空 / `0` / `false` / `off` / `no` 视为假；`#cmakedefine01` 展开为 **`#define NAME 0`** 或 **`1`**；`#cmakedefine NAME` 为真则 **`#define NAME`**，否则 **`/* #undef NAME */`**；带尾部内容的 **`#cmakedefine NAME …`** 为真则输出 **`#define NAME …`**。用于 zlib 等 **`zconf.h.in`** 类模板；**不是**完整 CMake 生成器。
 
@@ -247,7 +256,7 @@
   1. **`目标名`**：与本包内某一**库** target 同名，表示依赖本包该库。
   2. **`包名:目标名`**：依赖**其他包**中的某一库 target（该包须在 `package.xml` 中声明，且该 target 须在扫描集中存在）。
 - **`visibility`**（可选，默认 **`private`**，解析时大小写不敏感）：取值为 **`private` / `public` / `interface`**，对应 CMake `target_link_libraries` 的 **`PRIVATE` / `PUBLIC` / `INTERFACE`**。**可执行文件**作为消费者时，**不允许**使用 **`interface`**（可执行文件必须实际链接该库；否则 configure 失败）。
-- **约束**：依赖指向的目标类型须为库目标（`static_library` / `shared_library` / `imported_static_library` / `imported_shared_library` / `imported_installed_static_library` / `imported_installed_shared_library`）或 **`asset_bundle`**（仅校验图，不参与链接）；解析不到或类型不对则 **configure 失败**。
+- **约束**：依赖指向的目标类型须为库目标（`static_library` / `shared_library` / `library` / `prebuilt_static_library` / `prebuilt_shared_library`）或 **`asset_bundle`**（仅校验图，不参与链接）；解析不到或类型不对则 **configure 失败**。
 
 **生成行为（CMake 模式，当前实现）**：
 
@@ -266,7 +275,7 @@
 ## 5. configure 对「主包」与目标的额外要求
 
 - **主包**：优先取 **cwd 等于其 `package.xml` 父目录`** 的那一个包；若无匹配，则取扫描到的**第一个**包作为主包（多包同扫时顺序依赖文件系统，建议单包目录下执行或明确文档化扫描顺序风险）。
-- 主包下至少需要 **一个 target.xml**（可执行/库/导入库均可）；纯库包（例如只含 `imported_installed_*`）允许 configure/build。
+- 主包下至少需要 **一个 target.xml**（可执行/库/导入库均可）；纯库包（例如只含 **`prebuilt_*` + `<prebuilt/>`**）允许 configure/build。
 - 同一 **`包名:目标名`** 在扫描结果中不得重复。
 
 ---
@@ -287,3 +296,11 @@
 | 数据结构 | `GroundZero/lib/engine/xml/simple_xml.hpp`（`PackageDesc` / `TargetDesc`） |
 
 后续若引入 XSD/JSON Schema，可在本文件顶部增加版本号与变更记录。
+
+---
+
+## 8. `gz pack`、安装树与「二次分发用 XML」（产品方向 / 与当前实现对齐）
+
+- **当前实现（与源码一致）**：**`gz pack`** 只对 **`--install-dir-name`** 所指的 **安装树根**（**`.intermediate/install/<arch>/`**，内含 **`bin/`**、**`lib/`**、**`include/`** 等**已编译/已安装**产物）做 **归档**（PowerShell **`Compress-Archive`** / **`tar`**，或在本机存在 **`cpack`** 且构建目录已生成 **CPack** 配置时走 **CPack**）。**不会**在包内**自动生成**新的 **`package.xml` / `target.xml`**，也**不会**把原先的源码型 **`executable` / `static_library` / `shared_library` / `library`** 描述**改写**为 **`prebuilt_*` + `<prebuilt …/>`**。实现入口：**`GroundZero/lib/engine/commands/pack.cpp`**、**`run_pack_backend`**（**`backend_dispatch.cpp`**）。
+
+- **产品方向（二次分发）**：将 **install 结果**作为独立交付单元分发时，消费方若仍用 **`gz configure`** 编排构建，理想流程是：在归档或解压布局旁附带一套 **面向二进制** 的 **`package.xml` / `target.xml`**——其中库以 **`prebuilt_static_library` / `prebuilt_shared_library`** 等声明，用 **`<prebuilt …/>`** 指向包内（或固定前缀下）的 **`.exe` / `.lib` / `.dll` / `.so`** 等路径，**`<sources>` 不再列出编译源码**。本条为**规格愿景**；落地后须与 **`pack`** 或独立发布管线同步实现并回写本节「当前实现」段。

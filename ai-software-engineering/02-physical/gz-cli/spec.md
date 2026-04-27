@@ -34,6 +34,7 @@
 - **`build`**：必须提供 **`--build-dir-name`**；构建目录下必须存在 **`gz_cache.txt`**。
 - **`run` / `test`**：必须提供 **`--install-dir-name`**；其值为 **安装树根在 `.intermediate/install/` 下的单段目录名**（通常等于缓存中的 **`arch`**）。
 - **`pack`**：至少一次 **`--install-dir-name`**；可重复以打多架构包。
+- **`pack`（当前行为补充）**：仅对给定 **安装树**做 **zip/tar.gz**（或 **CPack**）归档，**不**生成或改写 **`package.xml` / `target.xml`**。若将来支持「二次分发用 XML」自动落地，以 **`doc/zh/package-target-xml-spec.md` §8** 与实现为准。
 
 ---
 

@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="UTF-8"?>
-<target name="prebuilt_stub_lib" type="imported_static_library">
+<target name="prebuilt_stub_lib" type="prebuilt_static_library">
   <prebuilt import_lib="../third_party/stub/lib/stub.lib"/>
   <headers>
     <dir from="../third_party/stub" to="stub"/>

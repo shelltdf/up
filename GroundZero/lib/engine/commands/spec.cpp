@@ -9,7 +9,7 @@ namespace {
 // English-only: embedded copy of rules aligned with doc/zh/package-target-xml-spec.md for AI/tools without repo .md.
 // Split into named chunks: MSVC ~16kB string literal limit; edit the slice you need.
 constexpr const char* kXmlSpecEnThroughSection3 =
-  R"SPEC(GZ_XML_SPEC_REVISION=20
+  R"SPEC(GZ_XML_SPEC_REVISION=21
 
 # gz — package.xml and target.xml (machine-oriented summary)
 
@@ -48,6 +48,16 @@ Rules:
   nearest parent `package.xml` ("nearest_package_parent" behavior).
 - `gz configure` recursively scans from cwd and/or each `--scan` root for `package.xml` and `target.xml`.
 
+### Repeated balanced blocks (merge order)
+Under **`<package>`** and **`<target>`**, these **paired** sections may appear **multiple times** in document order; each
+body is parsed and **appended** to the same logical list (or merged per rules below):
+- **package.xml:** `<vars>`, `<defines>`, `<config_files>`
+- **target.xml:** `<sources>`, `<headers>`, `<assets>`, `<vars>`, `<defines>`, `<config_files>`
+**Self-closing / void tags:** multiple **`<prebuilt …/>`** or **`<install …/>`** — the **last** non-empty parse wins for
+that model slot. **`<dependency/>`** remains global-regex collected; order is list order.
+**Bare `<file>…</file>`** (no `<sources>` wrapper): only scanned **when there is zero** `<sources>…</sources>` block in the
+file; if **any** `<sources>` block exists, sources come **only** from those block bodies (outer bare `<file>` ignored).
+
 ---
 
 ## 2. package.xml
@@ -64,7 +74,8 @@ Rules:
 
 )SPEC"
   R"SPEC(### Optional package variables `<vars>`
-- Block: `<vars>...</vars>` with self-closing entries `<var name="KEY" value="VAL"/>` (`value` may be omitted for empty).
+- Block: `<vars>...</vars>` (may repeat; bodies merge in order) with self-closing entries `<var name="KEY" value="VAL"/>`
+  (`value` may be omitted for empty).
 - Each pair is a **default** for `KEY` for all targets in the package (for `@KEY@` / `when=`); the same key may be
   **overridden** at configure time (see merge order below).
 - Script var (special var type): `<var name="SCRIPT_NAME" type="script" script_type="lua" trigger="manual|sources.preprocess|sources.postprocess|headers.preprocess|headers.postprocess|assets.preprocess|assets.postprocess" value="..."/>`
@@ -81,13 +92,14 @@ Rules:
   defaults for the same name.
 
 ### Optional package compile definitions `<defines>`
-- Same shape as target **`<defines>`** (see below): `<defines>...</defines>` with `<define name="IDENT" value="..."/>`.
-- Applied to **every** `executable` / `static_library` / `shared_library` target in this package **before** that target’s
-  own `<defines>` entries (so target-level definitions follow and may override at the toolchain level).
+- Same shape as target **`<defines>`** (see below): `<defines>...</defines>` (may repeat; bodies merge in order) with
+  `<define name="IDENT" value="..."/>`.
+- Applied to **every** `executable` / `library` / `static_library` / `shared_library` target in this package **before** that
+  target’s own `<defines>` entries (so target-level definitions follow and may override at the toolchain level).
 
 ### Optional package config files `<config_files>`
-- Same block shape as target **`<config_files>`**: `<config_files>...</config_files>` with **`<file in="rel" to="out"/>`**
-  (both required).
+- Same block shape as target **`<config_files>`**: `<config_files>...</config_files>` (may repeat; bodies merge in order)
+  with **`<file in="rel" to="out"/>`** (both required).
 - `in` is relative to the **`package.xml` parent directory** (package root).
 - `to` is relative to **`.intermediate/generated/<package>/_package/`** (reserved directory name **`_package`**; avoid
   naming a compile target `_package` in the same package). Same safe-path rules as target config: no `..`, not absolute.
@@ -96,8 +108,8 @@ Rules:
   workspace options. Builtin **`GZ_TARGET_NAME` is empty** unless a target `<var>` sets it.
 - Generated files are written **once per configure** per package and appended to **every** native compile target in that
   package as extra sources. **`.intermediate/generated/<package>/_package/`** is added to compile **include directories**
-  for every `executable` / `static_library` / `shared_library` in the package whenever any package-level `<config_files>`
-  entry exists.
+  for every `executable` / `library` / `static_library` / `shared_library` in the package whenever any package-level
+  `<config_files>` entry exists.
 
 ---
 
@@ -175,27 +187,31 @@ outside the forms above.
 | type | `<sources>` / `<file>` | `<prebuilt/>` | `<install …/>` (artifact) | Notes |
 |------|------------------------|---------------|----------------------------|-------|
 | executable | required (>=1 source) | no | no | Normal compile target. |
-| static_library | required | no | no | |
-| shared_library | required | no | no | |
+| library | required | no | no | Configure maps to STATIC or SHARED from `GZ_TARGET_DYNAMIC_LIBRARY` / `GZ_DYNAMIC_LIBRARY`. |
+| static_library | required | no | no | Always STATIC (ignores global dynamic preference). |
+| shared_library | required | no | no | Always SHARED (ignores global static preference). |
 | asset_bundle | may be empty | no | no | Need at least one of sources / assets / `<headers>`. |
-| imported_static_library | not required | **required** | no | Paths relative to `target.xml` dir unless absolute. |
-| imported_shared_library | not required | **required** | no | On Windows, dll + import `.lib` must be resolvable. |
+| prebuilt_static_library | not required | **required** | no | Paths relative to `target.xml` dir unless absolute. |
+| prebuilt_shared_library | not required | **required** | no | On Windows, dll + import `.lib` must be resolvable. |
 | imported_installed_static_library | not required | no | **required** | `artifact` relative to `CMAKE_INSTALL_PREFIX` (populate prefix by out-of-band install / CI). |
 | imported_installed_shared_library | not required | no | **required** | Windows: need `implib` for the import library. |
 
 ### Sources
 - Repeat: `<file>relative/path.cpp</file>` — path is **relative to the directory that contains this target.xml**.
-- Optional wrapper: `<sources>…</sources>` is for readability only; the parser matches `<file>…</file>` anywhere.
+- If **no** `<sources>…</sources>` block exists, bare `<file>…</file>` anywhere in the file is collected. If **one or more**
+  `<sources>` blocks exist, only entries **inside** those blocks are used; outer bare `<file>` is ignored. Multiple
+  `<sources>` blocks append in document order.
 - Under `<sources>`, you may also use self-closing **`<file from="rel.cpp" when="..."/>`** or **`<glob from="*.cpp" when="..."/>`**
   (requires `from=`). Paired `<file from="...">…</file>` / `<glob …>` still support optional **`when="..."`** on the
   opening tag.
-- Optional **`<vars>...</vars>`** (same shape as package vars): **defaults** for that target; same key overrides the
-  package default, and may still be overridden last by `--opt` / `gz_cache.txt`.
+- Optional **`<vars>...</vars>`** (may repeat; bodies merge in order; same shape as package vars): **defaults** for that
+  target; same key overrides the package default, and may still be overridden last by `--opt` / `gz_cache.txt`.
 - Script vars are also allowed at target level with the same `type="script"` + `script_type` + `trigger` + `value` shape.
 
 ### Config files (`<config_files>`) — target-level configure-time templates
 
-- Block: `<config_files>...</config_files>` with **`<file in="template.rel" to="out.rel"/>`** (both required).
+- Block: `<config_files>...</config_files>` (may repeat; bodies merge in order) with **`<file in="template.rel" to="out.rel"/>`**
+  (both required).
 - `in` is relative to **`target.xml` directory**; `to` is relative to **`.intermediate/generated/<package>/<target>/`** and
   must be a safe relative path (no `..` segments, not absolute).
 - During **configure**, `gz` reads each template, **extends** the merged variable map with **default-empty** entries for
@@ -203,8 +219,8 @@ outside the forms above.
   then applies **`@NAME@`** and **`${NAME}`** substitution, alternating both passes until nothing changes (max 64 rounds),
   using the **full** merged variable map for target-level templates, then
   writes the output under the generated directory, and adds that file to the target’s compile sources. The target’s
-  generated directory is also added as an **include directory** for `executable` / `static_library` / `shared_library`
-  targets.
+  generated directory is also added as an **include directory** for `executable` / `library` / `static_library` /
+  `shared_library` targets.
 - After `@` / `${}` replacement, lines **`#cmakedefine NAME ...`** and **`#cmakedefine01 NAME`** are expanded like CMake
   `configure_file` (subset): unknown / empty / `0` / `false` / `off` / `no` treat as false; `#cmakedefine01` becomes
   **`#define NAME 0|1`**. This helps zlib-style `zconf.h` templates; it is **not** a full CMake `configure_file` engine.
@@ -216,6 +232,7 @@ outside the forms above.
 
 )SPEC"
   R"SPEC(### Headers block (`<headers>`) — compile + install layout
+- The `<headers>…</headers>` block may repeat; entries from each block append in document order.
 - Self-closing entries under `<headers>` (`<includes>` is not supported):
   - `<dir from="rel/path" to="optional_include_subdir"/>`
   - `<file from="rel/path.hpp" to="optional_subdir"/>`
@@ -223,11 +240,16 @@ outside the forms above.
 - `from` is required, relative to `target.xml` directory. `to` is optional (under install prefix `include/`).
 - Optional **`when="..."`** on each entry: if false, the entry is omitted from compile include paths and from install rules.
 
+### Assets block (`<assets>`)
+- `<assets>…</assets>` may repeat; entries from each block append in document order. Inner shape matches examples
+  (`<dir|file|glob from="…" to="…"/>` with optional preprocess/postprocess bodies). **`when` on assets is not implemented.**
+
 ### Compile definitions (`<defines>`) — target
-- Optional block: `<defines>...</defines>` containing self-closing `<define name="IDENT" value="..."/>`.
+- Optional block: `<defines>...</defines>` (may repeat; bodies merge in order) containing self-closing
+  `<define name="IDENT" value="..."/>`.
 - `name` is required (C identifier: `[A-Za-z_][A-Za-z0-9_]*`). `value` is optional; omitted means define the macro name only.
 - `value` (if present) may only contain letters, digits, and `._+-/` (no spaces).
-- Applied to native compile targets (`executable`, `static_library`, `shared_library`): CMake uses
+- Applied to native compile targets (`executable`, `library`, `static_library`, `shared_library`): CMake uses
   `target_compile_definitions(... PRIVATE ...)`, Ninja appends `/D` or `-D` flags to compile commands.
 
 ### Target dependencies
@@ -238,10 +260,13 @@ outside the forms above.
   parse). Maps to CMake `target_link_libraries` link keywords for **executable** consumers when explicit `<dependency/>`
   rows are used: **`PRIVATE`** / **`PUBLIC`** / **`INTERFACE`**. **`interface` is rejected** when the consumer target is
   an **`executable`** (an executable must actually link the library; use `private` or `public`).
-- Valid dependency target types are library-like (`static_library`, `shared_library`, imported_* library types).
-  Configure fails if the reference cannot be resolved or points to a non-library.
+- Valid dependency target types are library-like (`static_library`, `shared_library`, `library`, `prebuilt_static_library`,
+  `prebuilt_shared_library`, `imported_installed_static_library`, `imported_installed_shared_library`). Configure fails if
+  the reference cannot be resolved or points to a non-library.
 
 CMake backend note (current behavior):
+- **`library`** targets are rewritten internally to **`static_library`** or **`shared_library`** before backend emission,
+  using the same **`GZ_TARGET_DYNAMIC_LIBRARY`** / **`GZ_DYNAMIC_LIBRARY`** rule as default exe→lib link filtering.
 - **Executable** targets also **PRIVATE-link all library targets in the same package** when no explicit `<dependency/>`
   link rows exist; otherwise explicit rows (with their `visibility`) are used for `target_link_libraries`.
 - **Library** targets: `<dependency/>` participates in validation and external-package library wiring; static-to-static
@@ -302,7 +327,7 @@ target.xml (executable next to sources):
 ### 6b. Full-tag reference sketches (syntax only; trim for real trees)
 
 These snippets are **not** one runnable layout: they show **every major child shape** the scanner recognizes. Omit
-blocks you do not need. Some combinations are **mutually exclusive by `type`** (e.g. `imported_*` vs normal `<sources>`).
+blocks you do not need. Some combinations are **mutually exclusive by `type`** (e.g. `prebuilt_*` vs normal `<sources>`).
 
 **package.xml — all supported top-level constructs (except duplicate `<dependency/>` rows shown as one each):**
 
@@ -327,7 +352,7 @@ blocks you do not need. Some combinations are **mutually exclusive by `type`** (
 </package>
 ```
 
-**target.xml — native compile target** (`executable` | `static_library` | `shared_library`): `<vars>`, `<config_files>`,
+**target.xml — native compile target** (`executable` | `library` | `static_library` | `shared_library`): `<vars>`, `<config_files>`,
 `<defines>`, `<sources>` (`<file>text</file>`, wrapper block, self-closing `from=` / `when=`, paired tags with
 `<preprocess command="..."/>` / `<postprocess command="..."/>`), `<headers>` (`dir` / `file` / `glob`, optional `to`,
 optional `when`), `<assets>` (same `from` / `to` / preprocess / postprocess pattern; **`when` not implemented**),
@@ -369,11 +394,12 @@ optional `when`), `<assets>` (same `from` / `to` / preprocess / postprocess patt
 </target>
 ```
 
-**target.xml — `imported_static_library` / `imported_shared_library`** (uses `<prebuilt/>`, no compile `<sources>`):
+**target.xml — `prebuilt_static_library` / `prebuilt_shared_library`** (uses `<prebuilt/>`, no compile `<sources>`; legacy
+  `imported_{static,shared}_library` accepted on load and normalized to these names):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<target name="sdk_stub" type="imported_static_library">
+<target name="sdk_stub" type="prebuilt_static_library">
   <prebuilt import_lib="lib/third_party.lib"/>
 </target>
 ```

@@ -18,6 +18,7 @@ cmake --build _build --config Release
 
 - `build.py` / `install.py` **只**作用于仓库根 CMake 工程，**不**编译 `test_projects/`。
 - 示例包在各自目录下用已安装的 `gz` 执行 `configure` / `build` / `test` 等。
+- **`test_projects/hello_library_type/`**：演示 **`target.xml`** **`type="library"`** 与 **`GZ_TARGET_DYNAMIC_LIBRARY`**；索引见 **`test_projects/README.md`**。
 
 ## 源码与文档编码
 

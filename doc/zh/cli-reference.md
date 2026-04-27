@@ -126,6 +126,8 @@ gz configure [--build-dir-name <叶子>] [--scan <目录>]... [--opt KEY=VALUE].
 
 **路径**：扫描到的 XML 路径必须 **ASCII**（否则 configure 失败）。
 
+**`GZ_TARGET_DYNAMIC_LIBRARY`（兼容 `GZ_DYNAMIC_LIBRARY`）**：写入 **`--opt`** 或缓存后参与 **`arch`** 组合中的 static/dynamic 段，并在 **`configure`** 内把 **`target.xml`** 的 **`type="library"`** 解析为 **`static_library`** 或 **`shared_library`** 再生成后端工程；**`static_library` / `shared_library`** 始终强制对应形态，**不受**此项覆盖。字段级约定见 **[`package-target-xml-spec.md`](package-target-xml-spec.md) §3.1**。
+
 **范例**
 
 ```powershell
@@ -214,7 +216,9 @@ gz test --install-dir-name $ARCH hello_foo_test
 
 ## 9. 子命令：`pack`
 
-**用途**：将一个或多个 **安装树** 打成包（实现上先尝试 **CPack**，失败则回退 **archive**；细节见 `pack.cpp` / `backend_dispatch.cpp`）。输出在 **`.intermediate/pack/<名>/`**。
+**用途**：将一个或多个 **安装树**（**已编译产物**所在目录）打成包（实现上先尝试 **CPack**，失败则回退 **archive**；细节见 `pack.cpp` / `backend_dispatch.cpp`）。输出在 **`.intermediate/pack/<名>/`**。
+
+**说明**：**当前不会**随包**自动生成**新的 **`package.xml` / `target.xml`**，也**不会**把源码型目标改成 **`prebuilt_*` + `<prebuilt>`**；若需把 install 树交给下游用 **`gz configure`** 消费，须**手写**或通过**外部发布脚本**生成描述。产品层面对「打包即附带二进制向 XML」的约定见 **[`package-target-xml-spec.md`](package-target-xml-spec.md) §8**。
 
 ```text
 gz pack --install-dir-name <名> [--install-dir-name <名>]...

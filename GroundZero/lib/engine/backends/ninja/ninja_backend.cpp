@@ -76,7 +76,7 @@ std::string build_ninja_install_command(const BuildBackendContext& ctx) {
 int write_ninja_file(const ConfigureGraphModel& model) {
   for (const auto& t : model.targets) {
     if (t.imported_prebuilt) {
-      std::cerr << "configure: ninja backend does not support imported_* prebuilt targets.\n";
+      std::cerr << "configure: ninja backend does not support prebuilt_* disk library targets.\n";
       return 9;
     }
   }
