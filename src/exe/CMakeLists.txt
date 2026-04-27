@@ -1,4 +1,4 @@
-add_executable(up main.cpp)
+add_executable(up main.cpp cli_paths.cpp cli_dispatch.cpp)
 target_link_libraries(up PRIVATE up-lib)
 set_target_properties(up PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
 

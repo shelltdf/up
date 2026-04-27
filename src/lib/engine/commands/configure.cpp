@@ -900,12 +900,64 @@ std::map<std::string, std::string> merge_up_options(const std::map<std::string, 
   return out;
 }
 
+// Single pass over `dom.packages_by_name()`: load each package.xml then each target.xml under that package.
+int load_configure_dom_desc_collections(const DomDocument& dom,
+                                          std::vector<std::pair<std::filesystem::path, PackageDesc>>& loaded_packages,
+                                          std::map<std::string, std::filesystem::path>& package_name_to_dir,
+                                          std::map<std::string, PackageDesc>& package_name_to_desc,
+                                          std::vector<LoadedTarget>& all_targets,
+                                          std::map<std::string, size_t>& target_index) {
+  for (const auto& kv : dom.packages_by_name()) {
+    const auto* pkg_node = kv.second;
+    if (!pkg_node)
+      continue;
+    PackageDesc pkg;
+    std::string err;
+    if (!load_package_xml(pkg_node->package_xml_path(), pkg, err)) {
+      std::cerr << to_posix_path_string(pkg_node->package_xml_path()) << ": " << err << "\n";
+      return 3;
+    }
+    if (package_name_to_dir.count(pkg.name)) {
+      std::cerr << "configure: duplicate package name: " << pkg.name << "\n";
+      return 3;
+    }
+    package_name_to_dir[pkg.name] = pkg_node->package_xml_path().parent_path();
+    package_name_to_desc[pkg.name] = pkg;
+    loaded_packages.push_back({pkg_node->package_xml_path(), pkg});
+
+    for (const auto& child : pkg_node->children()) {
+      if (child->type() != DomNodeType::Target)
+        continue;
+      const auto* tgt_node = static_cast<const TargetNode*>(child.get());
+      TargetDesc td;
+      if (!load_target_xml(tgt_node->target_xml_path(), td, err)) {
+        std::cerr << to_posix_path_string(tgt_node->target_xml_path()) << ": " << err << "\n";
+        return 3;
+      }
+      LoadedTarget lt;
+      lt.target_dir = tgt_node->target_xml_path().parent_path();
+      lt.package_name = pkg_node->name();
+      lt.desc = std::move(td);
+      const std::string key = lt.package_name + ":" + lt.desc.name;
+      if (target_index.count(key)) {
+        std::cerr << "configure: duplicate target key: " << key << " at " << to_posix_path_string(tgt_node->target_xml_path())
+                  << "\n";
+        return 3;
+      }
+      target_index[key] = all_targets.size();
+      all_targets.push_back(std::move(lt));
+    }
+  }
+  return 0;
+}
+
 }  // namespace
 
-int cmd_configure(const std::filesystem::path& cwd,
-                  const std::vector<std::string>& scan_roots,
-                  const std::vector<std::string>& opt_kvs,
-                  const std::optional<std::string>& build_dir_name_override) {
+int run_configure(const ConfigureRequest& req) {
+  const std::filesystem::path& cwd = req.cwd;
+  const std::vector<std::string>& scan_roots = req.scan_roots;
+  const std::vector<std::string>& opt_kvs = req.opt_kvs;
+  const std::optional<std::string>& build_dir_name_override = req.build_dir_name_override;
   cli_verbose_phase("configure", "start");
   std::vector<std::filesystem::path> roots;
   if (scan_roots.empty())
@@ -988,55 +1040,12 @@ int cmd_configure(const std::filesystem::path& cwd,
   std::vector<std::pair<std::filesystem::path, PackageDesc>> loaded_packages;
   std::map<std::string, std::filesystem::path> package_name_to_dir;
   std::map<std::string, PackageDesc> package_name_to_desc;
-  for (const auto& kv : dom.packages_by_name()) {
-    const auto* pkg_node = kv.second;
-    if (!pkg_node)
-      continue;
-    PackageDesc pkg;
-    std::string err;
-    if (!load_package_xml(pkg_node->package_xml_path(), pkg, err)) {
-      std::cerr << to_posix_path_string(pkg_node->package_xml_path()) << ": " << err << "\n";
-      return 3;
-    }
-    if (package_name_to_dir.count(pkg.name)) {
-      std::cerr << "configure: duplicate package name: " << pkg.name << "\n";
-      return 3;
-    }
-    package_name_to_dir[pkg.name] = pkg_node->package_xml_path().parent_path();
-    package_name_to_desc[pkg.name] = pkg;
-    loaded_packages.push_back({pkg_node->package_xml_path(), pkg});
-  }
-
   std::vector<LoadedTarget> all_targets;
   std::map<std::string, size_t> target_index;  // package:target -> all_targets idx
-  for (const auto& kv : dom.packages_by_name()) {
-    const auto* pkg_node = kv.second;
-    if (!pkg_node)
-      continue;
-    for (const auto& child : pkg_node->children()) {
-      if (child->type() != DomNodeType::Target)
-        continue;
-      const auto* tgt_node = static_cast<const TargetNode*>(child.get());
-      TargetDesc td;
-      std::string err;
-      if (!load_target_xml(tgt_node->target_xml_path(), td, err)) {
-        std::cerr << to_posix_path_string(tgt_node->target_xml_path()) << ": " << err << "\n";
-        return 3;
-      }
-      LoadedTarget lt;
-      lt.target_dir = tgt_node->target_xml_path().parent_path();
-      lt.package_name = pkg_node->name();
-      lt.desc = std::move(td);
-      const std::string key = lt.package_name + ":" + lt.desc.name;
-      if (target_index.count(key)) {
-        std::cerr << "configure: duplicate target key: " << key << " at " << to_posix_path_string(tgt_node->target_xml_path())
-                  << "\n";
-        return 3;
-      }
-      target_index[key] = all_targets.size();
-      all_targets.push_back(std::move(lt));
-    }
-  }
+  if (const int dom_desc_rc = load_configure_dom_desc_collections(dom, loaded_packages, package_name_to_dir, package_name_to_desc,
+                                                                  all_targets, target_index);
+      dom_desc_rc != 0)
+    return dom_desc_rc;
   cli_verbose_phase("configure", "targets_bound");
 
   std::cout << "Package / target graph (DOM):\n";
@@ -1992,6 +2001,18 @@ int cmd_configure(const std::filesystem::path& cwd,
       build_root, out_dir, cmake_generator, config_name, multi_config};
   cli_verbose_phase("configure", "cmake_configure_backend");
   return run_configure_backend(backend_ctx);
+}
+
+int cmd_configure(const std::filesystem::path& cwd,
+                  const std::vector<std::string>& scan_roots,
+                  const std::vector<std::string>& opt_kvs,
+                  const std::optional<std::string>& build_dir_name_override) {
+  ConfigureRequest r;
+  r.cwd = cwd;
+  r.scan_roots = scan_roots;
+  r.opt_kvs = opt_kvs;
+  r.build_dir_name_override = build_dir_name_override;
+  return run_configure(r);
 }
 
 }  // namespace up

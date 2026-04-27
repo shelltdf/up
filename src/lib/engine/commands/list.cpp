@@ -43,49 +43,46 @@ bool require_ascii_path(const std::filesystem::path& p) {
 
 }  // namespace
 
-int cmd_list(const std::filesystem::path& cwd, const std::vector<std::string>& args) {
-  std::filesystem::path xml_out;
-  std::filesystem::path json_out;
-  std::vector<std::filesystem::path> roots;
-  bool quiet = false;
-  std::string format = "tree";
+int parse_list_cli_args(const std::filesystem::path& cwd, const std::vector<std::string>& args, ListRequest& out) {
+  out = ListRequest{};
+  out.cwd = cwd;
   for (size_t i = 0; i < args.size(); ++i) {
     if (args[i] == "--xml" && i + 1 < args.size()) {
-      xml_out = std::filesystem::path(args[i + 1]);
+      out.xml_out = std::filesystem::path(args[i + 1]);
       ++i;
     } else if (args[i] == "--json" && i + 1 < args.size()) {
-      json_out = std::filesystem::path(args[i + 1]);
+      out.json_out = std::filesystem::path(args[i + 1]);
       ++i;
     } else if (args[i] == "--quiet") {
-      quiet = true;
+      out.quiet = true;
     } else if (args[i] == "--scan" && i + 1 < args.size()) {
-      roots.push_back(std::filesystem::path(args[i + 1]).lexically_normal());
+      out.roots.push_back(std::filesystem::path(args[i + 1]).lexically_normal());
       ++i;
     } else if (args[i] == "--format" && i + 1 < args.size()) {
-      format = args[i + 1];
+      out.format = args[i + 1];
       ++i;
     } else {
       std::cerr << "list: unknown option: " << args[i] << "\n";
       return 2;
     }
   }
-  if (format != "tree" && format != "json" && format != "xml") {
+  if (out.format != "tree" && out.format != "json" && out.format != "xml") {
     std::cerr << "list: invalid --format value (expected tree|json|xml)\n";
     return 2;
   }
-  if (format == "xml" && !json_out.empty() && !quiet) {
+  if (out.format == "xml" && !out.json_out.empty() && !out.quiet) {
     std::cerr << "list: warning: stdout uses XML while --json writes file output\n";
   }
-  if (format == "json" && !xml_out.empty() && !quiet) {
+  if (out.format == "json" && !out.xml_out.empty() && !out.quiet) {
     std::cerr << "list: warning: stdout uses JSON while --xml writes file output\n";
   }
-  if (roots.empty()) {
-    roots.push_back(cwd);
+  if (out.roots.empty()) {
+    out.roots.push_back(cwd);
   } else {
     bool has_cwd = false;
     std::error_code ec;
     const auto cwd_abs = std::filesystem::weakly_canonical(std::filesystem::absolute(cwd), ec);
-    for (const auto& r : roots) {
+    for (const auto& r : out.roots) {
       std::error_code rc;
       const auto r_abs = std::filesystem::weakly_canonical(std::filesystem::absolute(r), rc);
       if (!ec && !rc && r_abs == cwd_abs) {
@@ -94,12 +91,16 @@ int cmd_list(const std::filesystem::path& cwd, const std::vector<std::string>& a
       }
     }
     if (!has_cwd)
-      roots.push_back(cwd);
+      out.roots.push_back(cwd);
   }
+  return 0;
+}
 
+int run_list(const ListRequest& req) {
+  const std::filesystem::path& cwd = req.cwd;
   std::vector<std::filesystem::path> package_files;
   std::vector<std::filesystem::path> target_files;
-  for (const auto& r : roots)
+  for (const auto& r : req.roots)
     collect_desc_files(r, package_files, target_files);
   {
     auto dedup = [](std::vector<std::filesystem::path>& v) {
@@ -140,10 +141,12 @@ int cmd_list(const std::filesystem::path& cwd, const std::vector<std::string>& a
     return 3;
   }
 
-  const bool stdout_json = format == "json";
-  const bool stdout_xml = format == "xml";
+  std::filesystem::path xml_out = req.xml_out;
+  std::filesystem::path json_out = req.json_out;
+  const bool stdout_json = req.format == "json";
+  const bool stdout_xml = req.format == "xml";
   const bool stdout_tree = !stdout_json && !stdout_xml;
-  if (stdout_tree && !quiet)
+  if (stdout_tree && !req.quiet)
     doc.print_tree(std::cout);
   if (!xml_out.empty()) {
     if (xml_out.is_relative())
@@ -152,7 +155,7 @@ int cmd_list(const std::filesystem::path& cwd, const std::vector<std::string>& a
       std::cerr << "list: " << err << "\n";
       return 4;
     }
-    if (!quiet)
+    if (!req.quiet)
       std::cout << "dom xml exported: " << to_posix_path_string(xml_out) << "\n";
   }
   if (!json_out.empty()) {
@@ -162,7 +165,7 @@ int cmd_list(const std::filesystem::path& cwd, const std::vector<std::string>& a
       std::cerr << "list: " << err << "\n";
       return 4;
     }
-    if (!quiet)
+    if (!req.quiet)
       std::cout << "dom json exported: " << to_posix_path_string(json_out) << "\n";
   }
   if (stdout_json) {
@@ -171,13 +174,21 @@ int cmd_list(const std::filesystem::path& cwd, const std::vector<std::string>& a
       return 4;
     }
   }
-  if (stdout_xml && !quiet) {
+  if (stdout_xml && !req.quiet) {
     if (!doc.write_xml(std::cout)) {
       std::cerr << "list: failed to print dom xml\n";
       return 4;
     }
   }
   return 0;
+}
+
+int cmd_list(const std::filesystem::path& cwd, const std::vector<std::string>& args) {
+  ListRequest req;
+  const int pr = parse_list_cli_args(cwd, args, req);
+  if (pr != 0)
+    return pr;
+  return run_list(req);
 }
 
 }  // namespace up
