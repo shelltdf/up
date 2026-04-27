@@ -1,4 +1,4 @@
-﻿// Linux GTK3：与 Win32 up-gui 同一套 up_gui_settings.txt 与 configure 传参逻辑（CWD、扫描目录、环境 --opt、build-dir-name）。
+// Linux GTK3：与 Win32 up-gui 同一套 up_gui_settings.txt 与 configure 传参逻辑（CWD、扫描目录、环境 --opt、build-dir-name）。
 // 未实现：Win32 上的「编译环境」三 Tab 弹窗、选项表 ListView、从 up_cache 自动填运行目标等（可后续补）。
 
 #include "../core/gui_unix_shared.hpp"
@@ -93,6 +93,7 @@ void save_ui_to_persist() {
 void on_browse_cwd(GtkWidget*, gpointer) {
   GtkWidget* dlg = gtk_file_chooser_dialog_new("Working directory (CWD)", GTK_WINDOW(g_win), GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER,
                                                "_Cancel", GTK_RESPONSE_CANCEL, "_Select", GTK_RESPONSE_ACCEPT, nullptr);
+  gtk_window_set_position(GTK_WINDOW(dlg), GTK_WIN_POS_CENTER_ALWAYS);
   std::string init = get_entry(g_entry_cwd);
   if (init.empty())
     init = g_persist.browse_cwd;
@@ -113,6 +114,7 @@ void on_browse_cwd(GtkWidget*, gpointer) {
 void on_scan_add(GtkWidget*, gpointer) {
   GtkWidget* dlg = gtk_file_chooser_dialog_new("Add scan root", GTK_WINDOW(g_win), GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER,
                                                "_Cancel", GTK_RESPONSE_CANCEL, "_Select", GTK_RESPONSE_ACCEPT, nullptr);
+  gtk_window_set_position(GTK_WINDOW(dlg), GTK_WIN_POS_CENTER_ALWAYS);
   if (!g_persist.browse_scan.empty())
     gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(dlg), g_persist.browse_scan.c_str());
   if (gtk_dialog_run(GTK_DIALOG(dlg)) == GTK_RESPONSE_ACCEPT) {
@@ -220,9 +222,9 @@ std::string build_configure_args_line() {
   return args;
 }
 
-#if UP_ENABLE_PROJECT
-void on_project(GtkWidget*, gpointer) {
-  run_up_line_async("project");
+#if UP_ENABLE_REVERSE
+void on_reverse(GtkWidget*, gpointer) {
+  run_up_line_async("reverse");
 }
 #endif
 
@@ -308,6 +310,7 @@ static void activate(GtkApplication* app, gpointer) {
   g_win = GTK_WIDGET(w);
   gtk_window_set_title(w, "up-gui");
   gtk_window_set_default_size(w, 920, 680);
+  gtk_window_set_position(w, GTK_WIN_POS_CENTER_ALWAYS);
   {
     const std::filesystem::path icon_path = unix_shared::executable_parent_dir() / "up_gui.png";
     if (std::filesystem::exists(icon_path))
@@ -327,8 +330,8 @@ static void activate(GtkApplication* app, gpointer) {
     g_signal_connect(it, "activate", G_CALLBACK(cb), nullptr);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu_actions), it);
   };
-#if UP_ENABLE_PROJECT
-  add_menu("_Project", on_project);
+#if UP_ENABLE_REVERSE
+  add_menu("_Reverse", on_reverse);
 #endif
   add_menu("_Configure", on_configure);
   add_menu("_Build", on_build);
@@ -344,8 +347,8 @@ static void activate(GtkApplication* app, gpointer) {
     g_signal_connect(b, "clicked", G_CALLBACK(cb), nullptr);
     gtk_toolbar_insert(GTK_TOOLBAR(bar), b, -1);
   };
-#if UP_ENABLE_PROJECT
-  add_tb("Project", on_project);
+#if UP_ENABLE_REVERSE
+  add_tb("Reverse", on_reverse);
 #endif
   add_tb("Configure", on_configure);
   add_tb("Build", on_build);

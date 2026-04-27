@@ -1,5 +1,5 @@
-﻿#include "project_import_internal.hpp"
-#include "project_import_common.hpp"
+#include "reverse_import_internal.hpp"
+#include "reverse_import_common.hpp"
 
 #include "cli_verbose.hpp"
 #include "path_check.hpp"
@@ -211,7 +211,7 @@ void collect_set_source_lists(const std::filesystem::path& cmake_dir, const std:
       const std::string& tok = parts[i];
       if (tok.find('$') != std::string::npos)
         continue;
-      if (!project_import::looks_like_source_token(tok))
+      if (!reverse_import::looks_like_source_token(tok))
         continue;
       std::filesystem::path rel(tok);
       std::filesystem::path abs_p = rel.is_absolute() ? rel : (cmake_dir / rel);
@@ -231,7 +231,7 @@ void collect_set_source_lists(const std::filesystem::path& cmake_dir, const std:
 void append_resolved_paths(const std::filesystem::path& cmake_dir, const std::string& token,
                            const std::map<std::string, std::vector<std::filesystem::path>>& var_paths,
                            std::vector<std::filesystem::path>& abs) {
-  if (project_import::looks_like_source_token(token)) {
+  if (reverse_import::looks_like_source_token(token)) {
     std::filesystem::path rel(token);
     std::filesystem::path abs_p = rel.is_absolute() ? rel : (cmake_dir / rel);
     std::error_code ec;
@@ -314,7 +314,7 @@ void collect_executable_targets_from_cmake(const std::string& text, std::set<std
       continue;
     }
     strip_quotes(toks[0]);
-    if (!project_import::plausible_cmake_target_name_token(toks[0])) {
+    if (!reverse_import::plausible_cmake_target_name_token(toks[0])) {
       p = lparen + 1;
       continue;
     }
@@ -325,7 +325,7 @@ void collect_executable_targets_from_cmake(const std::string& text, std::set<std
         skip = true;
     }
     if (!skip) {
-      const std::string id = project_import::sanitize_id(toks[0]);
+      const std::string id = reverse_import::sanitize_id(toks[0]);
       if (!id.empty())
         out.insert(id);
     }
@@ -354,11 +354,11 @@ void collect_library_targets_from_cmake(const std::string& text, std::map<std::s
       continue;
     }
     strip_quotes(toks[0]);
-    if (!project_import::plausible_cmake_target_name_token(toks[0])) {
+    if (!reverse_import::plausible_cmake_target_name_token(toks[0])) {
       p = lparen + 1;
       continue;
     }
-    const std::string sanitized = project_import::sanitize_id(toks[0]);
+    const std::string sanitized = reverse_import::sanitize_id(toks[0]);
     if (sanitized.empty()) {
       p = lparen + 1;
       continue;
@@ -433,8 +433,8 @@ std::optional<InstallTargetRule> parse_install_targets_rule(const std::string& i
         mode = u;
         continue;
       }
-      if (!tok.empty() && project_import::plausible_cmake_target_name_token(tok))
-        rule.targets.push_back(project_import::sanitize_id(tok));
+      if (!tok.empty() && reverse_import::plausible_cmake_target_name_token(tok))
+        rule.targets.push_back(reverse_import::sanitize_id(tok));
       continue;
     }
     if (u == "DESTINATION") {
@@ -519,12 +519,12 @@ void import_cmake_wrappers_recursive(const std::filesystem::path& cmake_file,
     return;
   std::error_code ec;
   const std::filesystem::path canon = std::filesystem::weakly_canonical(cmake_file, ec);
-  const std::string canon_s = project_import::posix_str(canon);
+  const std::string canon_s = reverse_import::posix_str(canon);
   if (seen_cmake_files.count(canon_s))
     return;
   seen_cmake_files.insert(canon_s);
 
-  const std::string text = project_import::read_file_text(cmake_file, error);
+  const std::string text = reverse_import::read_file_text(cmake_file, error);
   if (!error.empty())
     return;
   collect_set_scalar_vars(text, scalar_vars);
@@ -611,7 +611,7 @@ void collect_find_package_names(const std::string& text, std::map<std::string, b
       std::string pkg = toks[0];
       strip_quotes(pkg);
       if (!pkg.empty() && pkg.find('$') == std::string::npos) {
-        pkg = project_import::normalize_dep_package_name(std::move(pkg));
+        pkg = reverse_import::normalize_dep_package_name(std::move(pkg));
         if (!pkg.empty() && pkg != "required" && pkg != "quiet") {
           bool required = false;
           for (size_t i = 1; i < toks.size(); ++i) {
@@ -652,7 +652,7 @@ void normalize_find_package_dep_map(std::map<std::string, bool>& deps) {
   // Normalize names through shared rules, and merge required flags.
   std::map<std::string, bool> normalized;
   for (const auto& kv : deps) {
-    const std::string key = project_import::normalize_dep_package_name(kv.first);
+    const std::string key = reverse_import::normalize_dep_package_name(kv.first);
     if (key.empty())
       continue;
     auto it = normalized.find(key);
@@ -702,9 +702,9 @@ bool target_type_is_importable_link_dep(const std::string& ty) {
 }
 
 void expand_static_cmake_path_vars(std::string& tok, const std::filesystem::path& current_list_dir,
-                                   const std::filesystem::path& project_source_root) {
-  const std::string cur = project_import::posix_str(current_list_dir);
-  const std::string root = project_import::posix_str(project_source_root);
+                                   const std::filesystem::path& upstream_source_root) {
+  const std::string cur = reverse_import::posix_str(current_list_dir);
+  const std::string root = reverse_import::posix_str(upstream_source_root);
   replace_all_inplace(tok, "${CMAKE_CURRENT_SOURCE_DIR}", cur);
   replace_all_inplace(tok, "${CMAKE_CURRENT_LIST_DIR}", cur);
   replace_all_inplace(tok, "${PROJECT_SOURCE_DIR}", root);
@@ -761,19 +761,19 @@ struct CmakeStaticGraphMaps {
 
 void import_cmake_static_graph_recursive(const std::filesystem::path& cmake_file,
                                          const std::filesystem::path& write_root,
-                                         const std::filesystem::path& project_source_root, CmakeStaticGraphMaps& maps,
+                                         const std::filesystem::path& upstream_source_root, CmakeStaticGraphMaps& maps,
                                          std::vector<std::string>& warnings, std::string& error,
                                          std::set<std::string>& seen_cmake_files, int depth) {
   if (depth > 16)
     return;
   std::error_code ec;
   const std::filesystem::path canon = std::filesystem::weakly_canonical(cmake_file, ec);
-  const std::string canon_s = project_import::posix_str(canon);
+  const std::string canon_s = reverse_import::posix_str(canon);
   if (seen_cmake_files.count(canon_s))
     return;
   seen_cmake_files.insert(canon_s);
 
-  const std::string text = project_import::read_file_text(cmake_file, error);
+  const std::string text = reverse_import::read_file_text(cmake_file, error);
   if (!error.empty())
     return;
 
@@ -799,7 +799,7 @@ void import_cmake_static_graph_recursive(const std::filesystem::path& cmake_file
       continue;
     }
     strip_quotes(parts[0]);
-    const std::string consumer = project_import::sanitize_id(parts[0]);
+    const std::string consumer = reverse_import::sanitize_id(parts[0]);
     auto cons_it = maps.by_name.find(consumer);
     if (cons_it == maps.by_name.end() || !cons_it->second) {
       lp = lparen + 1;
@@ -811,9 +811,9 @@ void import_cmake_static_graph_recursive(const std::filesystem::path& cmake_file
     for (const std::string& raw_item : items) {
       if (raw_item.find('$') != std::string::npos || raw_item.find('<') != std::string::npos)
         continue;
-      if (!project_import::plausible_cmake_target_name_token(raw_item))
+      if (!reverse_import::plausible_cmake_target_name_token(raw_item))
         continue;
-      const std::string dep_name = project_import::sanitize_id(raw_item);
+      const std::string dep_name = reverse_import::sanitize_id(raw_item);
       if (dep_name.empty() || dep_name == consumer)
         continue;
       auto dep_it = maps.by_name.find(dep_name);
@@ -821,7 +821,7 @@ void import_cmake_static_graph_recursive(const std::filesystem::path& cmake_file
         continue;
       if (!target_type_is_importable_link_dep(dep_it->second->type))
         continue;
-      project_import::add_target_dependency(*consumer_td, dep_name);
+      reverse_import::add_target_dependency(*consumer_td, dep_name);
     }
     lp = lparen + 1;
   }
@@ -846,7 +846,7 @@ void import_cmake_static_graph_recursive(const std::filesystem::path& cmake_file
       continue;
     }
     strip_quotes(parts[0]);
-    const std::string consumer = project_import::sanitize_id(parts[0]);
+    const std::string consumer = reverse_import::sanitize_id(parts[0]);
     auto cons_it = maps.by_name.find(consumer);
     if (cons_it == maps.by_name.end() || !cons_it->second) {
       ip = lparen + 1;
@@ -861,13 +861,13 @@ void import_cmake_static_graph_recursive(const std::filesystem::path& cmake_file
     std::vector<std::string> path_toks;
     collect_target_include_path_tokens(parts, path_toks);
     for (std::string tok : path_toks) {
-      expand_static_cmake_path_vars(tok, cmake_dir, project_source_root);
+      expand_static_cmake_path_vars(tok, cmake_dir, upstream_source_root);
       if (tok.find('$') != std::string::npos)
         continue;
-      if (project_import::plausible_cmake_target_name_token(tok) && tok.find('/') == std::string::npos &&
+      if (reverse_import::plausible_cmake_target_name_token(tok) && tok.find('/') == std::string::npos &&
           tok.find('\\') == std::string::npos && tok.find('.') == std::string::npos) {
         // Single identifier without path separators: could be an INTERFACE target (skip).
-        auto maybe_tgt = maps.by_name.find(project_import::sanitize_id(tok));
+        auto maybe_tgt = maps.by_name.find(reverse_import::sanitize_id(tok));
         if (maybe_tgt != maps.by_name.end())
           continue;
       }
@@ -879,13 +879,13 @@ void import_cmake_static_graph_recursive(const std::filesystem::path& cmake_file
         abs_p = std::filesystem::absolute(abs_p);
       if (!std::filesystem::exists(abs_p))
         continue;
-      project_import::add_target_include_dir(*consumer_td, write_root, sub_it->second, abs_p, warnings);
+      reverse_import::add_target_include_dir(*consumer_td, write_root, sub_it->second, abs_p, warnings);
     }
     ip = lparen + 1;
   }
 
   for (const auto& child : collect_subdirectory_cmakes(cmake_dir, text))
-    import_cmake_static_graph_recursive(child, write_root, project_source_root, maps, warnings, error, seen_cmake_files,
+    import_cmake_static_graph_recursive(child, write_root, upstream_source_root, maps, warnings, error, seen_cmake_files,
                                         depth + 1);
 }
 
@@ -900,8 +900,8 @@ void import_cmake_apply_static_target_graph(const std::filesystem::path& top_cma
     maps.subdir_by_name[pr.second.name] = pr.first;
   }
   std::set<std::string> seen;
-  const std::filesystem::path project_root = top_cmake_file.parent_path();
-  import_cmake_static_graph_recursive(top_cmake_file, write_root, project_root, maps, warnings, error, seen, 0);
+  const std::filesystem::path cmake_tree_root = top_cmake_file.parent_path();
+  import_cmake_static_graph_recursive(top_cmake_file, write_root, cmake_tree_root, maps, warnings, error, seen, 0);
   error.clear();
 }
 
@@ -911,12 +911,12 @@ void import_cmake_find_packages_recursive(const std::filesystem::path& cmake_fil
     return;
   std::error_code ec;
   const std::filesystem::path canon = std::filesystem::weakly_canonical(cmake_file, ec);
-  const std::string canon_s = project_import::posix_str(canon);
+  const std::string canon_s = reverse_import::posix_str(canon);
   if (seen_cmake_files.count(canon_s))
     return;
   seen_cmake_files.insert(canon_s);
 
-  const std::string text = project_import::read_file_text(cmake_file, error);
+  const std::string text = reverse_import::read_file_text(cmake_file, error);
   if (!error.empty())
     return;
   collect_find_package_names(text, deps);
@@ -933,12 +933,12 @@ void import_cmake_recursive(const std::filesystem::path& cmake_file, const std::
     return;
   std::error_code ec;
   const std::filesystem::path canon = std::filesystem::weakly_canonical(cmake_file, ec);
-  const std::string canon_s = project_import::posix_str(canon);
+  const std::string canon_s = reverse_import::posix_str(canon);
   if (seen_cmake_files.count(canon_s))
     return;
   seen_cmake_files.insert(canon_s);
 
-  const std::string text = project_import::read_file_text(cmake_file, error);
+  const std::string text = reverse_import::read_file_text(cmake_file, error);
   if (!error.empty())
     return;
 
@@ -967,11 +967,11 @@ void import_cmake_recursive(const std::filesystem::path& cmake_file, const std::
         continue;
       }
       strip_quotes(toks[0]);
-      if (!project_import::plausible_cmake_target_name_token(toks[0])) {
+      if (!reverse_import::plausible_cmake_target_name_token(toks[0])) {
         p = lparen + 1;
         continue;
       }
-      const std::string tname = project_import::sanitize_id(toks[0]);
+      const std::string tname = reverse_import::sanitize_id(toks[0]);
       if (seen_target_names.count(tname)) {
         p = lparen + 1;
         continue;
@@ -1008,8 +1008,8 @@ void import_cmake_recursive(const std::filesystem::path& cmake_file, const std::
         ty = map_lib_type(toks);
 
       const std::string bucket =
-          project_import::resolve_target_xml_bucket(write_root, cmake_dir, tname, abs, bucket_claims);
-      project_import::push_target(out, write_root, bucket, tname, ty, abs, warnings);
+          reverse_import::resolve_target_xml_bucket(write_root, cmake_dir, tname, abs, bucket_claims);
+      reverse_import::push_target(out, write_root, bucket, tname, ty, abs, warnings);
       if (!abs.empty())
         seen_target_names.insert(tname);
       p = lparen + 1;
@@ -1099,10 +1099,10 @@ bool run_cmake_configure_for_file_api(const std::filesystem::path& source_dir, c
 #else
   const std::string cmd = "cmake -S \"" + s + "\" -B \"" + b + "\"";
 #endif
-  std::cout << "project: [cmake] file_api: running `cmake` configure for File API (source=" << s << " build=" << b << ")\n"
+  std::cout << "reverse: [cmake] file_api: running `cmake` configure for File API (source=" << s << " build=" << b << ")\n"
             << std::flush;
   if (cli_verbose())
-    std::cerr << "project: [cmake] [verbose] exec: " << cmd << "\n" << std::flush;
+    std::cerr << "reverse: [cmake] [verbose] exec: " << cmd << "\n" << std::flush;
   const int code = std::system(cmd.c_str());
   if (code != 0) {
     error = "cmake configure failed (exit " + std::to_string(code) + "); is `cmake` on PATH? command: " + cmd;
@@ -1168,7 +1168,7 @@ bool file_api_query_impl(const std::filesystem::path& source_dir, const std::fil
       continue;
     if (fn.rfind("target-", 0) != 0)
       continue;
-    std::string blob = project_import::read_file_text(ent.path(), error);
+    std::string blob = reverse_import::read_file_text(ent.path(), error);
     if (!error.empty())
       return false;
     if (json_bool_field_default_false(blob, "imported")) {
@@ -1181,9 +1181,9 @@ bool file_api_query_impl(const std::filesystem::path& source_dir, const std::fil
       continue;
     const std::string name_raw = *name_opt;
     const std::string type_raw = *type_opt;
-    if (!project_import::plausible_cmake_target_name_token(name_raw))
+    if (!reverse_import::plausible_cmake_target_name_token(name_raw))
       continue;
-    const std::string name = project_import::sanitize_id(name_raw);
+    const std::string name = reverse_import::sanitize_id(name_raw);
     if (name.empty())
       continue;
     std::string type_u = type_raw;

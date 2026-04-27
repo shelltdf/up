@@ -1,4 +1,4 @@
-﻿#include "project_import_common.hpp"
+#include "reverse_import_common.hpp"
 
 #include "path_check.hpp"
 #include "paths.hpp"
@@ -10,7 +10,7 @@
 #include <map>
 #include <sstream>
 
-namespace up::project_import {
+namespace up::reverse_import {
 
 namespace {
 
@@ -283,4 +283,4 @@ void push_target(ImportedPackage& out, const std::filesystem::path& write_root, 
   out.targets.push_back({subdir, std::move(td)});
 }
 
-}  // namespace up::project_import
+}  // namespace up::reverse_import

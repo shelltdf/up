@@ -1,6 +1,6 @@
-﻿#pragma once
+#pragma once
 
-#include "project_import.hpp"
+#include "reverse_import.hpp"
 
 #include <filesystem>
 #include <map>
@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace up::project_import {
+namespace up::reverse_import {
 
 std::string read_file_text(const std::filesystem::path& path, std::string& error);
 bool is_src_ext(const std::string& ext);
@@ -42,4 +42,4 @@ void add_target_dependency(TargetDesc& td, const std::string& dep_name);
 bool add_target_include_dir(TargetDesc& td, const std::filesystem::path& write_root, const std::string& subdir,
                             const std::filesystem::path& abs_include_dir, std::vector<std::string>& warnings);
 
-}  // namespace up::project_import
+}  // namespace up::reverse_import

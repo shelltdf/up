@@ -12,7 +12,7 @@
 
 ### Fixed
 
-- Corrected CMake project-source append list to use `UP_LIB_SOURCES` (instead of stale `UP_CORE_SOURCES`) when `UP_ENABLE_PROJECT=ON`.
+- Corrected CMake project-source append list to use `UP_LIB_SOURCES` (instead of stale `UP_CORE_SOURCES`) when `UP_ENABLE_REVERSE=ON`.
 
 ### Verified
 

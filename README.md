@@ -1,4 +1,4 @@
-﻿# uni-package (up)
+# uni-package (up)
 
 **uni-package**（缩写 **`up`**）是一个面向「用数据结构驱动构建与包关系」的原型命令行工具：用 **`package.xml`** 与各目标子目录中的 **`target.xml`**（每目录至多一个）描述包与目标，`up` 负责扫描、生成 CMake 工程、构建、测试与运行。新手从零上手建议先读 **[doc/user-manual.md](doc/user-manual.md)**（中文）或 **[doc/user-manual.en.md](doc/user-manual.en.md)**（English）；`package.xml` / `target.xml` 的字段与解析约定见 **[doc/package-target-xml-spec.md](doc/package-target-xml-spec.md)**；设计背景与完整约定见 **[DESIGN.md](DESIGN.md)**，思维导图见 **[mindmap.mmd](mindmap.mmd)**。近期变更记录见 **[CHANGELOG.md](CHANGELOG.md)**。
 
@@ -23,7 +23,7 @@ cmake --build _build --config Release
 
 位于 `_build\Release\`（Windows + Release 示例）。MSVC 下工程启用 **静态 CRT**（`/MT`）与 **`/utf-8`**，与 [DESIGN.md](DESIGN.md) 中对 `up.exe` 的取向一致。
 
-可选：首次 `cmake` 时加上 **`-DUP_ENABLE_PROJECT=ON`** 以编译并启用 **`up project`** 子命令（以及 GUI 中对应能力）。默认 **OFF** 时执行 `up project` 会提示需重编译。
+可选：首次 `cmake` 时加上 **`-DUP_ENABLE_REVERSE=ON`** 以编译并启用 **`up reverse`** 子命令（以及 GUI 中对应能力）。默认 **OFF** 时执行 `up reverse` 会提示需重编译。旧子命令 **`project`** 与 **`--project-dir`** 已移除，请改用 **`reverse`** 与 **`--source-dir` / `-C`**（无别名兼容）。
 
 也可用 Python 脚本（在仓库根目录）：
 
@@ -57,7 +57,7 @@ python package.py --with-dev
 | `up spec` | 向 stdout 输出内嵌的英文 `package.xml` / `target.xml` 规则说明（供工具/AI） |
 | `up list [--format tree\|json\|xml] [--xml <路径>] [--json <路径>] [--quiet]` | 输出当前 DOM 结构（默认 tree）；`--format` 控制 stdout 载荷；`--xml/--json` 导出文件；`--quiet` 抑制树形与导出提示。部分组合参数会给 warning 但不失败 |
 | `up print-build-dir-name [--build-dir-name <叶子>] [--opt ...]` | 打印当前配置对应的 **`<arch>`** 字符串（便于脚本传给 `run`/`test`/`pack` 的 `--install-dir-name`） |
-| `up project ...` | **仅当**构建时启用 **`-DUP_ENABLE_PROJECT=ON`**。探测现有工程并生成 `package.xml` / `target.xml`。CMake 默认写 `<cmake source_dir=\"...\"/>`，并尽量从 `install(TARGETS ...)` 自动生成 `.targets/` 下的 `imported_installed_*` 包装目标；在需要时还会尝试 **CMake File API**（需本机 `cmake` 能成功配置该工程）。若依赖未齐或不想跑配置，可加 **`--cmake-no-file-api`**，仅做安装规则扫描 + **CMakeLists 启发式扫描**（含对 `target_link_libraries` / `target_include_directories` 的尽力解析），精度低于 codemodel |
+| `up reverse ...` | **仅当**构建时启用 **`-DUP_ENABLE_REVERSE=ON`**。探测现有工程并生成 `package.xml` / `target.xml`。CMake 默认写 `<cmake source_dir=\"...\"/>`，并尽量从 `install(TARGETS ...)` 自动生成 `.targets/` 下的 `imported_installed_*` 包装目标；在需要时还会尝试 **CMake File API**（需本机 `cmake` 能成功配置该工程）。若依赖未齐或不想跑配置，可加 **`--cmake-no-file-api`**，仅做安装规则扫描 + **CMakeLists 启发式扫描**（含对 `target_link_libraries` / `target_include_directories` 的尽力解析），精度低于 codemodel |
 
 无子命令或未知子命令时会打印简短用法。
 
@@ -102,8 +102,8 @@ $ARCH = .\_build\Release\up.exe print-build-dir-name
 在 SDK 根目录执行：
 
 ```powershell
-# 需要宿主 up 以 -DUP_ENABLE_PROJECT=ON 构建
-up project
+# 需要宿主 up 以 -DUP_ENABLE_REVERSE=ON 构建
+up reverse
 up configure
 $ARCH = up print-build-dir-name
 up build --build-dir-name default
@@ -113,7 +113,7 @@ up build --build-dir-name default
 
 默认行为（CMake 探测）：
 
-- `up project` 会生成 `package.xml`（含 `<cmake source_dir="..."/>`）
+- `up reverse` 会生成 `package.xml`（含 `<cmake source_dir="..."/>`）
 - 并尽量按 `install(TARGETS ...)` 自动生成 `.targets/<name>/target.xml`
 - 自动目标类型为 `imported_installed_static_library` / `imported_installed_shared_library`
 - 包名默认优先取 `CMakeLists.txt` 里的 `project(...)`（可被 `--package-name` 覆盖）

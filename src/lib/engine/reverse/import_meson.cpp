@@ -1,5 +1,5 @@
-﻿#include "project_import_internal.hpp"
-#include "project_import_common.hpp"
+#include "reverse_import_internal.hpp"
+#include "reverse_import_common.hpp"
 
 #include <filesystem>
 #include <regex>
@@ -13,7 +13,7 @@ void import_meson_basic(const std::filesystem::path& scan_root, const std::files
   (void)write_root;
   (void)out;
   const std::filesystem::path mf = scan_root / "meson.build";
-  const std::string text = project_import::read_file_text(mf, error);
+  const std::string text = reverse_import::read_file_text(mf, error);
   if (!error.empty())
     return;
   std::regex ex_re(R"(\bexecutable\s*\(\s*['\"]([^'\"]+)['\"])");

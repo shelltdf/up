@@ -1,8 +1,8 @@
-﻿#include "project.hpp"
+#include "reverse.hpp"
 
 #include "cli_verbose.hpp"
-#include "project_import.hpp"
-#include "project_import_internal.hpp"
+#include "reverse_import.hpp"
+#include "reverse_import_internal.hpp"
 #include "lang.hpp"
 #include "path_check.hpp"
 #include "paths.hpp"
@@ -45,7 +45,7 @@ std::filesystem::path win32_get_current_directory_or_empty() {
 }
 #endif
 
-std::filesystem::path default_project_base_from_os(const std::filesystem::path& fallback) {
+std::filesystem::path default_reverse_scan_base_from_os(const std::filesystem::path& fallback) {
 #if defined(_WIN32)
   const auto w = win32_get_current_directory_or_empty();
   if (!w.empty())
@@ -84,7 +84,7 @@ std::string cmake_source_dir_for_package_xml(const std::filesystem::path& scan_r
   const auto s = std::filesystem::weakly_canonical(std::filesystem::absolute(scan_root), ec1);
   const auto w = std::filesystem::weakly_canonical(std::filesystem::absolute(write_root), ec2);
   if (ec1 || ec2) {
-    rel_warn = "project: could not canonicalize paths; using <cmake source_dir=\".\"/>.";
+    rel_warn = "reverse: could not canonicalize paths; using <cmake source_dir=\".\"/>.";
     return ".";
   }
   std::error_code ec3;
@@ -95,7 +95,7 @@ std::string cmake_source_dir_for_package_xml(const std::filesystem::path& scan_r
       return to_posix_path_string(n);
     return ".";
   }
-  rel_warn = "project: could not compute relative path to CMake project; using <cmake source_dir=\".\"/>.";
+  rel_warn = "reverse: could not compute relative path to CMake project; using <cmake source_dir=\".\"/>.";
   return ".";
 }
 
@@ -227,9 +227,9 @@ void merge_cmake_source_overlay_into(ImportedPackage& base, ImportedPackage&& ov
 
 }  // namespace
 
-int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>& args) {
+int cmd_reverse(const std::filesystem::path& cwd, const std::vector<std::string>& args) {
   auto finish = [](int code) {
-    std::cout << "project: finished with " << (code == 0 ? "success" : "failure") << " (code " << code << ")\n";
+    std::cout << "reverse: finished with " << (code == 0 ? "success" : "failure") << " (code " << code << ")\n";
     return code;
   };
   bool dry_run = false;
@@ -238,7 +238,7 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
   bool cmake_no_file_api = false;
   bool cmake_query_keep_build = false;
   std::optional<std::filesystem::path> output_dir;
-  std::optional<std::string> project_dir_arg;
+  std::optional<std::string> source_dir_arg;
   std::optional<std::string> package_name_opt;
   std::optional<std::string> cmake_query_build_dir_arg;
 
@@ -256,14 +256,14 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
       cmake_query_keep_build = true;
     else if (a == "--cmake-query-build-dir" && i + 1 < args.size())
       cmake_query_build_dir_arg = args[++i];
-    else if ((a == "--project-dir" || a == "-C") && i + 1 < args.size())
-      project_dir_arg = args[++i];
+    else if ((a == "--source-dir" || a == "-C") && i + 1 < args.size())
+      source_dir_arg = args[++i];
     else if (a == "--output-dir" && i + 1 < args.size())
       output_dir = args[++i];
     else if (a == "--package-name" && i + 1 < args.size())
       package_name_opt = args[++i];
     else {
-      std::cerr << "project: unknown option: " << a << "\n"
+      std::cerr << "reverse: unknown option: " << a << "\n"
                 << "  --dry-run       print probe result and XML; do not write files\n"
                 << "  --force         overwrite existing package.xml / target.xml\n"
                 << "  --cmake-query   CMake only: use File API only (fail if cmake/configure or codemodel yields no libs).\n"
@@ -272,7 +272,7 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
                 << "                         Less accurate than codemodel (no real configure); install scan + source scan only.\n"
                 << "  --cmake-query-build-dir <path>  scratch dir for File API (default: <write_root>/.up/cmake_file_api_query)\n"
                 << "  --cmake-query-keep-build        keep the File API build directory after use (default: delete)\n"
-                << "  --project-dir|-C <path>  probe/write under this dir (override default cwd from the OS)\n"
+                << "  --source-dir|-C <path>  probe/write under this dir (override default cwd from the OS)\n"
                 << "  --output-dir <path>  package root for generated files (default: same as scan root). target.xml is placed next\n"
                 << "                         to each target's CMake/.pro tree when possible, else under .targets/<name>/.\n"
                 << "  --package-name <name>  override <package name=\"...\">\n";
@@ -280,44 +280,44 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
     }
   }
   if (cmake_query && cmake_no_file_api) {
-    std::cerr << "project: --cmake-query cannot be combined with --cmake-no-file-api.\n";
+    std::cerr << "reverse: --cmake-query cannot be combined with --cmake-no-file-api.\n";
     return finish(2);
   }
-  cli_verbose_phase("project", "options_parsed");
+  cli_verbose_phase("reverse", "options_parsed");
 
   std::filesystem::path base;
-  if (project_dir_arg.has_value()) {
+  if (source_dir_arg.has_value()) {
     std::error_code ecp;
-    base = std::filesystem::absolute(std::filesystem::path(*project_dir_arg), ecp);
+    base = std::filesystem::absolute(std::filesystem::path(*source_dir_arg), ecp);
     if (ecp || base.empty()) {
-      std::cerr << "project: invalid --project-dir / -C path\n";
+      std::cerr << "reverse: invalid --source-dir / -C path\n";
       return finish(2);
     }
   } else {
     // Prefer Win32 GetCurrentDirectoryW on Windows: some launchers leave std::filesystem::current_path()
     // at a repo root while the shell cwd (what the user cd'd into) matches Win32.
-    base = default_project_base_from_os(cwd);
+    base = default_reverse_scan_base_from_os(cwd);
   }
 
   std::error_code ec;
   const std::filesystem::path scan_root = std::filesystem::absolute(base, ec);
   if (ec) {
-    std::cerr << "project: could not resolve project directory path\n";
+    std::cerr << "reverse: could not resolve source directory path\n";
     return finish(2);
   }
   std::filesystem::path write_root = output_dir.value_or(base);
   write_root = std::filesystem::absolute(write_root, ec);
   if (ec) {
-    std::cerr << "project: invalid --output-dir\n";
+    std::cerr << "reverse: invalid --output-dir\n";
     return finish(2);
   }
-  cli_verbose_phase("project", "paths_resolved");
+  cli_verbose_phase("reverse", "paths_resolved");
 
   if (path_has_non_ascii(scan_root) || path_has_non_ascii(write_root)) {
     std::cerr << lang::configure_path_non_ascii() << to_posix_path_string(write_root) << "\n";
     return finish(2);
   }
-  cli_verbose_phase("project", "paths_ascii_ok");
+  cli_verbose_phase("reverse", "paths_ascii_ok");
   const std::filesystem::path pkg_xml = write_root / "package.xml";
 
   std::error_code ec_pkg;
@@ -328,26 +328,26 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
     if (filesystem_status_error_is_missing(ec_pkg))
       pkg_st = std::filesystem::file_status(std::filesystem::file_type::not_found);
     else {
-      std::cerr << "project: cannot stat " << to_posix_path_string(pkg_xml) << ": " << ec_pkg.message() << "\n";
+      std::cerr << "reverse: cannot stat " << to_posix_path_string(pkg_xml) << ": " << ec_pkg.message() << "\n";
       return finish(2);
     }
   }
   if (cli_verbose()) {
-    if (!project_dir_arg.has_value()) {
+    if (!source_dir_arg.has_value()) {
       std::error_code ecl;
       const auto libcwd = std::filesystem::current_path(ecl);
-      std::cerr << "project: [verbose] std::filesystem::current_path()="
+      std::cerr << "reverse: [verbose] std::filesystem::current_path()="
                 << to_posix_path_string(ecl ? std::filesystem::path{} : libcwd) << "\n";
 #if defined(_WIN32)
       const auto w32cwd = win32_get_current_directory_or_empty();
-      std::cerr << "project: [verbose] GetCurrentDirectoryW()=" << to_posix_path_string(w32cwd.empty() ? std::filesystem::path{} : w32cwd)
+      std::cerr << "reverse: [verbose] GetCurrentDirectoryW()=" << to_posix_path_string(w32cwd.empty() ? std::filesystem::path{} : w32cwd)
                 << "\n";
 #endif
     }
-    std::cerr << "project: [verbose] scan_root=" << to_posix_path_string(scan_root)
+    std::cerr << "reverse: [verbose] scan_root=" << to_posix_path_string(scan_root)
               << " write_root=" << to_posix_path_string(write_root)
-              << " (override roots with --project-dir|-C and/or --output-dir)\n"
-              << "project: [verbose] package.xml path=" << to_posix_path_string(pkg_xml);
+              << " (override roots with --source-dir|-C and/or --output-dir)\n"
+              << "reverse: [verbose] package.xml path=" << to_posix_path_string(pkg_xml);
     if (!std::filesystem::exists(pkg_st))
       std::cerr << " status=not_found\n";
     else if (std::filesystem::is_regular_file(pkg_st))
@@ -362,19 +362,19 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
   if (!force) {
     if (std::filesystem::is_directory(pkg_st)) {
       if (!dry_run) {
-        std::cerr << "project: " << to_posix_path_string(pkg_xml)
-                  << " exists as a directory (not a file). Remove or rename it before running `up project`.\n";
+        std::cerr << "reverse: " << to_posix_path_string(pkg_xml)
+                  << " exists as a directory (not a file). Remove or rename it before running `up reverse`.\n";
         return finish(2);
       }
     } else if (std::filesystem::exists(pkg_st) && !std::filesystem::is_regular_file(pkg_st)) {
       if (!dry_run) {
-        std::cerr << "project: " << to_posix_path_string(pkg_xml)
-                  << " exists but is not a regular file. Remove it or choose a different --output-dir / --project-dir.\n";
+        std::cerr << "reverse: " << to_posix_path_string(pkg_xml)
+                  << " exists but is not a regular file. Remove it or choose a different --output-dir / --source-dir.\n";
         return finish(2);
       }
     }
   }
-  cli_verbose_phase("project", "pre_probe");
+  cli_verbose_phase("reverse", "pre_probe");
 
   const ProbeResult probe = probe_build_system(scan_root);
   ImportedPackage imported;
@@ -383,17 +383,17 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
   std::string scaffold_rel_warn;
   std::string cmake_rel_dir;
   CmakeTargetsProvenance cmake_targets_from = CmakeTargetsProvenance::None;
-  cli_verbose_phase("project", "probe_done");
+  cli_verbose_phase("reverse", "probe_done");
 
   if (cmake_query && probe.kind != BuildProbeKind::CMake) {
-    std::cerr << "project: --cmake-query only applies to CMake projects (probe did not select CMake).\n";
+    std::cerr << "reverse: --cmake-query only applies to CMake projects (probe did not select CMake).\n";
     return finish(2);
   }
 
   if (cmake_scaffold) {
     cmake_rel_dir = cmake_source_dir_for_package_xml(scan_root, write_root, scaffold_rel_warn);
     if (!scaffold_rel_warn.empty())
-      std::cout << "project: " << scaffold_rel_warn << "\n";
+      std::cout << "reverse: " << scaffold_rel_warn << "\n";
     std::string default_pkg_name = scan_root.filename().string();
     if (auto cmake_project_name = parse_cmake_project_name(probe.anchor); cmake_project_name.has_value())
       default_pkg_name = *cmake_project_name;
@@ -411,7 +411,7 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
       std::error_code ecq;
       q = std::filesystem::absolute(q, ecq);
       if (ecq || q.empty()) {
-        std::cerr << "project: invalid --cmake-query-build-dir path\n";
+        std::cerr << "reverse: invalid --cmake-query-build-dir path\n";
         return std::nullopt;
       }
       return q;
@@ -421,7 +421,7 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
         std::error_code ecrm;
         std::filesystem::remove_all(q, ecrm);
         if (ecrm)
-          std::cout << "project: warning: could not remove cmake query build dir " << to_posix_path_string(q) << ": "
+          std::cout << "reverse: warning: could not remove cmake query build dir " << to_posix_path_string(q) << ": "
                     << ecrm.message() << "\n";
       }
     };
@@ -432,7 +432,7 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
         return finish(2);
       if (!import_cmake_targets_from_file_api_query(cmake_source_dir, *qbd, imported, err)) {
         cleanup_query_dir(*qbd);
-        std::cerr << "project: " << err << "\n";
+        std::cerr << "reverse: " << err << "\n";
         return finish(1);
       }
       if (!imported.targets.empty())
@@ -440,10 +440,10 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
       cleanup_query_dir(*qbd);
     } else {
       if (!import_cmake_installed_from_probe(probe.anchor, imported, err)) {
-        std::cerr << "project: " << err << "\n";
+        std::cerr << "reverse: " << err << "\n";
         return finish(1);
       }
-      std::cout << "project: [cmake] install_scan: " << imported.targets.size()
+      std::cout << "reverse: [cmake] install_scan: " << imported.targets.size()
                 << " target(s) (install(TARGETS ...) and add_library heuristics)\n";
       if (!imported.targets.empty())
         cmake_targets_from = CmakeTargetsProvenance::InstallScan;
@@ -459,28 +459,28 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
             imported.targets = std::move(fa.targets);
             imported.warnings.insert(imported.warnings.end(), fa.warnings.begin(), fa.warnings.end());
             cmake_targets_from = CmakeTargetsProvenance::FileApi;
-            std::cout << "project: [cmake] file_api: " << imported.targets.size() << " target(s) from codemodel\n";
+            std::cout << "reverse: [cmake] file_api: " << imported.targets.size() << " target(s) from codemodel\n";
           }
         } else {
-          std::cout << "project: [cmake] file_api: skipped: " << fa_err << "\n";
+          std::cout << "reverse: [cmake] file_api: skipped: " << fa_err << "\n";
         }
         cleanup_query_dir(*qbd);
       } else if (imported.targets.empty() && cmake_no_file_api) {
-        std::cout << "project: [cmake] file_api: skipped (--cmake-no-file-api)\n";
+        std::cout << "reverse: [cmake] file_api: skipped (--cmake-no-file-api)\n";
       }
 
       if (imported.targets.empty()) {
-        std::cout << "project: [cmake] source_scan: parsing CMakeLists (heuristic add_library / add_executable)\n";
+        std::cout << "reverse: [cmake] source_scan: parsing CMakeLists (heuristic add_library / add_executable)\n";
         std::vector<std::string> leg_warn;
         std::string leg_err;
         import_cmake_file(probe.anchor, write_root, imported, leg_warn, leg_err);
         for (auto& w : leg_warn)
           imported.warnings.push_back(std::move(w));
-        std::cout << "project: [cmake] source_scan: " << imported.targets.size() << " target(s)\n";
+        std::cout << "reverse: [cmake] source_scan: " << imported.targets.size() << " target(s)\n";
         if (!imported.targets.empty())
           cmake_targets_from = CmakeTargetsProvenance::SourceScan;
       } else if (cmake_no_file_api) {
-        std::cout << "project: [cmake] source_scan: merging CMakeLists heuristics + static link/include hints "
+        std::cout << "reverse: [cmake] source_scan: merging CMakeLists heuristics + static link/include hints "
                      "(--cmake-no-file-api)\n";
         ImportedPackage src_overlay;
         std::vector<std::string> owarn;
@@ -490,17 +490,17 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
           imported.warnings.push_back(std::move(w));
         const size_t overlay_n = src_overlay.targets.size();
         merge_cmake_source_overlay_into(imported, std::move(src_overlay));
-        std::cout << "project: [cmake] source_scan: merged overlay; " << imported.targets.size()
+        std::cout << "reverse: [cmake] source_scan: merged overlay; " << imported.targets.size()
                   << " target(s) total (overlay had " << overlay_n << ")\n";
         cmake_targets_from = CmakeTargetsProvenance::SourceScan;
       }
     }
-    cli_verbose_phase("project", "cmake_import_done");
+    cli_verbose_phase("reverse", "cmake_import_done");
     // Keep CMake project() name (or --package-name override) as package.xml name.
     imported.package_name = package_name_opt.value_or(default_pkg_name);
     if (!cmake_query && imported.targets.empty()) {
-      std::cout << "project: warning: CMake scaffold found no target stubs after install scan, File API, and source scan.\n";
-      std::cout << "project: hint: add install(TARGETS ...) for shipped libs where applicable"
+      std::cout << "reverse: warning: CMake scaffold found no target stubs after install scan, File API, and source scan.\n";
+      std::cout << "reverse: hint: add install(TARGETS ...) for shipped libs where applicable"
 #if UP_DISABLE_PACKAGE_XML_CMAKE
                    " (this build omits <cmake/> in package.xml).\n";
 #else
@@ -508,14 +508,14 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
 #endif
     }
   } else if (!import_from_probe(scan_root, write_root, probe, imported, err)) {
-    std::cerr << "project: " << err << "\n";
+    std::cerr << "reverse: " << err << "\n";
     return finish(1);
   }
   if (!cmake_scaffold)
-    cli_verbose_phase("project", "heuristic_import_done");
+    cli_verbose_phase("reverse", "heuristic_import_done");
 
   if (!cmake_scaffold && imported.targets.empty()) {
-    std::cerr << "project: no targets generated.\n";
+    std::cerr << "reverse: no targets generated.\n";
     return finish(1);
   }
 
@@ -539,21 +539,21 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
           pkg.dependencies.emplace_back(d.first, !d.second);
       }
     } else if (!dep_err.empty()) {
-      std::cout << "project: warning: failed to parse CMake find_package deps: " << dep_err << "\n";
+      std::cout << "reverse: warning: failed to parse CMake find_package deps: " << dep_err << "\n";
     }
 #if UP_DISABLE_PACKAGE_XML_CMAKE
-    std::cout << "project: note: built with UP_DISABLE_PACKAGE_XML_CMAKE: package.xml will not contain <cmake/> "
+    std::cout << "reverse: note: built with UP_DISABLE_PACKAGE_XML_CMAKE: package.xml will not contain <cmake/> "
                  "(target stubs only).\n";
 #endif
   }
-  cli_verbose_phase("project", "package_desc_ready");
+  cli_verbose_phase("reverse", "package_desc_ready");
 
-  std::cout << "project: probe=" << probe_label(probe.kind) << "\n";
+  std::cout << "reverse: probe=" << probe_label(probe.kind) << "\n";
   if (cmake_scaffold) {
     if (cmake_query) {
-      std::cout << "project: CMake scaffold: <cmake/> + target.xml from CMake File API (codemodel).\n";
+      std::cout << "reverse: CMake scaffold: <cmake/> + target.xml from CMake File API (codemodel).\n";
     } else {
-      std::cout << "project: CMake scaffold: <cmake/> + target.xml; ";
+      std::cout << "reverse: CMake scaffold: <cmake/> + target.xml; ";
       switch (cmake_targets_from) {
         case CmakeTargetsProvenance::InstallScan:
           std::cout << "targets from install rules / add_library install heuristics.\n";
@@ -570,14 +570,14 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
       }
     }
   } else {
-    std::cout << "project: heuristic import: CMake/qmake/autotools parsing is incomplete; edit XML as needed.\n";
+    std::cout << "reverse: heuristic import: CMake/qmake/autotools parsing is incomplete; edit XML as needed.\n";
   }
   for (const auto& w : imported.warnings)
-    std::cout << "project: warning: " << w << "\n";
+    std::cout << "reverse: warning: " << w << "\n";
 
   if (!force && !dry_run && std::filesystem::is_regular_file(pkg_st)) {
     const size_t n_files = 1 + imported.targets.size();
-    std::cout << "project: would write " << n_files
+    std::cout << "reverse: would write " << n_files
               << " file(s) (nothing written; package.xml already exists; use --force or --dry-run for full XML):\n";
     std::cout << "  [package] " << to_posix_path_string(pkg_xml) << "\n";
     for (const auto& pr : imported.targets) {
@@ -589,14 +589,14 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
         std::cout << "  type=" << pr.second.type;
       std::cout << "\n";
     }
-    std::cerr << "project: " << to_posix_path_string(pkg_xml)
+    std::cerr << "reverse: " << to_posix_path_string(pkg_xml)
               << " already exists. Use --force to overwrite, or --dry-run to preview.\n"
-              << "project: hint: write_root is process cwd at launch unless --output-dir; use --project-dir|-C if cwd is wrong.\n";
+              << "reverse: hint: write_root is process cwd at launch unless --output-dir; use --source-dir|-C if cwd is wrong.\n";
     return finish(2);
   }
 
   if (dry_run) {
-    cli_verbose_phase("project", "dry_run_preview");
+    cli_verbose_phase("reverse", "dry_run_preview");
     std::ostringstream oss;
     write_package_xml(oss, pkg);
     std::cout << "--- " << to_posix_path_string(pkg_xml) << " ---\n";
@@ -611,27 +611,27 @@ int cmd_project(const std::filesystem::path& cwd, const std::vector<std::string>
     return finish(0);
   }
 
-  cli_verbose_phase("project", "write_files");
+  cli_verbose_phase("reverse", "write_files");
   std::filesystem::create_directories(write_root);
   for (const auto& pr : imported.targets)
     std::filesystem::create_directories(write_root / pr.first);
 
   std::string werr;
   if (!write_package_xml(pkg_xml, pkg, werr)) {
-    std::cerr << "project: " << werr << "\n";
+    std::cerr << "reverse: " << werr << "\n";
     return finish(1);
   }
   for (const auto& pr : imported.targets) {
     const auto tp = write_root / pr.first / "target.xml";
     if (!write_target_xml(tp, pr.second, werr)) {
-      std::cerr << "project: " << werr << "\n";
+      std::cerr << "reverse: " << werr << "\n";
       return finish(1);
     }
   }
 
-  std::cout << "project: wrote " << to_posix_path_string(pkg_xml) << " and " << imported.targets.size()
+  std::cout << "reverse: wrote " << to_posix_path_string(pkg_xml) << " and " << imported.targets.size()
             << " target.xml (under " << to_posix_path_string(write_root) << ").\n";
-  cli_verbose_phase("project", "done");
+  cli_verbose_phase("reverse", "done");
   return finish(0);
 }
 

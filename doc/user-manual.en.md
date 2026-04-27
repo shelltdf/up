@@ -1,4 +1,4 @@
-﻿# up User Manual
+# up User Manual
 
 This manual is for first-time users of `up`. It helps you understand and run `up` from scratch with both CLI and `up-gui`.
 
@@ -176,7 +176,9 @@ cmake -S . -B _build -G "Visual Studio 17 2022" -A x64
 cmake --build _build --config Release
 ```
 
-Add **`-DUP_ENABLE_PROJECT=ON`** on the first `cmake` line if you need the **`up project`** subcommand.
+Add **`-DUP_ENABLE_REVERSE=ON`** on the first `cmake` line if you need the **`up reverse`** subcommand.
+
+The legacy **`project`** subcommand and **`--project-dir`** flag are removed with no alias; use **`reverse`** and **`--source-dir`** (or **`-C`**) instead.
 
 Option B: Python scripts
 
@@ -205,7 +207,7 @@ Common commands (see also `up --help`):
 - `up pack --install-dir-name <name>...`
 - `up list [--format tree|json|xml] [--xml <path>] [--json <path>] [--quiet]`
 - `up spec` / `up print-build-dir-name`
-- `up project ...` (**requires** a host `up` built with **`-DUP_ENABLE_PROJECT=ON`**)
+- `up reverse ...` (**requires** a host `up` built with **`-DUP_ENABLE_REVERSE=ON`**)
   - **Default** when a **CMake** tree is detected: writes **`<cmake source_dir="..."/>`** and tries to auto-generate `imported_installed_*` wrapper `target.xml` files from `install(TARGETS ...)` rules (written under `.targets/<name>/target.xml`, target names prefer CMake target names). If parsing fails, only `package.xml` is written with warnings.
   - `package.xml` `name` prefers the CMake `project(...)` name by default (falls back to directory name when unresolved; `--package-name` still overrides).
 
@@ -269,14 +271,14 @@ The GUI passes selected settings to `up.exe` via `--opt`.
 
 #### Template D: Import third-party CMake SDK (zlib / FBX style)
 
-1. In the third-party CMake project root, run `up project` (requires **`-DUP_ENABLE_PROJECT=ON`** host build)
+1. In the third-party CMake project root, run `up reverse` (requires **`-DUP_ENABLE_REVERSE=ON`** host build)
 2. Run `up configure`, then `up build --build-dir-name default` (see §4.3)
 3. Check generated `.targets/<name>/target.xml`
 4. Consume from another package via `<dependency name="pkg:target"/>`
 
 Default behavior highlights:
 
-- `up project` writes `package.xml` with `<cmake source_dir="..."/>` (requires **`-DUP_ENABLE_PROJECT=ON`** host build)
+- `up reverse` writes `package.xml` with `<cmake source_dir="..."/>` (requires **`-DUP_ENABLE_REVERSE=ON`** host build)
 - Tries to generate `imported_installed_*` wrappers from `install(TARGETS ...)`
 - Tries to generate package-level dependencies from `find_package(...)`:
   - `REQUIRED` -> `<dependency ... optional="false"/>`

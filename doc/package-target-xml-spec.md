@@ -1,4 +1,4 @@
-﻿# `package.xml` 与 `target.xml` 规范说明
+# `package.xml` 与 `target.xml` 规范说明
 
 本文档描述 **up** 当前实现对两种描述文件的**解析约定**与 **configure** 阶段的**语义约束**。实现采用轻量正则扫描（见 `src/lib/engine/xml/simple_xml.cpp`），**不是**完整 XML 校验器：建议仍写成良构 XML，并遵守下列可识别形态。与 **`up spec`** 内嵌英文规范不一致时，以 **`up spec`** 与源码为准；本文件侧重中文说明与仓库内交叉引用。
 
@@ -275,9 +275,9 @@
 
 ---
 
-## 11. `up project` 对 CMake 的默认生成行为（补充）
+## 11. `up reverse` 对 CMake 的默认生成行为（补充）
 
-- 当探测到 CMake 工程时，`up project` 默认会：
+- 当探测到 CMake 工程时，`up reverse` 默认会：
   - 生成 `package.xml`（包含 `<cmake source_dir="..."/>`）
   - 尝试解析 `install(TARGETS ...)`，自动生成 `imported_installed_*` 的 `target.xml`（默认写到 `.targets/<name>/target.xml`）
   - 尝试解析 `find_package(...)`，自动写入包级 `<dependency .../>`：

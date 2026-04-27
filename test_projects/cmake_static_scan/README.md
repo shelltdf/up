@@ -1,6 +1,6 @@
 # cmake_static_scan
 
-用于验证 `up project` 在 **不运行 CMake File API**（`--cmake-no-file-api`）时，对 `CMakeLists.txt` 的启发式扫描能否：
+用于验证 `up reverse` 在 **不运行 CMake File API**（`--cmake-no-file-api`）时，对 `CMakeLists.txt` 的启发式扫描能否：
 
 - 发现 `add_library` / `add_executable` 与源文件
 - 从 `target_link_libraries` 推断同包内目标依赖（`cg_bar` → `cg_foo`）

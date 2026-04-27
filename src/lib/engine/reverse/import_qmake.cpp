@@ -1,5 +1,5 @@
-﻿#include "project_import_internal.hpp"
-#include "project_import_common.hpp"
+#include "reverse_import_internal.hpp"
+#include "reverse_import_common.hpp"
 
 #include <cctype>
 #include <filesystem>
@@ -15,7 +15,7 @@ void import_qmake(const std::filesystem::path& pro_file, const std::filesystem::
                   const std::filesystem::path& write_root, ImportedPackage& out, std::vector<std::string>& warnings,
                   std::string& error) {
   (void)scan_root;
-  const std::string text = project_import::read_file_text(pro_file, error);
+  const std::string text = reverse_import::read_file_text(pro_file, error);
   if (!error.empty())
     return;
 
@@ -50,7 +50,7 @@ void import_qmake(const std::filesystem::path& pro_file, const std::filesystem::
         tok = trim(tok);
         if (tok.empty() || tok[0] == '$')
           continue;
-        if (!project_import::looks_like_source_token(tok))
+        if (!reverse_import::looks_like_source_token(tok))
           continue;
         std::filesystem::path ap = pro_file.parent_path() / tok;
         std::error_code ec;
@@ -70,11 +70,11 @@ void import_qmake(const std::filesystem::path& pro_file, const std::filesystem::
       ty = "static_library";
   }
 
-  const std::string tname = project_import::sanitize_id(target);
+  const std::string tname = reverse_import::sanitize_id(target);
   std::map<std::string, int> bucket_claims;
   const std::string bucket =
-      project_import::resolve_target_xml_bucket(write_root, pro_file.parent_path(), tname, abs, bucket_claims);
-  project_import::push_target(out, write_root, bucket, tname, ty, abs, warnings);
+      reverse_import::resolve_target_xml_bucket(write_root, pro_file.parent_path(), tname, abs, bucket_claims);
+  reverse_import::push_target(out, write_root, bucket, tname, ty, abs, warnings);
   if (out.targets.empty()) {
     warnings.push_back("qmake: no SOURCES found; falling back.");
     error.clear();

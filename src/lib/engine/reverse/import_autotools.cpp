@@ -1,5 +1,5 @@
-﻿#include "project_import_internal.hpp"
-#include "project_import_common.hpp"
+#include "reverse_import_internal.hpp"
+#include "reverse_import_common.hpp"
 
 #include <filesystem>
 #include <map>
@@ -13,7 +13,7 @@ namespace up {
 void import_autotools(const std::filesystem::path& scan_root, const std::filesystem::path& write_root, ImportedPackage& out,
                       std::vector<std::string>& warnings, std::string& error) {
   const std::filesystem::path mf = scan_root / "Makefile.am";
-  const std::string text = project_import::read_file_text(mf, error);
+  const std::string text = reverse_import::read_file_text(mf, error);
   if (!error.empty())
     return;
 
@@ -55,7 +55,7 @@ void import_autotools(const std::filesystem::path& scan_root, const std::filesys
           tok.pop_back();
         if (tok.empty() || tok[0] == '$')
           continue;
-        if (!project_import::looks_like_source_token(tok))
+        if (!reverse_import::looks_like_source_token(tok))
           continue;
         std::filesystem::path ap = scan_root / tok;
         std::error_code ec;
@@ -63,10 +63,10 @@ void import_autotools(const std::filesystem::path& scan_root, const std::filesys
         if (!ec && std::filesystem::exists(ap))
           abs.push_back(ap);
       }
-      const std::string tname = project_import::sanitize_id(prog);
+      const std::string tname = reverse_import::sanitize_id(prog);
       const std::string bucket =
-          project_import::resolve_target_xml_bucket(write_root, scan_root, tname, abs, bucket_claims);
-      project_import::push_target(out, write_root, bucket, tname, "executable", abs, warnings);
+          reverse_import::resolve_target_xml_bucket(write_root, scan_root, tname, abs, bucket_claims);
+      reverse_import::push_target(out, write_root, bucket, tname, "executable", abs, warnings);
       break;
     }
   }

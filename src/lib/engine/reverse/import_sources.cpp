@@ -1,5 +1,5 @@
-﻿#include "project_import_internal.hpp"
-#include "project_import_common.hpp"
+#include "reverse_import_internal.hpp"
+#include "reverse_import_common.hpp"
 
 #include <filesystem>
 #include <map>
@@ -31,7 +31,7 @@ void collect_sources_flat(const std::filesystem::path& root, int max_depth, std:
         // Skip entries whose native path cannot be converted to std::string safely.
         continue;
       }
-      if (project_import::skip_dir_name(nm))
+      if (reverse_import::skip_dir_name(nm))
         continue;
       collect_sources_flat(ent.path(), max_depth - 1, out_files);
     } else if (ent.is_regular_file(ec2)) {
@@ -43,7 +43,7 @@ void collect_sources_flat(const std::filesystem::path& root, int max_depth, std:
       } catch (...) {
         continue;
       }
-      if (project_import::is_src_ext(ext))
+      if (reverse_import::is_src_ext(ext))
         out_files.push_back(ent.path());
     }
   }
@@ -62,12 +62,12 @@ void import_source_fallback(const std::filesystem::path& scan_root, const std::f
   // Keep fallback resilient for large/unusual source trees: avoid content scanning heuristics.
   const std::string ty = "static_library";
 
-  const std::string tname = project_import::sanitize_id(out.package_name);
+  const std::string tname = reverse_import::sanitize_id(out.package_name);
   std::filesystem::path common = files[0].parent_path();
   for (size_t i = 1; i < files.size(); ++i) {
     const auto d = files[i].parent_path();
     while (!common.empty()) {
-      const auto rp = project_import::try_relative(common, d);
+      const auto rp = reverse_import::try_relative(common, d);
       bool ok = false;
       if (rp) {
         ok = true;
@@ -85,8 +85,8 @@ void import_source_fallback(const std::filesystem::path& scan_root, const std::f
   }
   std::map<std::string, int> bucket_claims;
   const std::string bucket =
-      project_import::resolve_target_xml_bucket(write_root, common, tname, files, bucket_claims);
-  project_import::push_target(out, write_root, bucket, tname, ty, files, warnings);
+      reverse_import::resolve_target_xml_bucket(write_root, common, tname, files, bucket_claims);
+  reverse_import::push_target(out, write_root, bucket, tname, ty, files, warnings);
   if (out.targets.empty()) {
     error = "failed to build target from sources";
     return;

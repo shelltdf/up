@@ -1,4 +1,4 @@
-﻿// up-gui：本地 Win32 外壳，仅通过命令行调用与 up-gui.exe 同目录的 up.exe；不链接、不包含 src 下业务代码（见 DESIGN.md / mindmap）。
+// up-gui：本地 Win32 外壳，仅通过命令行调用与 up-gui.exe 同目录的 up.exe；不链接、不包含 src 下业务代码（见 DESIGN.md / mindmap）。
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -62,7 +62,7 @@ static void attach_default_gui_icons(WNDCLASSW& wc) {
 constexpr int IDC_PATH = 101;
 constexpr int IDC_BROWSE = 102;
 constexpr int IDC_CONFIGURE = 103;
-constexpr int IDC_PROJECT = 139;
+constexpr int IDC_REVERSE = 139;
 constexpr int IDC_LIST = 141;
 constexpr int IDC_LIST_HINT = 142;
 constexpr int IDC_BUILD = 104;
@@ -2036,6 +2036,125 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
   return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
+static RECT WorkAreaForMonitorContainingWindow(HWND ref) {
+  MONITORINFO mi{sizeof(mi)};
+  RECT work{};
+  HMONITOR mon = nullptr;
+  if (ref)
+    mon = MonitorFromWindow(ref, MONITOR_DEFAULTTONEAREST);
+  else {
+    // Top-level app window: center on the monitor under the cursor (matches user expectation for "screen center").
+    POINT pt{};
+    if (GetCursorPos(&pt))
+      mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    if (!mon)
+      mon = MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTOPRIMARY);
+  }
+  if (!mon) {
+    POINT pt{};
+    GetCursorPos(&pt);
+    mon = MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
+  }
+  if (mon && GetMonitorInfoW(mon, &mi))
+    return mi.rcWork;
+  SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+  return work;
+}
+
+static void CenterOuterWindowOnScreen(HWND reference, int outer_w, int outer_h, int* out_x, int* out_y) {
+  const RECT work = WorkAreaForMonitorContainingWindow(reference);
+  const int wa_w = work.right - work.left;
+  const int wa_h = work.bottom - work.top;
+  int x = work.left + (wa_w - outer_w) / 2;
+  int y = work.top + (wa_h - outer_h) / 2;
+  if (x + outer_w > work.right)
+    x = work.right - outer_w;
+  if (y + outer_h > work.bottom)
+    y = work.bottom - outer_h;
+  if (x < work.left)
+    x = work.left;
+  if (y < work.top)
+    y = work.top;
+  *out_x = x;
+  *out_y = y;
+}
+
+// Move an existing top-level HWND so it is centered in the work area of the monitor containing `ref_for_work_area`.
+static void CenterHWNDOnMonitorOf(HWND wnd, HWND ref_for_work_area) {
+  if (!wnd)
+    return;
+  RECT wr{};
+  if (!GetWindowRect(wnd, &wr))
+    return;
+  const int ww = wr.right - wr.left;
+  const int hh = wr.bottom - wr.top;
+  const RECT work = WorkAreaForMonitorContainingWindow(ref_for_work_area ? ref_for_work_area : wnd);
+  int x = work.left + ((work.right - work.left) - ww) / 2;
+  int y = work.top + ((work.bottom - work.top) - hh) / 2;
+  if (x + ww > work.right)
+    x = work.right - ww;
+  if (y + hh > work.bottom)
+    y = work.bottom - hh;
+  if (x < work.left)
+    x = work.left;
+  if (y < work.top)
+    y = work.top;
+  SetWindowPos(wnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+}
+
+// IFileOpenDialog / GetSaveFileName explorer UI does not always set GW_OWNER on the outer HWND to our hwnd.
+// Center the first plausible modal root on HCBT_ACTIVATE (class / size / owner heuristics).
+static HHOOK g_modal_file_dlg_cbt = nullptr;
+static HWND g_modal_file_dlg_owner = nullptr;
+static bool g_modal_file_dlg_centered = false;
+
+static LRESULT CALLBACK ModalFileDialogCenterCbtProc(int nCode, WPARAM wParam, LPARAM lParam) {
+  (void)lParam;
+  if (nCode != HCBT_ACTIVATE || !g_modal_file_dlg_owner || g_modal_file_dlg_centered)
+    return CallNextHookEx(g_modal_file_dlg_cbt, nCode, wParam, lParam);
+  const HWND target = reinterpret_cast<HWND>(wParam);
+  if (!target)
+    return CallNextHookEx(g_modal_file_dlg_cbt, nCode, wParam, lParam);
+  const HWND root = GetAncestor(target, GA_ROOT);
+  if (!root || root == g_modal_file_dlg_owner)
+    return CallNextHookEx(g_modal_file_dlg_cbt, nCode, wParam, lParam);
+  RECT wr{};
+  if (!GetWindowRect(root, &wr))
+    return CallNextHookEx(g_modal_file_dlg_cbt, nCode, wParam, lParam);
+  const int ww = wr.right - wr.left;
+  const int hh = wr.bottom - wr.top;
+  if (ww < 220 || hh < 160)
+    return CallNextHookEx(g_modal_file_dlg_cbt, nCode, wParam, lParam);
+
+  // IFileOpenDialog / Vista+ common dialogs often attach the shell frame via parent, not GW_OWNER (which may stay NULL).
+  const HWND dlg_owner = GetWindow(root, GW_OWNER);
+  const HWND dlg_parent = GetParent(root);
+  wchar_t cls[300]{};
+  (void)GetClassNameW(root, cls, static_cast<int>(std::size(cls)));
+  const bool owner_ok =
+      g_modal_file_dlg_owner && (dlg_owner == g_modal_file_dlg_owner || dlg_parent == g_modal_file_dlg_owner);
+  const bool class_ok =
+      wcscmp(cls, L"#32770") == 0 || _wcsicmp(cls, L"CabinetWClass") == 0 || _wcsicmp(cls, L"ExploreWClass") == 0 ||
+      // Win10/11 hosts (WinUI / XAML) for the common item dialog sometimes use these instead of #32770.
+      _wcsicmp(cls, L"Windows.UI.Core.CoreWindow") == 0 || wcsstr(cls, L"Xaml_WindowedPopupClass") != nullptr;
+  // IFileOpenDialog often shows a same-thread top-level shell frame with neither GW_OWNER nor #32770 on the root.
+  const DWORD wstyle = static_cast<DWORD>(GetWindowLongPtrW(root, GWL_STYLE));
+  const DWORD wtp_root = GetWindowThreadProcessId(root, nullptr);
+  const DWORD wtp_owner = g_modal_file_dlg_owner ? GetWindowThreadProcessId(g_modal_file_dlg_owner, nullptr) : 0;
+  const bool same_thread_as_owner = wtp_root != 0 && wtp_root == wtp_owner;
+  const RECT work_ref = WorkAreaForMonitorContainingWindow(g_modal_file_dlg_owner);
+  const int work_w = work_ref.right - work_ref.left;
+  const int work_h = work_ref.bottom - work_ref.top;
+  const bool dialog_like =
+      same_thread_as_owner && (wstyle & WS_CHILD) == 0 && (wstyle & WS_POPUP) != 0 && ww >= 360 && hh >= 240 &&
+      ww <= (work_w > 0 ? work_w + 80 : 4096) && hh <= (work_h > 0 ? work_h + 80 : 4096);
+  if (owner_ok || class_ok || dialog_like) {
+    CenterHWNDOnMonitorOf(root, g_modal_file_dlg_owner);
+    g_modal_file_dlg_centered = true;
+  }
+  return CallNextHookEx(g_modal_file_dlg_cbt, nCode, wParam, lParam);
+}
+
 bool ShowEnvSettingsDialog(HWND owner) {
   static bool cls_registered = false;
   static constexpr wchar_t kEnvClass[] = L"UpGuiEnvSettingsClass";
@@ -2054,11 +2173,12 @@ bool ShowEnvSettingsDialog(HWND owner) {
   EnvDialogState st{};
   st.work = g_env_settings;
   EnableWindow(owner, FALSE);
-  RECT rc{};
-  GetWindowRect(owner, &rc);
+  int dlg_x = 0;
+  int dlg_y = 0;
+  CenterOuterWindowOnScreen(owner, 860, 560, &dlg_x, &dlg_y);
   HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kEnvClass, T(L"编译环境设置", L"Build environment"),
                              WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE | WS_THICKFRAME | WS_CLIPCHILDREN,
-                             rc.left + 32, rc.top + 28, 860, 560, owner, nullptr, GetModuleHandleW(nullptr), &st);
+                             dlg_x, dlg_y, 860, 560, owner, nullptr, GetModuleHandleW(nullptr), &st);
   if (!dlg) {
     EnableWindow(owner, TRUE);
     return false;
@@ -2111,7 +2231,17 @@ bool PickFolder(HWND owner, const std::wstring& initial_dir, std::wstring& out, 
       }
     }
   }
-  if (FAILED(dlg->Show(owner))) {
+  g_modal_file_dlg_owner = owner;
+  g_modal_file_dlg_centered = false;
+  g_modal_file_dlg_cbt = SetWindowsHookExW(WH_CBT, ModalFileDialogCenterCbtProc, nullptr, GetCurrentThreadId());
+  const HRESULT hr_show = dlg->Show(owner);
+  if (g_modal_file_dlg_cbt) {
+    UnhookWindowsHookEx(g_modal_file_dlg_cbt);
+    g_modal_file_dlg_cbt = nullptr;
+  }
+  g_modal_file_dlg_owner = nullptr;
+  g_modal_file_dlg_centered = false;
+  if (FAILED(hr_show)) {
     dlg->Release();
     return false;
   }
@@ -2970,8 +3100,8 @@ void SetUiRunning(bool running) {
   g_running = running;
   const BOOL en = running ? FALSE : TRUE;
   if (g_toolbar) {
-#if UP_ENABLE_PROJECT
-    SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_PROJECT, static_cast<LPARAM>(!running));
+#if UP_ENABLE_REVERSE
+    SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_REVERSE, static_cast<LPARAM>(!running));
 #endif
     SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_LIST, static_cast<LPARAM>(!running));
     SendMessageW(g_toolbar, TB_ENABLEBUTTON, IDC_CONFIGURE, static_cast<LPARAM>(!running));
@@ -3009,8 +3139,8 @@ void SetUiRunning(bool running) {
     EnableMenuItem(menu, IDM_EXIT, ena);
     EnableMenuItem(menu, IDM_ABOUT, running ? gray : ena);
     EnableMenuItem(menu, IDM_UP_HELP, running ? gray : ena);
-#if UP_ENABLE_PROJECT
-    EnableMenuItem(menu, IDC_PROJECT, running ? gray : ena);
+#if UP_ENABLE_REVERSE
+    EnableMenuItem(menu, IDC_REVERSE, running ? gray : ena);
 #endif
     EnableMenuItem(menu, IDC_LIST, running ? gray : ena);
     EnableMenuItem(menu, IDC_CONFIGURE, running ? gray : ena);
@@ -3446,8 +3576,8 @@ void CreateMainMenu(HWND hwnd) {
   AppendMenuW(bar, MF_POPUP, reinterpret_cast<UINT_PTR>(file), T(L"文件(&F)", L"&File"));
 
   HMENU tools = CreateMenu();
-#if UP_ENABLE_PROJECT
-  AppendMenuW(tools, MF_STRING, IDC_PROJECT, T(L"工程(&J)", L"pro&ject"));
+#if UP_ENABLE_REVERSE
+  AppendMenuW(tools, MF_STRING, IDC_REVERSE, T(L"逆向(&J)", L"re&verse"));
 #endif
   AppendMenuW(tools, MF_STRING, IDC_LIST, T(L"列表(&L)", L"&list"));
   AppendMenuW(tools, MF_STRING, IDC_CONFIGURE, T(L"配置(&C)", L"&configure"));
@@ -3568,10 +3698,11 @@ void ShowUpHelpDialog(HWND owner, const std::wstring& text) {
   UpHelpDialogState st{};
   st.text = text;
   EnableWindow(owner, FALSE);
-  RECT rc{};
-  GetWindowRect(owner, &rc);
+  int dlg_x = 0;
+  int dlg_y = 0;
+  CenterOuterWindowOnScreen(owner, 760, 520, &dlg_x, &dlg_y);
   HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kHelpClass, T(L"up 帮助信息", L"up Help"),
-                             WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE | WS_THICKFRAME, rc.left + 40, rc.top + 40,
+                             WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE | WS_THICKFRAME, dlg_x, dlg_y,
                              760, 520, owner, nullptr, GetModuleHandleW(nullptr), &st);
   if (!dlg) {
     EnableWindow(owner, TRUE);
@@ -4022,8 +4153,18 @@ bool PickSaveListExportPath(HWND owner, const wchar_t* default_name, const wchar
   ofn.lpstrFile = buf;
   ofn.nMaxFile = static_cast<DWORD>(std::size(buf));
   ofn.lpstrDefExt = def_ext;
-  ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
-  if (!GetSaveFileNameW(&ofn))
+  ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_EXPLORER | OFN_ENABLESIZING;
+  g_modal_file_dlg_owner = owner;
+  g_modal_file_dlg_centered = false;
+  g_modal_file_dlg_cbt = SetWindowsHookExW(WH_CBT, ModalFileDialogCenterCbtProc, nullptr, GetCurrentThreadId());
+  const BOOL ok = GetSaveFileNameW(&ofn);
+  if (g_modal_file_dlg_cbt) {
+    UnhookWindowsHookEx(g_modal_file_dlg_cbt);
+    g_modal_file_dlg_cbt = nullptr;
+  }
+  g_modal_file_dlg_owner = nullptr;
+  g_modal_file_dlg_centered = false;
+  if (!ok)
     return false;
   out_path.assign(buf);
   return true;
@@ -4298,11 +4439,16 @@ void ShowUpListDialog(HWND owner, const std::wstring& text, const std::wstring& 
   st.up_exe = up_exe;
   st.cwd = cwd;
   EnableWindow(owner, FALSE);
-  RECT rc{};
-  GetWindowRect(owner, &rc);
+  // Must match WM_GETMINMAXINFO ptMinTrackSize (860×380): creating smaller than min width keeps top-left fixed while
+  // the frame grows rightward, so the dialog looks off-center.
+  static constexpr int kListDlgOuterW = 860;
+  static constexpr int kListDlgOuterH = 520;
+  int dlg_x = 0;
+  int dlg_y = 0;
+  CenterOuterWindowOnScreen(owner, kListDlgOuterW, kListDlgOuterH, &dlg_x, &dlg_y);
   HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kListClass, T(L"DOM 列表", L"DOM List"),
-                             WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE | WS_THICKFRAME, rc.left + 40, rc.top + 40,
-                             760, 520, owner, nullptr, GetModuleHandleW(nullptr), &st);
+                             WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE | WS_THICKFRAME, dlg_x, dlg_y,
+                             kListDlgOuterW, kListDlgOuterH, owner, nullptr, GetModuleHandleW(nullptr), &st);
   if (!dlg) {
     EnableWindow(owner, TRUE);
     return;
@@ -4664,10 +4810,11 @@ bool ShowConfigureOptionDialog(HWND owner) {
   ConfigureOptionDialogState st{};
   st.owner = owner;
   EnableWindow(owner, FALSE);
-  RECT rc{};
-  GetWindowRect(owner, &rc);
+  int dlg_x = 0;
+  int dlg_y = 0;
+  CenterOuterWindowOnScreen(owner, 760, 520, &dlg_x, &dlg_y);
   HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kClass, T(L"configure 选项设置", L"configure options"),
-                             WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE | WS_THICKFRAME, rc.left + 50, rc.top + 40,
+                             WS_CAPTION | WS_SYSMENU | WS_POPUP | WS_VISIBLE | WS_THICKFRAME, dlg_x, dlg_y,
                              760, 520, owner, nullptr, GetModuleHandleW(nullptr), &st);
   if (!dlg) {
     EnableWindow(owner, TRUE);
@@ -4708,8 +4855,8 @@ void CreateToolbarButtons(HWND tb) {
     const wchar_t* text;
   };
   const Entry entries[] = {
-#if UP_ENABLE_PROJECT
-      {IDC_PROJECT, STD_FILEOPEN, T(L"工程", L"project")},
+#if UP_ENABLE_REVERSE
+      {IDC_REVERSE, STD_FILEOPEN, T(L"逆向", L"reverse")},
 #endif
       {IDC_LIST, STD_COPY, T(L"列表", L"list")},
       {IDC_CONFIGURE, STD_PROPERTIES, T(L"配置", L"configure")},
@@ -5234,9 +5381,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         SendMessageW(g_scan_list, LB_SETCURSEL, static_cast<WPARAM>(dst), 0);
         return 0;
       }
-#if UP_ENABLE_PROJECT
-      if (id == IDC_PROJECT) {
-        RunUpAsync(L"project");
+#if UP_ENABLE_REVERSE
+      if (id == IDC_REVERSE) {
+        RunUpAsync(L"reverse");
         return 0;
       }
 #endif
@@ -5366,10 +5513,9 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int show) {
   AdjustWindowRect(&want, WS_OVERLAPPEDWINDOW, TRUE);
   const int win_w = want.right - want.left;
   const int win_h = want.bottom - want.top;
-  RECT work{};
-  SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
-  const int x = work.left + ((work.right - work.left) - win_w) / 2;
-  const int y = work.top + ((work.bottom - work.top) - win_h) / 2;
+  int x = 0;
+  int y = 0;
+  CenterOuterWindowOnScreen(nullptr, win_w, win_h, &x, &y);
   HWND hwnd = CreateWindowExW(0, kClassName, kTitle, WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN, x, y, win_w,
                               win_h, nullptr, nullptr, hi, nullptr);
   if (!hwnd)

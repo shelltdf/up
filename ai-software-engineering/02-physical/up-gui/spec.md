@@ -13,6 +13,6 @@
 | Linux | `src_gui/main/main_unix.cpp`、`src_gui/platform/gtk_gui.cpp`、`src_gui/core/gui_unix_shared.cpp` |
 | macOS | `src_gui/main/main_cocoa.mm`、`src_gui/platform/cocoa_gui.mm`、`src_gui/core/gui_unix_shared.cpp` |
 
-## 与 `UP_ENABLE_PROJECT`
+## 与 `UP_ENABLE_REVERSE`
 
-- 与 `up` 同步定义 **`UP_ENABLE_PROJECT`**；影响 GUI 是否暴露 `project` 相关能力（见各平台 `*.cpp` / `*.mm` 中 `#if UP_ENABLE_PROJECT`）。
+- 与 `up` 同步定义 **`UP_ENABLE_REVERSE`**；影响 GUI 是否暴露逆向（`reverse`）相关能力（见各平台 `*.cpp` / `*.mm` 中 `#if UP_ENABLE_REVERSE`）。

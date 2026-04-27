@@ -1,7 +1,7 @@
-﻿#include "project_import.hpp"
+#include "reverse_import.hpp"
 
-#include "project_import_internal.hpp"
-#include "project_import_common.hpp"
+#include "reverse_import_internal.hpp"
+#include "reverse_import_common.hpp"
 
 namespace up {
 
@@ -12,7 +12,7 @@ bool import_from_probe(const std::filesystem::path& scan_root, const std::filesy
   std::string pn = scan_root.filename().string();
   if (pn.empty() || pn == "." || pn == "..")
     pn = "package";
-  out.package_name = project_import::sanitize_id(pn);
+  out.package_name = reverse_import::sanitize_id(pn);
 
   std::vector<std::string> warnings;
 
@@ -68,7 +68,7 @@ bool import_cmake_installed_from_probe(const std::filesystem::path& cmake_file, 
   std::string pn = cmake_file.parent_path().filename().string();
   if (pn.empty() || pn == "." || pn == "..")
     pn = "package";
-  out.package_name = project_import::sanitize_id(pn);
+  out.package_name = reverse_import::sanitize_id(pn);
   import_cmake_installed_wrappers(cmake_file, out, out.warnings, error);
   return error.empty();
 }

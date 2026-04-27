@@ -216,10 +216,10 @@ static void upgui_apply_open_panel_directory(NSOpenPanel* p, NSString* primaryPa
   }
 }
 
-#if UP_ENABLE_PROJECT
-- (void)doProject:(id)sender {
+#if UP_ENABLE_REVERSE
+- (void)doReverse:(id)sender {
   (void)sender;
-  run_up_async("project");
+  run_up_async("reverse");
 }
 #endif
 
@@ -354,7 +354,7 @@ static void build_window() {
   }
 
   const CGFloat W = 920, H = 680;
-  NSRect rect = NSMakeRect(100, 100, W, H);
+  NSRect rect = NSMakeRect(0, 0, W, H);
   NSWindow* win = [[NSWindow alloc] initWithContentRect:rect styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                                                                             NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable)
                                                 backing:NSBackingStoreBuffered defer:NO];
@@ -376,8 +376,8 @@ static void build_window() {
   NSMenuItem* actTop = [[NSMenuItem alloc] initWithTitle:@"Actions" action:nil keyEquivalent:@""];
   NSMenu* actMenu = [[NSMenu alloc] initWithTitle:@"Actions"];
   NSMenuItem* m;
-#if UP_ENABLE_PROJECT
-  m = [[NSMenuItem alloc] initWithTitle:@"Project" action:@selector(doProject:) keyEquivalent:@"j"];
+#if UP_ENABLE_REVERSE
+  m = [[NSMenuItem alloc] initWithTitle:@"Reverse" action:@selector(doReverse:) keyEquivalent:@"j"];
   [m setTarget:ctrl];
   [actMenu addItem:m];
 #endif
@@ -406,11 +406,11 @@ static void build_window() {
   NSButton* b3 = makeBtn(@"Run", ctrl, @selector(doRun:));
   NSButton* b4 = makeBtn(@"Test", ctrl, @selector(doTest:));
   NSButton* b5 = makeBtn(@"Pack", ctrl, @selector(doPack:));
-#if UP_ENABLE_PROJECT
-  NSButton* b0 = makeBtn(@"Project", ctrl, @selector(doProject:));
+#if UP_ENABLE_REVERSE
+  NSButton* b0 = makeBtn(@"Reverse", ctrl, @selector(doReverse:));
 #endif
   CGFloat x = 20;
-#if UP_ENABLE_PROJECT
+#if UP_ENABLE_REVERSE
   for (NSButton* b in @[ b0, b1, b2, b3, b4, b5 ]) {
 #else
   for (NSButton* b in @[ b1, b2, b3, b4, b5 ]) {
@@ -484,6 +484,30 @@ static void build_window() {
   if (!g_persist.browse_cwd.empty())
     [g_tf_cwd setStringValue:utf8_to_ns(g_persist.browse_cwd)];
 
+  // Center main window on the work area of the display under the mouse (fallback: main screen).
+  {
+    NSScreen* sc = [NSScreen mainScreen];
+    const NSPoint mouse = [NSEvent mouseLocation];
+    for (NSScreen* candidate in [NSScreen screens]) {
+      if (NSMouseInRect(mouse, [candidate frame], NO)) {
+        sc = candidate;
+        break;
+      }
+    }
+    const NSRect vf = [sc visibleFrame];
+    NSRect f = [win frame];
+    f.origin.x = NSMidX(vf) - NSWidth(f) * 0.5;
+    f.origin.y = NSMidY(vf) - NSHeight(f) * 0.5;
+    if (NSMaxX(f) > NSMaxX(vf))
+      f.origin.x = NSMaxX(vf) - NSWidth(f);
+    if (NSMaxY(f) > NSMaxY(vf))
+      f.origin.y = NSMaxY(vf) - NSHeight(f);
+    if (f.origin.x < NSMinX(vf))
+      f.origin.x = NSMinX(vf);
+    if (f.origin.y < NSMinY(vf))
+      f.origin.y = NSMinY(vf);
+    [win setFrame:f display:NO];
+  }
   [win makeKeyAndOrderFront:nil];
   log_line("up-gui (Cocoa) — settings: " + g_settings_file.generic_string());
 }

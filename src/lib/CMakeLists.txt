@@ -45,21 +45,21 @@ set(UP_LIB_SOURCES
   engine/xml/var_subst.hpp
   engine/dom/dom_model.hpp
 )
-if(UP_ENABLE_PROJECT)
+if(UP_ENABLE_REVERSE)
   list(APPEND UP_LIB_SOURCES
-    engine/commands/project.cpp
-    engine/commands/project.hpp
-    engine/project/project_import.cpp
-    engine/project/project_import_common.cpp
-    engine/project/import_cmake.cpp
-    engine/project/import_autotools.cpp
-    engine/project/import_qmake.cpp
-    engine/project/import_meson.cpp
-    engine/project/import_sources.cpp
-    engine/project/project_probe.cpp
-    engine/project/project_import.hpp
-    engine/project/project_import_internal.hpp
-    engine/project/project_import_common.hpp
+    engine/commands/reverse.cpp
+    engine/commands/reverse.hpp
+    engine/reverse/reverse_import.cpp
+    engine/reverse/reverse_import_common.cpp
+    engine/reverse/import_cmake.cpp
+    engine/reverse/import_autotools.cpp
+    engine/reverse/import_qmake.cpp
+    engine/reverse/import_meson.cpp
+    engine/reverse/import_sources.cpp
+    engine/reverse/reverse_probe.cpp
+    engine/reverse/reverse_import.hpp
+    engine/reverse/reverse_import_internal.hpp
+    engine/reverse/reverse_import_common.hpp
   )
 endif()
 
@@ -73,7 +73,7 @@ target_include_directories(up-lib PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/engine/commands"
   "${CMAKE_CURRENT_SOURCE_DIR}/engine/backends"
   "${CMAKE_CURRENT_SOURCE_DIR}/engine/xml"
-  "${CMAKE_CURRENT_SOURCE_DIR}/engine/project"
+  "${CMAKE_CURRENT_SOURCE_DIR}/engine/reverse"
   "${CMAKE_CURRENT_SOURCE_DIR}/engine/dom"
   "${CMAKE_CURRENT_SOURCE_DIR}/infra/platform"
   "${CMAKE_CURRENT_SOURCE_DIR}/infra/i18n"
@@ -83,10 +83,10 @@ if(MSVC)
   target_compile_definitions(up-lib PRIVATE _CRT_SECURE_NO_WARNINGS)
   target_compile_options(up-lib PRIVATE /utf-8)
 endif()
-if(UP_ENABLE_PROJECT)
-  target_compile_definitions(up-lib PUBLIC UP_ENABLE_PROJECT=1)
+if(UP_ENABLE_REVERSE)
+  target_compile_definitions(up-lib PUBLIC UP_ENABLE_REVERSE=1)
 else()
-  target_compile_definitions(up-lib PUBLIC UP_ENABLE_PROJECT=0)
+  target_compile_definitions(up-lib PUBLIC UP_ENABLE_REVERSE=0)
 endif()
 if(UP_DISABLE_PACKAGE_XML_CMAKE)
   target_compile_definitions(up-lib PUBLIC UP_DISABLE_PACKAGE_XML_CMAKE=1)

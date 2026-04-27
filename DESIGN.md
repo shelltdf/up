@@ -52,7 +52,7 @@
 | `run` | 运行已编译完成的目标（如 `exe`）。 |
 | `test` | 运行单元测试；**无参数时运行全部**测试。 |
 | `pack` | 将编译结果打包为目标形态（安装程序、apk 等，依后端而定）。 |
-| `project` | 将当前 **cwd** 中已有代码工程**升级/迁移**为 `package.xml` 与各目标子目录下的 `target.xml` 描述。 |
+| `reverse` | 将当前 **cwd** 中已有代码工程**升级/迁移**为 `package.xml` 与各目标子目录下的 `target.xml` 描述（逆向生成规则）。 |
 
 **CMake 脚手架与 `--cmake-no-file-api`：** 默认在需要时会跑一次 **`cmake` 配置**以读取 **CMake File API（codemodel）**，精度高但要求当时环境下 `find_package` / 子工程路径等足以让该次 configure 成功。`--cmake-no-file-api` 会**跳过**该子进程，仅依赖安装规则文本扫描与 **CMakeLists 启发式源码扫描**（含对 `target_link_libraries` / `target_include_directories` 的尽力解析），适合依赖尚未就绪或无法提供前缀路径的仓库；结果可能不完整，需人工核对。
 
@@ -128,7 +128,7 @@
 | 阶段 | 内容 |
 |------|------|
 | P0 | CLI 子命令骨架、`.intermediate` 目录约定、`package.xml` / 子目录 `target.xml` 最小解析、configure 生成 CMake、build 调用 cmake、test 调用 ctest。 |
-| P1 | 多包依赖图、完整 **arch** 元组、缓存文件、路径校验与 i18n 文案、`project` 迁移向导。 |
+| P1 | 多包依赖图、完整 **arch** 元组、缓存文件、路径校验与 i18n 文案、`reverse`（逆向）迁移向导。 |
 | P2 | Ninja/sln 生成器、元工具链插件、moc/uic 类管线。 |
 | P3 | `up-gui.exe`、pack 多形态、模板市场/用户模板。 |
 

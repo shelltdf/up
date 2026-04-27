@@ -1,4 +1,4 @@
-﻿# up 用户手册
+# up 用户手册
 
 本手册面向第一次接触 `up` 的用户，目标是让你从零开始理解并完成一次完整使用（CLI 与 up-gui 两条路径）。
 
@@ -17,7 +17,7 @@
 | 支持多种目标类型 | 可执行程序 / 库 / 插件 / 资源文件 | 支持 `executable`、`static_library`、`shared_library` 等目标类型，并可组织插件与资源文件等工程产物。 |
 | 配置过程支持变量操作 | 全局变量 + 用户自定义变量 + 变量驱动 target 行为 | 系统会注入默认全局变量，用户可定义变量并在配置阶段参与目标行为控制，例如按 `win32/linux` 条件切换源码、依赖或构建选项。 |
 | 基于现有建造系统和编译器环境 + 不设立复杂规则不增加学习难度 | 复用 CMake / Ninja 与现有编译器链路 | 不额外发明复杂 DSL 或新规则体系，尽量沿用团队已有构建习惯，降低迁移与学习成本。 |
-| 全流程命令 + 全平台开发 + 全平台发布 | configure / build / test / run / pack / project（可选编译） | 覆盖从扫描、构建、测试到运行与打包的完整流程，并支持跨平台开发与发布；**`project`** 需 **`UP_ENABLE_PROJECT=ON`** 构建宿主 `up`。 |
+| 全流程命令 + 全平台开发 + 全平台发布 | configure / build / test / run / pack / reverse（可选编译） | 覆盖从扫描、构建、测试到运行与打包的完整流程，并支持跨平台开发与发布；**`reverse`（逆向）** 需 **`UP_ENABLE_REVERSE=ON`** 构建宿主 `up`。 |
 | 最简单的外部依赖关系扩展 | 通过设置 `scan dir` 搜索外部包建立依赖关系 | 当前可把外部包目录加入扫描来源来建立包依赖；后续可扩展为 `git clone` 或下载并解压 `zip` 后自动纳入 `scan` 来源。 |
 | 可扩展元编程工具接入 | 支持 `moc` / `uic` / `rc` 等工具模式 | 可将代码生成工具接入包体系，支持输入文件转换、生成产物管理与测试验证。 |
 
@@ -197,7 +197,9 @@ cmake -S . -B _build -G "Visual Studio 17 2022" -A x64
 cmake --build _build --config Release
 ```
 
-如需启用 **`up project`**，请在首次配置时追加 **`-DUP_ENABLE_PROJECT=ON`** 后再编译。
+如需启用 **`up reverse`**，请在首次配置时追加 **`-DUP_ENABLE_REVERSE=ON`** 后再编译。
+
+历史上曾使用子命令 **`project`** / 选项 **`--project-dir`**，当前版本已删除且无别名；请统一使用 **`reverse`** 与 **`--source-dir`（或 `-C`）**。
 
 方式 B：Python 脚本
 
@@ -228,7 +230,7 @@ $ARCH = .\_build\Release\up.exe print-build-dir-name
 - `up pack --install-dir-name <名>...`
 - `up list [--format tree|json|xml] [--xml <path>] [--json <path>] [--quiet]`
 - `up spec` / `up print-build-dir-name`
-- `up project ...`（**需**宿主 `up` 以 **`-DUP_ENABLE_PROJECT=ON`** 构建；否则子命令不可用）
+- `up reverse ...`（**需**宿主 `up` 以 **`-DUP_ENABLE_REVERSE=ON`** 构建；否则子命令不可用）
   - 默认：若探测到 **CMake** 工程，写入 **`<cmake source_dir="..."/>`**，并尽量从 `install(TARGETS ...)` 自动生成 `imported_installed_*` 包装 `target.xml`（默认落在 `.targets/<name>/target.xml`，目标名优先使用 CMake target 名，解析不到时仅生成 package.xml 并给出提示）。
   - `package.xml` 的 `name` 默认优先取 `CMakeLists.txt` 的 `project(...)` 名（若未解析到则回退目录名；`--package-name` 仍可覆盖）。
 
@@ -292,14 +294,14 @@ up run --install-dir-name $ARCH rock_app_one
 
 #### 模板 D：导入第三方 CMake SDK（zlib / FBX 风格）
 
-1. 在第三方 CMake 工程根目录执行 `up project`（需宿主 `up` 以 **`-DUP_ENABLE_PROJECT=ON`** 构建）
+1. 在第三方 CMake 工程根目录执行 `up reverse`（需宿主 `up` 以 **`-DUP_ENABLE_REVERSE=ON`** 构建）
 2. 执行 `up configure`，再 `up build --build-dir-name default` 等（见 §4.3）
 3. 检查是否生成 `.targets/<name>/target.xml`
 4. 在消费方包里通过 `<dependency name="pkg:target"/>` 引用
 
 默认行为要点：
 
-- `up project` 会写 `package.xml`（含 `<cmake source_dir="..."/>`）（需 **`-DUP_ENABLE_PROJECT=ON`** 构建的 `up`）
+- `up reverse` 会写 `package.xml`（含 `<cmake source_dir="..."/>`）（需 **`-DUP_ENABLE_REVERSE=ON`** 构建的 `up`）
 - 并尝试根据 `install(TARGETS ...)` 生成 `imported_installed_*` 包装目标
 - 并尝试根据 `find_package(...)` 生成包级依赖：
   - `REQUIRED` -> `<dependency ... optional="false"/>`

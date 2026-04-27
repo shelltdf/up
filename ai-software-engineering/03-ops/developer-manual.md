@@ -7,14 +7,14 @@ cmake -S . -B _build -G "Visual Studio 17 2022" -A x64
 cmake --build _build --config Release
 ```
 
-可选开启 **`project`** 子命令（会增加 `src/lib/engine/project/*` 等编译单元）：
+可选开启 **`reverse`（逆向）** 子命令（会增加 `src/lib/engine/reverse/*` 等编译单元）：
 
 ```powershell
-cmake -S . -B _build -G "Visual Studio 17 2022" -A x64 -DUP_ENABLE_PROJECT=ON
+cmake -S . -B _build -G "Visual Studio 17 2022" -A x64 -DUP_ENABLE_REVERSE=ON
 cmake --build _build --config Release
 ```
 
-或使用 `python build.py -- -DUP_ENABLE_PROJECT=ON` 将额外参数传给首次 configure。
+或使用 `python build.py -- -DUP_ENABLE_REVERSE=ON` 将额外参数传给首次 configure。
 
 ## 安装与打包
 
