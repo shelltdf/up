@@ -1,4 +1,4 @@
-﻿#include "gui_unix_shared.hpp"
+﻿#include "gui_persist.hpp"
 
 #include <cctype>
 #include <cstdio>
@@ -40,7 +40,9 @@ static bool path_equal_ci_utf8(const std::string& a, const std::string& b) {
   return true;
 }
 
-static std::string shell_single_quote(const std::string& s) {
+namespace up::gui::persist {
+
+std::string shell_single_quote(const std::string& s) {
   std::string out = "'";
   for (char c : s) {
     if (c == '\'')
@@ -51,8 +53,6 @@ static std::string shell_single_quote(const std::string& s) {
   out += '\'';
   return out;
 }
-
-namespace up::gui::unix_shared {
 
 std::filesystem::path executable_parent_dir() {
   std::string exe;
@@ -276,4 +276,4 @@ bool query_print_build_dir_name(const std::filesystem::path& up_exe, const std::
   return true;
 }
 
-}  // namespace up::gui::unix_shared
+}  // namespace up::gui::persist

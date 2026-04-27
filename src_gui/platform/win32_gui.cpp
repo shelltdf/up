@@ -1,4 +1,5 @@
-// up-gui：本地 Win32 外壳，仅通过命令行调用与 up-gui.exe 同目录的 up.exe；不链接、不包含 src 下业务代码（见 DESIGN.md / mindmap）。
+// Windows Win32：up-gui 主窗与消息循环（与 Linux platform/gtk_gui.cpp、macOS platform/cocoa_gui.mm 同一职责层级）。
+// 仅通过命令行调用与 up-gui.exe 同目录的 up.exe；不链接、不包含 src 下业务代码（见 DESIGN.md / mindmap）。
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -6,7 +7,7 @@
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
-#include <windows.h>
+#include "platform/win32_gui.hpp"
 #include <windowsx.h>
 #include <commctrl.h>
 #include <commdlg.h>
@@ -37,8 +38,16 @@
 #include <vector>
 
 #include "core/gui_core_actions.hpp"
+#include "platform/win32_modal_file_dialog_center.hpp"
+#include "platform/win32_paths.hpp"
+#include "platform/win32_window_placement.hpp"
 
 namespace {
+
+using up::gui::platform::win32::CenterOuterWindowOnScreen;
+using up::gui::platform::win32::DirOfModule;
+using up::gui::platform::win32::GuiSettingsPath;
+using up::gui::platform::win32::PathToPortableSlashes;
 
 constexpr wchar_t kClassName[] = L"UpGuiMainClass";
 constexpr wchar_t kTitle[] = L"up-gui";
@@ -415,16 +424,6 @@ void TrimInPlace(std::wstring& s) {
     s.pop_back();
 }
 
-// 路径统一为 POSIX 风格「/」分隔（generic 形式），便于与 Linux 习惯一致、配置文件易读；Windows API 多数仍接受此种路径。
-std::wstring PathToPortableSlashes(std::wstring w) {
-  TrimInPlace(w);
-  if (w.empty())
-    return w;
-  std::filesystem::path p(w);
-  p = p.lexically_normal();
-  return p.generic_wstring();
-}
-
 // 配置文件里所有「路径形态」的项统一为正斜杠 /（含从环境/自动探测得到的值）。
 void NormalizeGuiSettingsStoredPaths() {
   g_env_settings.android_sdk_path = PathToPortableSlashes(g_env_settings.android_sdk_path);
@@ -708,21 +707,6 @@ void AppendRunBookkeepingToLog(const up::gui::core::UpLaunchPlan& plan, const st
   if (plan.use_vcvars)
     push_sync(L"\r\n> [vcvars] " + vcvars + L"\r\n");
   push_sync(L"\r\n> " + plan.display_command + L"\r\n");
-}
-
-std::wstring DirOfModule() {
-  wchar_t buf[MAX_PATH]{};
-  if (!GetModuleFileNameW(nullptr, buf, MAX_PATH))
-    return {};
-  std::wstring p(buf);
-  const auto pos = p.find_last_of(L"\\/");
-  if (pos == std::wstring::npos)
-    return {};
-  return PathToPortableSlashes(p.substr(0, pos));
-}
-
-std::filesystem::path GuiSettingsPath() {
-  return std::filesystem::path(DirOfModule()) / "up_gui_settings.txt";
 }
 
 std::wstring GetEnvVarW(const wchar_t* name) {
@@ -2036,125 +2020,6 @@ LRESULT CALLBACK EnvSettingsWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM l
   return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
-static RECT WorkAreaForMonitorContainingWindow(HWND ref) {
-  MONITORINFO mi{sizeof(mi)};
-  RECT work{};
-  HMONITOR mon = nullptr;
-  if (ref)
-    mon = MonitorFromWindow(ref, MONITOR_DEFAULTTONEAREST);
-  else {
-    // Top-level app window: center on the monitor under the cursor (matches user expectation for "screen center").
-    POINT pt{};
-    if (GetCursorPos(&pt))
-      mon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
-    if (!mon)
-      mon = MonitorFromWindow(GetDesktopWindow(), MONITOR_DEFAULTTOPRIMARY);
-  }
-  if (!mon) {
-    POINT pt{};
-    GetCursorPos(&pt);
-    mon = MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY);
-  }
-  if (mon && GetMonitorInfoW(mon, &mi))
-    return mi.rcWork;
-  SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
-  return work;
-}
-
-static void CenterOuterWindowOnScreen(HWND reference, int outer_w, int outer_h, int* out_x, int* out_y) {
-  const RECT work = WorkAreaForMonitorContainingWindow(reference);
-  const int wa_w = work.right - work.left;
-  const int wa_h = work.bottom - work.top;
-  int x = work.left + (wa_w - outer_w) / 2;
-  int y = work.top + (wa_h - outer_h) / 2;
-  if (x + outer_w > work.right)
-    x = work.right - outer_w;
-  if (y + outer_h > work.bottom)
-    y = work.bottom - outer_h;
-  if (x < work.left)
-    x = work.left;
-  if (y < work.top)
-    y = work.top;
-  *out_x = x;
-  *out_y = y;
-}
-
-// Move an existing top-level HWND so it is centered in the work area of the monitor containing `ref_for_work_area`.
-static void CenterHWNDOnMonitorOf(HWND wnd, HWND ref_for_work_area) {
-  if (!wnd)
-    return;
-  RECT wr{};
-  if (!GetWindowRect(wnd, &wr))
-    return;
-  const int ww = wr.right - wr.left;
-  const int hh = wr.bottom - wr.top;
-  const RECT work = WorkAreaForMonitorContainingWindow(ref_for_work_area ? ref_for_work_area : wnd);
-  int x = work.left + ((work.right - work.left) - ww) / 2;
-  int y = work.top + ((work.bottom - work.top) - hh) / 2;
-  if (x + ww > work.right)
-    x = work.right - ww;
-  if (y + hh > work.bottom)
-    y = work.bottom - hh;
-  if (x < work.left)
-    x = work.left;
-  if (y < work.top)
-    y = work.top;
-  SetWindowPos(wnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
-}
-
-// IFileOpenDialog / GetSaveFileName explorer UI does not always set GW_OWNER on the outer HWND to our hwnd.
-// Center the first plausible modal root on HCBT_ACTIVATE (class / size / owner heuristics).
-static HHOOK g_modal_file_dlg_cbt = nullptr;
-static HWND g_modal_file_dlg_owner = nullptr;
-static bool g_modal_file_dlg_centered = false;
-
-static LRESULT CALLBACK ModalFileDialogCenterCbtProc(int nCode, WPARAM wParam, LPARAM lParam) {
-  (void)lParam;
-  if (nCode != HCBT_ACTIVATE || !g_modal_file_dlg_owner || g_modal_file_dlg_centered)
-    return CallNextHookEx(g_modal_file_dlg_cbt, nCode, wParam, lParam);
-  const HWND target = reinterpret_cast<HWND>(wParam);
-  if (!target)
-    return CallNextHookEx(g_modal_file_dlg_cbt, nCode, wParam, lParam);
-  const HWND root = GetAncestor(target, GA_ROOT);
-  if (!root || root == g_modal_file_dlg_owner)
-    return CallNextHookEx(g_modal_file_dlg_cbt, nCode, wParam, lParam);
-  RECT wr{};
-  if (!GetWindowRect(root, &wr))
-    return CallNextHookEx(g_modal_file_dlg_cbt, nCode, wParam, lParam);
-  const int ww = wr.right - wr.left;
-  const int hh = wr.bottom - wr.top;
-  if (ww < 220 || hh < 160)
-    return CallNextHookEx(g_modal_file_dlg_cbt, nCode, wParam, lParam);
-
-  // IFileOpenDialog / Vista+ common dialogs often attach the shell frame via parent, not GW_OWNER (which may stay NULL).
-  const HWND dlg_owner = GetWindow(root, GW_OWNER);
-  const HWND dlg_parent = GetParent(root);
-  wchar_t cls[300]{};
-  (void)GetClassNameW(root, cls, static_cast<int>(std::size(cls)));
-  const bool owner_ok =
-      g_modal_file_dlg_owner && (dlg_owner == g_modal_file_dlg_owner || dlg_parent == g_modal_file_dlg_owner);
-  const bool class_ok =
-      wcscmp(cls, L"#32770") == 0 || _wcsicmp(cls, L"CabinetWClass") == 0 || _wcsicmp(cls, L"ExploreWClass") == 0 ||
-      // Win10/11 hosts (WinUI / XAML) for the common item dialog sometimes use these instead of #32770.
-      _wcsicmp(cls, L"Windows.UI.Core.CoreWindow") == 0 || wcsstr(cls, L"Xaml_WindowedPopupClass") != nullptr;
-  // IFileOpenDialog often shows a same-thread top-level shell frame with neither GW_OWNER nor #32770 on the root.
-  const DWORD wstyle = static_cast<DWORD>(GetWindowLongPtrW(root, GWL_STYLE));
-  const DWORD wtp_root = GetWindowThreadProcessId(root, nullptr);
-  const DWORD wtp_owner = g_modal_file_dlg_owner ? GetWindowThreadProcessId(g_modal_file_dlg_owner, nullptr) : 0;
-  const bool same_thread_as_owner = wtp_root != 0 && wtp_root == wtp_owner;
-  const RECT work_ref = WorkAreaForMonitorContainingWindow(g_modal_file_dlg_owner);
-  const int work_w = work_ref.right - work_ref.left;
-  const int work_h = work_ref.bottom - work_ref.top;
-  const bool dialog_like =
-      same_thread_as_owner && (wstyle & WS_CHILD) == 0 && (wstyle & WS_POPUP) != 0 && ww >= 360 && hh >= 240 &&
-      ww <= (work_w > 0 ? work_w + 80 : 4096) && hh <= (work_h > 0 ? work_h + 80 : 4096);
-  if (owner_ok || class_ok || dialog_like) {
-    CenterHWNDOnMonitorOf(root, g_modal_file_dlg_owner);
-    g_modal_file_dlg_centered = true;
-  }
-  return CallNextHookEx(g_modal_file_dlg_cbt, nCode, wParam, lParam);
-}
-
 bool ShowEnvSettingsDialog(HWND owner) {
   static bool cls_registered = false;
   static constexpr wchar_t kEnvClass[] = L"UpGuiEnvSettingsClass";
@@ -2231,16 +2096,9 @@ bool PickFolder(HWND owner, const std::wstring& initial_dir, std::wstring& out, 
       }
     }
   }
-  g_modal_file_dlg_owner = owner;
-  g_modal_file_dlg_centered = false;
-  g_modal_file_dlg_cbt = SetWindowsHookExW(WH_CBT, ModalFileDialogCenterCbtProc, nullptr, GetCurrentThreadId());
+  up::gui::platform::win32::ModalFileDialogCenterBegin(owner);
   const HRESULT hr_show = dlg->Show(owner);
-  if (g_modal_file_dlg_cbt) {
-    UnhookWindowsHookEx(g_modal_file_dlg_cbt);
-    g_modal_file_dlg_cbt = nullptr;
-  }
-  g_modal_file_dlg_owner = nullptr;
-  g_modal_file_dlg_centered = false;
+  up::gui::platform::win32::ModalFileDialogCenterEnd();
   if (FAILED(hr_show)) {
     dlg->Release();
     return false;
@@ -4154,16 +4012,9 @@ bool PickSaveListExportPath(HWND owner, const wchar_t* default_name, const wchar
   ofn.nMaxFile = static_cast<DWORD>(std::size(buf));
   ofn.lpstrDefExt = def_ext;
   ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY | OFN_EXPLORER | OFN_ENABLESIZING;
-  g_modal_file_dlg_owner = owner;
-  g_modal_file_dlg_centered = false;
-  g_modal_file_dlg_cbt = SetWindowsHookExW(WH_CBT, ModalFileDialogCenterCbtProc, nullptr, GetCurrentThreadId());
+  up::gui::platform::win32::ModalFileDialogCenterBegin(owner);
   const BOOL ok = GetSaveFileNameW(&ofn);
-  if (g_modal_file_dlg_cbt) {
-    UnhookWindowsHookEx(g_modal_file_dlg_cbt);
-    g_modal_file_dlg_cbt = nullptr;
-  }
-  g_modal_file_dlg_owner = nullptr;
-  g_modal_file_dlg_centered = false;
+  up::gui::platform::win32::ModalFileDialogCenterEnd();
   if (!ok)
     return false;
   out_path.assign(buf);

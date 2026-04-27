@@ -255,7 +255,7 @@ up run --install-dir-name $ARCH rock_app_one
 
 ### 4.5 up-gui 快速上手
 
-`up-gui` 是 Win32 图形壳，核心仍是调用 `up.exe`。
+`up-gui` 是图形壳（Windows：Win32；Linux：GTK3；macOS：Cocoa），核心仍是调用同目录下的 `up` / `up.exe`。
 
 建议流程：
 

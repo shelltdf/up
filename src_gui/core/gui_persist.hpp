@@ -4,9 +4,9 @@
 #include <string>
 #include <vector>
 
-namespace up::gui::unix_shared {
+namespace up::gui::persist {
 
-// 与 up-gui Win32 同目录的 up_gui_settings.txt（UTF-8 key=value）。
+// GTK/Cocoa 与 Win32 共用：可执行文件旁的 up_gui_settings.txt（UTF-8 key=value）；Win32 另有宽字符路径实现，文件格式一致。
 std::filesystem::path settings_path_near_executable();
 
 // 可执行文件所在目录（不含文件名）。
@@ -57,4 +57,4 @@ bool query_print_build_dir_name(const std::filesystem::path& up_exe, const std::
                                 const std::string& build_dir_field, const PersistedEnv& env, std::string& out_leaf,
                                 std::string& err);
 
-}  // namespace up::gui::unix_shared
+}  // namespace up::gui::persist

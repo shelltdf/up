@@ -1,8 +1,10 @@
-// macOS Cocoa：与 GTK/Linux 端一致的 up-gui 主窗口（同一 up_gui_settings.txt 与 configure 传参）。
+// macOS Cocoa：与 GTK/Linux 端一致的 up-gui 主窗口（同一 up_gui_settings.txt 与 configure 传参；与 Windows 版 platform/win32_gui.cpp 行为对齐）。
 
 #import <Cocoa/Cocoa.h>
 
-#include "../core/gui_unix_shared.hpp"
+#include "platform/cocoa_gui.hpp"
+
+#include "gui_persist.hpp"
 
 #include <atomic>
 #include <filesystem>
@@ -12,9 +14,11 @@
 
 namespace up::gui::platform::cocoa {
 
+namespace persist = up::gui::persist;
+
 std::atomic<bool> g_busy{false};
 
-PersistedEnv g_persist{};
+persist::PersistedEnv g_persist{};
 std::filesystem::path g_settings_file;
 std::filesystem::path g_up_exe;
 
@@ -76,24 +80,24 @@ static std::vector<std::string> collect_scans() {
 }
 
 static void save_ui() {
-  g_persist.browse_cwd = unix_shared::path_to_portable_utf8(ns_to_utf8([g_tf_cwd stringValue]));
-  unix_shared::save_settings(g_settings_file, g_persist);
+  g_persist.browse_cwd = persist::path_to_portable_utf8(ns_to_utf8([g_tf_cwd stringValue]));
+  persist::save_settings(g_settings_file, g_persist);
 }
 
 static void append_install_dir_flag(std::string& args, const std::string& inst_edit, std::string& err) {
-  std::string inst = unix_shared::path_to_portable_utf8(inst_edit);
+  std::string inst = persist::path_to_portable_utf8(inst_edit);
   trim_ascii(inst);
   if (inst.empty()) {
     err = "Install Dir empty";
     return;
   }
-  const std::string leaf = unix_shared::intermediate_leaf_from_build_dir_field(inst);
+  const std::string leaf = persist::intermediate_leaf_from_build_dir_field(inst);
   if (leaf.empty()) {
     err = "Invalid install dir leaf";
     return;
   }
   args += " --install-dir-name ";
-  args += unix_shared::shell_single_quote(leaf);
+  args += persist::shell_single_quote(leaf);
 }
 
 static void run_up_async(const std::string& args_no_exe) {
@@ -102,7 +106,7 @@ static void run_up_async(const std::string& args_no_exe) {
     g_busy = false;
     return;
   }
-  const std::string cwd = unix_shared::path_to_portable_utf8(ns_to_utf8([g_tf_cwd stringValue]));
+  const std::string cwd = persist::path_to_portable_utf8(ns_to_utf8([g_tf_cwd stringValue]));
   if (cwd.empty()) {
     log_line("[error] Set CWD first.");
     g_busy = false;
@@ -118,12 +122,12 @@ static void run_up_async(const std::string& args_no_exe) {
 
   std::thread([args_no_exe, cwd, extra]() {
     const std::filesystem::path cwd_p(cwd);
-    std::string cmd = unix_shared::shell_single_quote(g_up_exe.generic_string()) + " " + args_no_exe;
+    std::string cmd = persist::shell_single_quote(g_up_exe.generic_string()) + " " + args_no_exe;
     if (!extra.empty())
       cmd += " " + extra;
     std::string out;
     int code = -1;
-    const bool ok = unix_shared::run_shell_in_dir(cwd_p, cmd, out, code);
+    const bool ok = persist::run_shell_in_dir(cwd_p, cmd, out, code);
     if (!ok)
       log_line("[error] failed to spawn shell");
     else {
@@ -138,22 +142,22 @@ static void run_up_async(const std::string& args_no_exe) {
 }
 
 static std::string build_configure_args_line() {
-  const std::string cwd = unix_shared::path_to_portable_utf8(ns_to_utf8([g_tf_cwd stringValue]));
+  const std::string cwd = persist::path_to_portable_utf8(ns_to_utf8([g_tf_cwd stringValue]));
   if (cwd.empty()) {
     log_line("[error] Set CWD first.");
     return {};
   }
   std::string leaf, qerr;
-  if (!unix_shared::query_print_build_dir_name(g_up_exe, std::filesystem::path(cwd), ns_to_utf8([g_tf_build stringValue]),
+  if (!persist::query_print_build_dir_name(g_up_exe, std::filesystem::path(cwd), ns_to_utf8([g_tf_build stringValue]),
                                               g_persist, leaf, qerr)) {
     log_line("[error] print-build-dir-name: " + qerr);
     return {};
   }
   std::string args = "configure";
-  unix_shared::append_scan_args_utf8(args, collect_scans(), cwd);
-  unix_shared::append_configure_env_opts(g_persist, args);
+  persist::append_scan_args_utf8(args, collect_scans(), cwd);
+  persist::append_configure_env_opts(g_persist, args);
   args += " --build-dir-name ";
-  args += unix_shared::shell_single_quote(leaf);
+  args += persist::shell_single_quote(leaf);
   return args;
 }
 
@@ -184,7 +188,7 @@ static void upgui_apply_open_panel_directory(NSOpenPanel* p, NSString* primaryPa
   if ([p runModal] == NSModalResponseOK) {
     NSURL* u = [[p URLs] firstObject];
     if (u) {
-      std::string path = unix_shared::path_to_portable_utf8([[u path] UTF8String]);
+      std::string path = persist::path_to_portable_utf8([[u path] UTF8String]);
       [g_tf_cwd setStringValue:utf8_to_ns(path)];
     }
   }
@@ -200,7 +204,7 @@ static void upgui_apply_open_panel_directory(NSOpenPanel* p, NSString* primaryPa
     NSURL* u = [[pan URLs] firstObject];
     if (u) {
       NSString* path = [u path];
-      g_persist.browse_scan = unix_shared::path_to_portable_utf8([path UTF8String]);
+      g_persist.browse_scan = persist::path_to_portable_utf8([path UTF8String]);
       [g_scan_rows addObject:path];
       [g_table_scan reloadData];
     }
@@ -234,13 +238,13 @@ static void upgui_apply_open_panel_directory(NSOpenPanel* p, NSString* primaryPa
 - (void)doBuild:(id)sender {
   (void)sender;
   std::string args = "build";
-  const std::string leaf = unix_shared::intermediate_leaf_from_build_dir_field(ns_to_utf8([g_tf_build stringValue]));
+  const std::string leaf = persist::intermediate_leaf_from_build_dir_field(ns_to_utf8([g_tf_build stringValue]));
   if (leaf.empty()) {
     log_line("[error] Set Build Dir first.");
     return;
   }
   args += " --build-dir-name ";
-  args += unix_shared::shell_single_quote(leaf);
+  args += persist::shell_single_quote(leaf);
   run_up_async(args);
 }
 
@@ -259,7 +263,7 @@ static void upgui_apply_open_panel_directory(NSOpenPanel* p, NSString* primaryPa
     return;
   }
   args += " ";
-  args += unix_shared::shell_single_quote(tgt);
+  args += persist::shell_single_quote(tgt);
   run_up_async(args);
 }
 
@@ -275,7 +279,7 @@ static void upgui_apply_open_panel_directory(NSOpenPanel* p, NSString* primaryPa
   }
   if (!tgt.empty()) {
     args += " ";
-    args += unix_shared::shell_single_quote(tgt);
+    args += persist::shell_single_quote(tgt);
   }
   run_up_async(args);
 }
@@ -338,13 +342,13 @@ static NSTextField* makeField() {
 }
 
 static void build_window() {
-  g_settings_file = unix_shared::settings_path_near_executable();
-  g_up_exe = unix_shared::executable_parent_dir() / "up";
-  (void)unix_shared::load_settings(g_settings_file, g_persist);
+  g_settings_file = persist::settings_path_near_executable();
+  g_up_exe = persist::executable_parent_dir() / "up";
+  (void)persist::load_settings(g_settings_file, g_persist);
   g_scan_rows = [NSMutableArray array];
 
   {
-    const std::filesystem::path icon_path = unix_shared::executable_parent_dir() / "up_gui.png";
+    const std::filesystem::path icon_path = persist::executable_parent_dir() / "up_gui.png";
     if (std::filesystem::exists(icon_path)) {
       NSString* ip = [NSString stringWithUTF8String:icon_path.string().c_str()];
       NSImage* img = [[NSImage alloc] initWithContentsOfFile:ip];

@@ -232,7 +232,7 @@ up run --install-dir-name $ARCH rock_app_one
 
 ### 4.5 `up-gui` quick flow
 
-`up-gui` is a Win32 shell on top of `up.exe`.
+`up-gui` is a thin GUI shell (Win32 on Windows, GTK3 on Linux, Cocoa on macOS) that runs `up` / `up.exe` from the same install directory.
 
 Suggested flow:
 

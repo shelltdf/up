@@ -1,7 +1,9 @@
-// Linux GTK3：与 Win32 up-gui 同一套 up_gui_settings.txt 与 configure 传参逻辑（CWD、扫描目录、环境 --opt、build-dir-name）。
+// Linux GTK3：与 Windows 版 up-gui（platform/win32_gui.cpp）同一套 up_gui_settings.txt 与 configure 传参逻辑（CWD、扫描目录、环境 --opt、build-dir-name）。
 // 未实现：Win32 上的「编译环境」三 Tab 弹窗、选项表 ListView、从 up_cache 自动填运行目标等（可后续补）。
 
-#include "../core/gui_unix_shared.hpp"
+#include "platform/gtk_gui.hpp"
+
+#include "gui_persist.hpp"
 
 #include <gtk/gtk.h>
 
@@ -13,6 +15,8 @@
 
 namespace up::gui::platform::gtk {
 namespace {
+
+namespace persist = up::gui::persist;
 
 std::atomic<bool> g_busy{false};
 GtkApplication* g_app{};
@@ -29,7 +33,7 @@ GtkWidget* g_scan_view{};
 GtkWidget* g_log_view{};
 GtkWidget* g_status{};
 
-PersistedEnv g_persist{};
+persist::PersistedEnv g_persist{};
 std::filesystem::path g_settings_file;
 std::filesystem::path g_up_exe;
 
@@ -86,8 +90,8 @@ std::vector<std::string> collect_scans() {
 }
 
 void save_ui_to_persist() {
-  g_persist.browse_cwd = unix_shared::path_to_portable_utf8(get_entry(g_entry_cwd));
-  unix_shared::save_settings(g_settings_file, g_persist);
+  g_persist.browse_cwd = persist::path_to_portable_utf8(get_entry(g_entry_cwd));
+  persist::save_settings(g_settings_file, g_persist);
 }
 
 void on_browse_cwd(GtkWidget*, gpointer) {
@@ -102,7 +106,7 @@ void on_browse_cwd(GtkWidget*, gpointer) {
   if (gtk_dialog_run(GTK_DIALOG(dlg)) == GTK_RESPONSE_ACCEPT) {
     char* p = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dlg));
     if (p) {
-      const std::string portable = unix_shared::path_to_portable_utf8(p);
+      const std::string portable = persist::path_to_portable_utf8(p);
       gtk_entry_set_text(GTK_ENTRY(g_entry_cwd), portable.c_str());
       g_persist.browse_cwd = portable;
       g_free(p);
@@ -120,7 +124,7 @@ void on_scan_add(GtkWidget*, gpointer) {
   if (gtk_dialog_run(GTK_DIALOG(dlg)) == GTK_RESPONSE_ACCEPT) {
     char* p = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dlg));
     if (p) {
-      g_persist.browse_scan = unix_shared::path_to_portable_utf8(p);
+      g_persist.browse_scan = persist::path_to_portable_utf8(p);
       GtkTreeIter it{};
       gtk_list_store_append(g_store_scan, &it);
       gtk_list_store_set(g_store_scan, &it, 0, g_persist.browse_scan.c_str(), -1);
@@ -138,19 +142,19 @@ void on_scan_remove(GtkWidget*, gpointer) {
 }
 
 static void append_install_dir_flag(std::string& args, const std::string& inst_edit, std::string& err) {
-  std::string inst = unix_shared::path_to_portable_utf8(inst_edit);
+  std::string inst = persist::path_to_portable_utf8(inst_edit);
   trim_ascii(inst);
   if (inst.empty()) {
     err = "Install Dir empty (--install-dir-name required)";
     return;
   }
-  const std::string leaf = unix_shared::intermediate_leaf_from_build_dir_field(inst);
+  const std::string leaf = persist::intermediate_leaf_from_build_dir_field(inst);
   if (leaf.empty()) {
     err = "Invalid install dir / leaf for --install-dir-name";
     return;
   }
   args += " --install-dir-name ";
-  args += unix_shared::shell_single_quote(leaf);
+  args += persist::shell_single_quote(leaf);
 }
 
 void run_up_line_async(const std::string& args_no_exe) {
@@ -159,7 +163,7 @@ void run_up_line_async(const std::string& args_no_exe) {
     g_busy = false;
     return;
   }
-  const std::string cwd = unix_shared::path_to_portable_utf8(get_entry(g_entry_cwd));
+  const std::string cwd = persist::path_to_portable_utf8(get_entry(g_entry_cwd));
   if (cwd.empty()) {
     log_line("[error] Set CWD first.");
     g_busy = false;
@@ -176,12 +180,12 @@ void run_up_line_async(const std::string& args_no_exe) {
 
   std::thread([args_no_exe, cwd, extra]() {
     const std::filesystem::path cwd_p(cwd);
-    std::string cmd = unix_shared::shell_single_quote(g_up_exe.generic_string()) + " " + args_no_exe;
+    std::string cmd = persist::shell_single_quote(g_up_exe.generic_string()) + " " + args_no_exe;
     if (!extra.empty())
       cmd += " " + extra;
     std::string out;
     int code = -1;
-    const bool ok = unix_shared::run_shell_in_dir(cwd_p, cmd, out, code);
+    const bool ok = persist::run_shell_in_dir(cwd_p, cmd, out, code);
     if (!ok)
       log_line("[error] failed to spawn shell");
     else {
@@ -202,23 +206,23 @@ void run_up_line_async(const std::string& args_no_exe) {
 
 // 返回非空则为完整 configure 参数行（不含可执行文件路径）；失败时写日志并返回空。
 std::string build_configure_args_line() {
-  const std::string cwd = unix_shared::path_to_portable_utf8(get_entry(g_entry_cwd));
+  const std::string cwd = persist::path_to_portable_utf8(get_entry(g_entry_cwd));
   if (cwd.empty()) {
     log_line("[error] Set CWD first.");
     return {};
   }
   std::string leaf;
   std::string qerr;
-  if (!unix_shared::query_print_build_dir_name(g_up_exe, std::filesystem::path(cwd), get_entry(g_entry_build), g_persist,
+  if (!persist::query_print_build_dir_name(g_up_exe, std::filesystem::path(cwd), get_entry(g_entry_build), g_persist,
                                               leaf, qerr)) {
     log_line("[error] print-build-dir-name: " + qerr);
     return {};
   }
   std::string args = "configure";
-  unix_shared::append_scan_args_utf8(args, collect_scans(), cwd);
-  unix_shared::append_configure_env_opts(g_persist, args);
+  persist::append_scan_args_utf8(args, collect_scans(), cwd);
+  persist::append_configure_env_opts(g_persist, args);
   args += " --build-dir-name ";
-  args += unix_shared::shell_single_quote(leaf);
+  args += persist::shell_single_quote(leaf);
   return args;
 }
 
@@ -237,13 +241,13 @@ void on_configure(GtkWidget*, gpointer) {
 
 void on_build(GtkWidget*, gpointer) {
   std::string args = "build";
-  const std::string leaf = unix_shared::intermediate_leaf_from_build_dir_field(get_entry(g_entry_build));
+  const std::string leaf = persist::intermediate_leaf_from_build_dir_field(get_entry(g_entry_build));
   if (leaf.empty()) {
     log_line("[error] Set Build Dir (or leaf name) first.");
     return;
   }
   args += " --build-dir-name ";
-  args += unix_shared::shell_single_quote(leaf);
+  args += persist::shell_single_quote(leaf);
   run_up_line_async(args);
 }
 
@@ -262,7 +266,7 @@ void on_run(GtkWidget*, gpointer) {
     return;
   }
   args += " ";
-  args += unix_shared::shell_single_quote(tgt);
+  args += persist::shell_single_quote(tgt);
   run_up_line_async(args);
 }
 
@@ -278,7 +282,7 @@ void on_test(GtkWidget*, gpointer) {
   }
   if (!tgt.empty()) {
     args += " ";
-    args += unix_shared::shell_single_quote(tgt);
+    args += persist::shell_single_quote(tgt);
   }
   run_up_line_async(args);
 }
@@ -302,9 +306,9 @@ void on_window_destroy(GtkWidget*, gpointer) {
 
 static void activate(GtkApplication* app, gpointer) {
   g_app = app;
-  g_settings_file = unix_shared::settings_path_near_executable();
-  g_up_exe = unix_shared::executable_parent_dir() / "up";
-  (void)unix_shared::load_settings(g_settings_file, g_persist);
+  g_settings_file = persist::settings_path_near_executable();
+  g_up_exe = persist::executable_parent_dir() / "up";
+  (void)persist::load_settings(g_settings_file, g_persist);
 
   GtkWindow* w = GTK_WINDOW(gtk_application_window_new(app));
   g_win = GTK_WIDGET(w);
@@ -312,7 +316,7 @@ static void activate(GtkApplication* app, gpointer) {
   gtk_window_set_default_size(w, 920, 680);
   gtk_window_set_position(w, GTK_WIN_POS_CENTER_ALWAYS);
   {
-    const std::filesystem::path icon_path = unix_shared::executable_parent_dir() / "up_gui.png";
+    const std::filesystem::path icon_path = persist::executable_parent_dir() / "up_gui.png";
     if (std::filesystem::exists(icon_path))
       gtk_window_set_icon_from_file(w, icon_path.string().c_str(), nullptr);
   }

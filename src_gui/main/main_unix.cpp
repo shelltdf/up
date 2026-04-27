@@ -1,6 +1,4 @@
-﻿namespace up::gui::platform::gtk {
-int run(int argc, char** argv);
-}
+﻿#include "platform/gtk_gui.hpp"
 
 int main(int argc, char** argv) {
   return up::gui::platform::gtk::run(argc, argv);

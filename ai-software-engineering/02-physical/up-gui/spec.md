@@ -9,9 +9,9 @@
 
 | 平台 | 主要文件 |
 |------|-----------|
-| Windows | `src_gui/main/main_win32.cpp`, `src_gui/platform/win32_gui.cpp` |
-| Linux | `src_gui/main/main_unix.cpp`、`src_gui/platform/gtk_gui.cpp`、`src_gui/core/gui_unix_shared.cpp` |
-| macOS | `src_gui/main/main_cocoa.mm`、`src_gui/platform/cocoa_gui.mm`、`src_gui/core/gui_unix_shared.cpp` |
+| Windows | `main/main_win32.cpp`、`platform/win32_gui.cpp`、`win32_gui.hpp`、`platform/win32_paths.*`、`platform/win32_window_placement.*`、`platform/win32_modal_file_dialog_center.*`、`resources/up_gui.rc`（路径前缀均为 `src_gui/`） |
+| Linux | `main/main_unix.cpp`、`platform/gtk_gui.cpp`、`gtk_gui.hpp`、`core/gui_persist.cpp`、`core/gui_persist.hpp` |
+| macOS | `main/main_cocoa.mm`、`platform/cocoa_gui.mm`、`cocoa_gui.hpp`、`core/gui_persist.cpp`、`core/gui_persist.hpp` |
 
 ## 与 `UP_ENABLE_REVERSE`
 
