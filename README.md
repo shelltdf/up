@@ -1,6 +1,6 @@
 # uni-package (up)
 
-**uni-package**（缩写 **`up`**）是一个面向「用数据结构驱动构建与包关系」的原型命令行工具：用 **`package.xml`** 与各目标子目录中的 **`target.xml`**（每目录至多一个）描述包与目标，`up` 负责扫描、生成 CMake 工程、构建、测试与运行。新手从零上手建议先读 **[doc/user-manual.md](doc/user-manual.md)**（中文）或 **[doc/user-manual.en.md](doc/user-manual.en.md)**（English）；`package.xml` / `target.xml` 的字段与解析约定见 **[doc/package-target-xml-spec.md](doc/package-target-xml-spec.md)**；设计背景与完整约定见 **[DESIGN.md](DESIGN.md)**，思维导图见 **[mindmap.mmd](mindmap.mmd)**。近期变更记录见 **[CHANGELOG.md](CHANGELOG.md)**。
+**uni-package**（缩写 **`up`**）是一个面向「用数据结构驱动构建与包关系」的原型命令行工具：用 **`package.xml`** 与各目标子目录中的 **`target.xml`**（每目录至多一个）描述包与目标，`up` 负责扫描、生成 CMake 工程、构建、测试与运行。**推荐**用户**纯手写**上述 XML（见 **`doc/zh/getting-started.md`**、**`doc/zh/package-target-xml-spec.md`** 文首）；**`up reverse`** 与 **`package.xml` 的 `<cmake/>`** 为**遗留/可选**，文档不再作为默认迁移手段。新手从零上手建议先读 **[doc/zh/getting-started.md](doc/zh/getting-started.md)**（分步教程）与 **[doc/zh/user-manual.md](doc/zh/user-manual.md)**（中文）、**[doc/en/user-manual.md](doc/en/user-manual.md)**（English）；`package.xml` / `target.xml` 的字段与解析约定见 **[doc/zh/package-target-xml-spec.md](doc/zh/package-target-xml-spec.md)**；**内置变量、`up_cache` 与 `UP_*` 键**见 **[doc/zh/internal-variables.md](doc/zh/internal-variables.md)**；**从最小包到 `when`/预处理/子工程**见 **[doc/zh/script-tutorial.md](doc/zh/script-tutorial.md)**；**脚本消息 `trigger` 总表与 Lua 绑定语义**见 **[doc/zh/script-messages.md](doc/zh/script-messages.md)**；`doc/` 双语索引见 **[doc/README.md](doc/README.md)**。设计背景与完整约定见 **[DESIGN.md](DESIGN.md)**，思维导图见 **[mindmap.mmd](mindmap.mmd)**。近期变更记录见 **[CHANGELOG.md](CHANGELOG.md)**。
 
 ## 依赖
 
@@ -23,7 +23,7 @@ cmake --build _build --config Release
 
 位于 `_build\Release\`（Windows + Release 示例）。MSVC 下工程启用 **静态 CRT**（`/MT`）与 **`/utf-8`**，与 [DESIGN.md](DESIGN.md) 中对 `up.exe` 的取向一致。
 
-可选：首次 `cmake` 时加上 **`-DUP_ENABLE_REVERSE=ON`** 以编译并启用 **`up reverse`** 子命令（以及 GUI 中对应能力）。默认 **OFF** 时执行 `up reverse` 会提示需重编译。旧子命令 **`project`** 与 **`--project-dir`** 已移除，请改用 **`reverse`** 与 **`--source-dir` / `-C`**（无别名兼容）。
+可选：首次 `cmake` 时加上 **`-DUP_ENABLE_REVERSE=ON`** 可编译出带 **`up reverse`** 子命令的宿主（**遗留**，用于对照旧工作流）。默认 **OFF** 时执行 `up reverse` 会提示需重编译。**产品方向**为手写 `package.xml` / `target.xml`，不必开启此项。
 
 也可用 Python 脚本（在仓库根目录）：
 
@@ -57,7 +57,7 @@ python package.py --with-dev
 | `up spec` | 向 stdout 输出内嵌的英文 `package.xml` / `target.xml` 规则说明（供工具/AI） |
 | `up list [--format tree\|json\|xml] [--xml <路径>] [--json <路径>] [--quiet]` | 输出当前 DOM 结构（默认 tree）；`--format` 控制 stdout 载荷；`--xml/--json` 导出文件；`--quiet` 抑制树形与导出提示。部分组合参数会给 warning 但不失败 |
 | `up print-build-dir-name [--build-dir-name <叶子>] [--opt ...]` | 打印当前配置对应的 **`<arch>`** 字符串（便于脚本传给 `run`/`test`/`pack` 的 `--install-dir-name`） |
-| `up reverse ...` | **仅当**构建时启用 **`-DUP_ENABLE_REVERSE=ON`**。探测现有工程并生成 `package.xml` / `target.xml`。CMake 默认写 `<cmake source_dir=\"...\"/>`，并尽量从 `install(TARGETS ...)` 自动生成 `.targets/` 下的 `imported_installed_*` 包装目标；在需要时还会尝试 **CMake File API**（需本机 `cmake` 能成功配置该工程）。若依赖未齐或不想跑配置，可加 **`--cmake-no-file-api`**，仅做安装规则扫描 + **CMakeLists 启发式扫描**（含对 `target_link_libraries` / `target_include_directories` 的尽力解析），精度低于 codemodel |
+| `up reverse ...` | **遗留**：**仅当**构建时启用 **`-DUP_ENABLE_REVERSE=ON`**。曾用于从 CMake 工程试探性生成 `package.xml` / `target.xml`。**不推荐**作为新项目入口；请优先手写 XML（见 **`doc/zh/package-target-xml-spec.md`** 文首）。 |
 
 无子命令或未知子命令时会打印简短用法。
 
@@ -95,48 +95,29 @@ $ARCH = .\_build\Release\up.exe print-build-dir-name
 
 若将 `up.exe` 加入 `PATH`，也可在 **`test_projects` 下某一子包目录**（例如 `test_projects\hello_demo`）内直接执行 `up configure`、`up build --build-dir-name default` 等（此时默认只扫描当前目录对应的那一个包）；`run`/`test`/`pack` 仍需带 **`--install-dir-name`**（一般为 **`up print-build-dir-name`** 的输出）。
 
-## 第三方 SDK 导入（zlib / FBX 风格最小流程）
+## 第三方 SDK 导入（手写 `package.xml` / `target.xml`）
 
-适用于“上游是 CMake 工程、你希望在 `up` 里把它当预编译库目标消费”的场景。
+适用于：上游是 CMake 或其它构建，你已在**包外**完成 **`install`**（或拿到官方预编译布局），希望在 `up` 里**显式**描述头文件与库路径。
 
-在 SDK 根目录执行：
+**推荐流程**：
 
-```powershell
-# 需要宿主 up 以 -DUP_ENABLE_REVERSE=ON 构建
-up reverse
-up configure
-$ARCH = up print-build-dir-name
-up build --build-dir-name default
-```
+1. 在包外对上游执行 **`cmake --install`**（或解压 SDK），得到确定的 `lib/`、`include/` 等目录。
+2. 在本仓库或你的工程里**手写** **`package.xml`**（包名、可选包级依赖）与 **`target.xml`**：用 **`imported_installed_*` + `<install artifact="..."/>`** 指向安装前缀下的 `.lib` / `.so`，或用 **`imported_*` + `<prebuilt>`** 指向 vendored 二进制；用 **`<headers>`** 暴露头文件。
+3. **`up configure --scan …`** → **`up build --build-dir-name …`**；`run` / `test` / `pack` 仍使用 **`--install-dir-name $ARCH`**（`$ARCH` 来自 **`up print-build-dir-name`** 或 **`up_cache.txt` 的 `arch=`**）。
 
-安装与运行仍使用 **`--install-dir-name $ARCH`**（或从 `.intermediate/build/default/up_cache.txt` 读取 `arch=`）。
+**`configure`** 仍会把本工作区 **`.intermediate/install/<arch>/`** 并入 **`CMAKE_PREFIX_PATH`**，并在多包场景下尽量为 **`find_package`** 推导常见缓存变量（若你仍在 CMake 聚合后端中消费上游 CMake 工程）。规则约束不变：**无**针对 zlib/FBX 等具体库名的内置特判，一切靠 XML 声明。
 
-默认行为（CMake 探测）：
-
-- `up reverse` 会生成 `package.xml`（含 `<cmake source_dir="..."/>`）
-- 并尽量按 `install(TARGETS ...)` 自动生成 `.targets/<name>/target.xml`
-- 自动目标类型为 `imported_installed_static_library` / `imported_installed_shared_library`
-- 包名默认优先取 `CMakeLists.txt` 里的 `project(...)`（可被 `--package-name` 覆盖）
-- `configure` 会把依赖包安装前缀并入 `CMAKE_PREFIX_PATH`，并在可推导时补充常见 `find_package` 缓存变量（如 `<PKG>_LIBRARY` / `<PKG>_LIBRARY_DEBUG` / `<PKG>_INCLUDE_DIR`）
-
-规则约束（重要）：
-
-- `up` / `up-gui` 是泛化规则引擎，不内置针对具体第三方代码库（库名、仓库名、目录布局）的特判逻辑。
-- 依赖关系、安装产物、头文件目录等差异化行为，必须通过 `package.xml` / `target.xml` 显式声明。
-- 当自动探测信息不足时，请手工补齐 `.targets/*/target.xml`、`<dependency .../>`、`<install artifact=\"...\" implib=\"...\"/>`、`<interface_include .../>` 等规则字段。
-
-最小示例（可手工补齐）：
+最小示例（**不含** **`<cmake/>`**；`artifact` 相对安装前缀）：
 
 ```xml
 <!-- package.xml -->
 <package name="zlib" version="0.1.0">
-  <cmake source_dir="."/>
   <dependency name="openssl" optional="true"/>
 </package>
 ```
 
 ```xml
-<!-- .targets/zlibstatic/target.xml -->
+<!-- 例如 zlibstatic/target.xml -->
 <target name="zlibstatic" type="imported_installed_static_library">
   <install artifact="lib/zlibstatic.lib"/>
   <interface_include dir="include"/>
@@ -161,8 +142,8 @@ up build --build-dir-name default
 
 - 纯库包（没有 executable）也支持 `configure/build`
 - Windows 下依赖库变量优先使用 `implib` / `.lib`，避免将 `.dll` 误传给链接器
-- 若 `install(TARGETS ...)` 解析不到可包装库，只会生成 `package.xml`，此时可手工补 `.targets/*/target.xml`
-- 在 **`target.xml`** 里写目标级依赖时，CMake 后端可选 **`visibility="private|public|interface"`**（默认 `private`，对应 `target_link_libraries` 的可见性）；**可执行目标**不得对依赖使用 **`interface`**。完整语法与 `when` 适用范围以 **`up spec`** 与 **`doc/package-target-xml-spec.md`** 为准。
+- 若安装布局与上游 CMake 不一致，请在 **`target.xml`** 中核对 **`artifact` / `implib` / `<headers>`** 路径
+- 在 **`target.xml`** 里写目标级依赖时，CMake 后端可选 **`visibility="private|public|interface"`**（默认 `private`，对应 `target_link_libraries` 的可见性）；**可执行目标**不得对依赖使用 **`interface`**。完整语法与 `when` 适用范围以 **`up spec`** 与 **`doc/zh/package-target-xml-spec.md`** 为准。
 
 ## 工作目录约定（相对于执行 `up` 时的 cwd）
 
@@ -174,7 +155,7 @@ up build --build-dir-name default
 
 `<arch>` 当前按组合信息生成（如 `windows_x86_64_cmake_msvc_dynamic_release` 或 `windows_x86_64_ninja_msvc_dynamic_release`），来源于 `UP_TARGET_*` 配置与主机工具链探测。中间目录名 **`.intermediate`** 与 [mindmap.mmd](mindmap.mmd) 一致，建议加入 `.gitignore`。
 
-**并行编译（加速 `up build`）**：`cmake --build` 与 `ninja install` 会带上并行度；**默认并行度**按本机**当前可见的逻辑处理器数**（Windows：`GetActiveProcessorCount` / `GetNativeSystemInfo`；Linux：`sysconf(_SC_NPROCESSORS_ONLN)`；macOS：`sysctl`；再回退 `std::thread::hardware_concurrency()`，仍未知则用 4），并写入 **`up_cache.txt`** 的 **`UP_BUILD_PARALLEL`** 与 **`UP_BUILD_JOBS`**（二者同值，与 ninja `-j` / cmake `--parallel` 一致；仍可在命令行只改其一）。可用 `up configure --opt UP_BUILD_PARALLEL=16` 覆盖；**不再读取** `CMAKE_BUILD_PARALLEL_LEVEL` 等环境变量。含 `<cmake/>` 子工程时，生成根 `CMakeLists.txt` 里 **ExternalProject** 的 `BUILD_COMMAND` 会在 **configure 当刻** 按当前选项把并行数写进脚本；若要改子工程并行度需重新 `configure`。
+**并行编译（加速 `up build`）**：`cmake --build` 与 `ninja install` 会带上并行度；**默认并行度**按本机**当前可见的逻辑处理器数**（Windows：`GetActiveProcessorCount` / `GetNativeSystemInfo`；Linux：`sysconf(_SC_NPROCESSORS_ONLN)`；macOS：`sysctl`；再回退 `std::thread::hardware_concurrency()`，仍未知则用 4），并写入 **`up_cache.txt`** 的 **`UP_BUILD_PARALLEL`** 与 **`UP_BUILD_JOBS`**（二者同值，与 ninja `-j` / cmake `--parallel` 一致；仍可在命令行只改其一）。可用 `up configure --opt UP_BUILD_PARALLEL=16` 覆盖；**不再读取** `CMAKE_BUILD_PARALLEL_LEVEL` 等环境变量。若包内仍含**遗留** **`<cmake/>`** 子工程，生成根 `CMakeLists.txt` 里 **ExternalProject** 的 `BUILD_COMMAND` 会在 **configure 当刻** 按当前选项把并行数写进脚本；若要改子工程并行度需重新 `configure`。
 
 ## 仓库结构（摘要）
 
@@ -185,13 +166,13 @@ up build --build-dir-name default
 ├── package.py          # 将 up / up-gui 打成 zip 或 tar.gz
 ├── DESIGN.md           # 设计文档
 ├── ai-software-engineering/  # 四阶段工程文档（概念/逻辑/物理/运维），与实现同步维护
-├── doc/                # 补充规范（如 XML 描述文件）
+├── doc/                # 用户手册、XML 规范、变量总览、脚本教程等（见 doc/README.md）
 ├── README.md           # 本文件
 ├── mindmap.mmd         # 设计思维导图
 ├── src/
 │   ├── exe/            # up.exe 入口（main 与命令分发）
 │   └── lib/            # up.lib 实现（engine + infra）
-├── src_gui/            # up-gui 外壳（Windows: main/main_win32 + platform/win32_*；Linux/macOS: main + platform + core/gui_persist）
+├── src_gui/            # up-gui 外壳（platform/win32|gtk|cocoa/ 三子目录 + core/；各平台 main 见 main/main_*）
 └── test_projects/      # 测试包集合（每子目录一包）
 ```
 

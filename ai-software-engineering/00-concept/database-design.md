@@ -15,4 +15,4 @@
 
 ## 其它
 
-包描述 **`package.xml` / `target.xml`** 为源码树内的人类可编辑数据，不归档为「数据库表」，字段级约定见 `doc/package-target-xml-spec.md` 与 `02-physical` 各目标规格中的引用。
+包描述 **`package.xml` / `target.xml`** 为源码树内的人类可编辑数据，不归档为「数据库表」，字段级约定见 **`doc/zh/package-target-xml-spec.md`** 与 `02-physical` 各目标规格中的引用（索引导航见 **`doc/README.md`**）。

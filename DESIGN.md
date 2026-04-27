@@ -52,9 +52,9 @@
 | `run` | 运行已编译完成的目标（如 `exe`）。 |
 | `test` | 运行单元测试；**无参数时运行全部**测试。 |
 | `pack` | 将编译结果打包为目标形态（安装程序、apk 等，依后端而定）。 |
-| `reverse` | 将当前 **cwd** 中已有代码工程**升级/迁移**为 `package.xml` 与各目标子目录下的 `target.xml` 描述（逆向生成规则）。 |
+| `reverse` | **遗留/可选**：从 **cwd** 中已有 CMake 等工程**试探性**生成 `package.xml` / `target.xml`（需 **`UP_ENABLE_REVERSE=ON`** 构建宿主）。**产品方向**为**纯手写** XML，见 **`doc/zh/package-target-xml-spec.md`** 文首；本命令不作为新项目的推荐入口。 |
 
-**CMake 脚手架与 `--cmake-no-file-api`：** 默认在需要时会跑一次 **`cmake` 配置**以读取 **CMake File API（codemodel）**，精度高但要求当时环境下 `find_package` / 子工程路径等足以让该次 configure 成功。`--cmake-no-file-api` 会**跳过**该子进程，仅依赖安装规则文本扫描与 **CMakeLists 启发式源码扫描**（含对 `target_link_libraries` / `target_include_directories` 的尽力解析），适合依赖尚未就绪或无法提供前缀路径的仓库；结果可能不完整，需人工核对。
+**`reverse` 与 CMake File API（遗留）：** 若仍启用 **`up reverse`**，默认可能调用 **`cmake`** 读取 **File API（codemodel）**；`--cmake-no-file-api` 会跳过该子进程，仅做安装规则与 **CMakeLists** 启发式扫描，结果常不完整。**不推荐**依赖此路径做工程迁移。
 
 ### 2.1 configure 要点
 
@@ -72,7 +72,7 @@
 
 ## 3. 包文件设计
 
-细则见 **[doc/package-target-xml-spec.md](doc/package-target-xml-spec.md)**。
+细则见 **[doc/zh/package-target-xml-spec.md](doc/zh/package-target-xml-spec.md)**。
 
 ### 3.1 package.xml
 
@@ -83,7 +83,7 @@
 
 - 文件名固定为 **`target.xml`**；**同一目录下不得出现多个** target 描述文件，多目标通过**不同子目录**各放一份 `target.xml` 解决。
 - 每个文件内**只包含一个根 `<target>` 元素**。`<sources>` 中的路径相对于**该 `target.xml` 所在目录**。
-- 承载：目标名、类型（`executable` / `static_library` / `shared_library`）、源文件列表、可选 **`<headers>`**（头文件来源与安装到 `include/` 的布局）、可选 **`<dependency name="..." visibility="..."/>`**（`visibility` 可选，默认 **`private`**，取值 **`private` / `public` / `interface`**，对应 CMake `target_link_libraries` 的可见性；**可执行目标**不得对依赖使用 **`interface`**，否则 configure 失败）。库与库之间**当前不**生成链式 `target_link_libraries`（由最终可执行文件等消费方链接）。**`<sources>` / `<headers>`** 等条目上的 **`when`** 与变量合并细则见 **[doc/package-target-xml-spec.md](doc/package-target-xml-spec.md)**（与 **`up spec`** 输出一致者优先）。
+- 承载：目标名、类型（`executable` / `static_library` / `shared_library`）、源文件列表、可选 **`<headers>`**（头文件来源与安装到 `include/` 的布局）、可选 **`<dependency name="..." visibility="..."/>`**（`visibility` 可选，默认 **`private`**，取值 **`private` / `public` / `interface`**，对应 CMake `target_link_libraries` 的可见性；**可执行目标**不得对依赖使用 **`interface`**，否则 configure 失败）。库与库之间**当前不**生成链式 `target_link_libraries`（由最终可执行文件等消费方链接）。**`<sources>` / `<headers>`** 等条目上的 **`when`** 与变量合并细则见 **[doc/zh/package-target-xml-spec.md](doc/zh/package-target-xml-spec.md)**（与 **`up spec`** 输出一致者优先）。
 - 与父 `package.xml` 的归属关系由目录树表达（`target.xml` 须位于对应 `package.xml` 之下的子树中）。
 
 ### 3.3 最小示例与仓库布局
@@ -128,7 +128,7 @@
 | 阶段 | 内容 |
 |------|------|
 | P0 | CLI 子命令骨架、`.intermediate` 目录约定、`package.xml` / 子目录 `target.xml` 最小解析、configure 生成 CMake、build 调用 cmake、test 调用 ctest。 |
-| P1 | 多包依赖图、完整 **arch** 元组、缓存文件、路径校验与 i18n 文案、`reverse`（逆向）迁移向导。 |
+| P1 | 多包依赖图、完整 **arch** 元组、缓存文件、路径校验与 i18n 文案；**`reverse` 仅作遗留能力**，迁移以**手写** `package.xml` / `target.xml` 为主（见 `doc/zh/getting-started.md`）。 |
 | P2 | Ninja/sln 生成器、元工具链插件、moc/uic 类管线。 |
 | P3 | `up-gui.exe`、pack 多形态、模板市场/用户模板。 |
 

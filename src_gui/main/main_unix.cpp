@@ -1,4 +1,4 @@
-﻿#include "platform/gtk_gui.hpp"
+#include "platform/gtk/gtk_gui.hpp"
 
 int main(int argc, char** argv) {
   return up::gui::platform::gtk::run(argc, argv);

@@ -15,9 +15,9 @@
 | [hello_data_files/](hello_data_files/) | 演示 `xml/json/svg` 数据文件随安装产物落盘并由可执行程序启动加载。 |
 | [meta_codegen/](meta_codegen/) | 演示 `moc/uic/rc` 风格代码生成工具：`.h -> .meta.cpp`、`.ui -> .h+.cpp`、`.rc -> .h+.cpp`。 |
 | [plugin_runtime/](plugin_runtime/) | 演示插件共享库动态加载：默认导出 `init/update/shutdown/info` 并由测试程序运行。 |
-| [native_cmake_vendor/](native_cmake_vendor/) | 演示 `package.xml` 中 **`<cmake source_dir="..."/>`**：上游子目录由 `ExternalProject` 构建安装后再编本包可执行文件。 |
+| [native_cmake_vendor/](native_cmake_vendor/) | **遗留实现回归**：`package.xml` 中 **`<cmake source_dir="..."/>`** + `ExternalProject`；**非**产品推荐路径（见 `doc/zh/package-target-xml-spec.md` 文首）。 |
 | [prebuilt_static_stub/](prebuilt_static_stub/) | 演示 **`imported_static_library`** + **`<prebuilt import_lib="..."/>`**：链入预编译的 `stub_import.lib`（Windows MSVC x64 已提交 `lib/import/`；可再用 `lib/CMakeLists.txt` 重生）。 |
-| third-party CMake SDK（外部目录） | 对第三方目录（如 zlib/FBX）直接执行 `up reverse`，默认会生成 `<cmake/>` 与 `.targets/<name>/target.xml`（`imported_installed_*` 包装目标）；详见 [`README.md`](../README.md) 与 [`doc/user-manual.md`](../doc/user-manual.md)。 |
+| third-party CMake SDK（外部目录） | **推荐**：包外 `cmake --install` 后**手写** `imported_installed_*` / `imported_*`（见 [`doc/zh/getting-started.md`](../doc/zh/getting-started.md)）。**遗留** `up reverse` 行为见 [`doc/zh/package-target-xml-spec.md`](../doc/zh/package-target-xml-spec.md) §11。 |
 
 ### 包依赖关系
 
@@ -52,7 +52,7 @@ flowchart LR
 - `prebuilt_static_stub`：无包级依赖（预编译静态库导入示例）。
 - `third_party_cmake_sdk`（external）：外部目录示例节点，不属于仓库内 `test_projects/` 子目录；实际依赖关系取决于被导入 SDK 的 `package.xml/target.xml`。
 
-补充：当前实现支持“纯库包”配置/构建（无需 executable）。因此第三方 SDK 包装场景可只含 `.targets/*/target.xml`。
+补充：当前实现支持“纯库包”配置/构建（无需 executable）。第三方 SDK 也可完全由手写 **`target.xml`**（含 `imported_*`）描述，不必生成 `.targets/` 目录。
 
 ## 规则化约束（重要）
 
@@ -63,7 +63,7 @@ flowchart LR
 
 1. `package.xml`
    - 声明包级依赖：`<dependency name="..."/>`
-   - 若使用上游 CMake 子工程：`<cmake source_dir="..."/>`
+   - **不推荐**包级 **`<cmake source_dir="..."/>`**；优先包外安装上游后再在本包 `target.xml` 声明产物（**遗留**场景仍见 `native_cmake_vendor`）。
 2. `target.xml`
    - 预编译库：使用 `imported_static_library` / `imported_shared_library` + `<prebuilt .../>`
    - 上游安装产物包装：使用 `imported_installed_static_library` / `imported_installed_shared_library` + `<install artifact="..."/>`
@@ -72,7 +72,7 @@ flowchart LR
 3. 依赖引用
    - 包内：`<dependency name="myLib"/>`
    - 跨包：`<dependency name="otherPkg:otherLib"/>`
-   - CMake 后端可选 **`visibility="private|public|interface"`**（默认 `private`）；可执行目标不得使用 `interface`。细则见 **`up spec`** 与 `doc/package-target-xml-spec.md`。
+   - CMake 后端可选 **`visibility="private|public|interface"`**（默认 `private`）；可执行目标不得使用 `interface`。细则见 **`up spec`** 与 `doc/zh/package-target-xml-spec.md`。
 
 ---
 

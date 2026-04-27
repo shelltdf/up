@@ -1,5 +1,6 @@
 # up-gui: thin shell around up.exe — MUST NOT compile, include, or link any file under src/.
 # Only paths under src_gui/ are allowed as up-gui sources (enforced below).
+# Platform UI sources live only under platform/win32/, platform/gtk/, platform/cocoa/ (see platform/README.md).
 set(UP_GUI_CORE_SOURCES
   core/gui_core_actions.cpp
   core/gui_persist.cpp
@@ -8,37 +9,37 @@ set(UP_GUI_CORE_SOURCES
 if(WIN32)
   set(UP_GUI_PLATFORM_SOURCES
     main/main_win32.cpp
-    platform/win32_encoding.cpp
-    platform/win32_fsutil.cpp
-    platform/win32_gui.cpp
-    platform/win32_modal_file_dialog_center.cpp
-    platform/win32_paths.cpp
-    platform/win32_run_process.cpp
-    platform/win32_text_util.cpp
-    platform/win32_window_placement.cpp
+    platform/win32/win32_encoding.cpp
+    platform/win32/win32_fsutil.cpp
+    platform/win32/win32_gui.cpp
+    platform/win32/win32_modal_file_dialog_center.cpp
+    platform/win32/win32_paths.cpp
+    platform/win32/win32_run_process.cpp
+    platform/win32/win32_text_util.cpp
+    platform/win32/win32_window_placement.cpp
     resources/up_gui.rc
   )
 elseif(APPLE)
   set(UP_GUI_PLATFORM_SOURCES
     main/main_cocoa.mm
-    platform/cocoa_gui.mm
-    platform/cocoa_gui_bridge.mm
-    platform/cocoa_gui_handlers.mm
-    platform/cocoa_gui_log.mm
-    platform/cocoa_gui_state.mm
-    platform/cocoa_gui_string.mm
-    platform/cocoa_gui_window.mm
+    platform/cocoa/cocoa_gui.mm
+    platform/cocoa/cocoa_gui_bridge.mm
+    platform/cocoa/cocoa_gui_handlers.mm
+    platform/cocoa/cocoa_gui_log.mm
+    platform/cocoa/cocoa_gui_state.mm
+    platform/cocoa/cocoa_gui_string.mm
+    platform/cocoa/cocoa_gui_window.mm
   )
 else()
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
   set(UP_GUI_PLATFORM_SOURCES
     main/main_unix.cpp
-    platform/gtk_gui.cpp
-    platform/gtk_gui_handlers.cpp
-    platform/gtk_gui_log.cpp
-    platform/gtk_gui_state.cpp
-    platform/gtk_gui_window.cpp
+    platform/gtk/gtk_gui.cpp
+    platform/gtk/gtk_gui_handlers.cpp
+    platform/gtk/gtk_gui_log.cpp
+    platform/gtk/gtk_gui_state.cpp
+    platform/gtk/gtk_gui_window.cpp
   )
 endif()
 set(UP_GUI_ALL_SOURCES ${UP_GUI_PLATFORM_SOURCES} ${UP_GUI_CORE_SOURCES})

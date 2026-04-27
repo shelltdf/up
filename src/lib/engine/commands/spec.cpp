@@ -6,7 +6,7 @@ namespace up {
 
 namespace {
 
-// English-only: embedded copy of rules aligned with doc/package-target-xml-spec.md for AI/tools without repo .md.
+// English-only: embedded copy of rules aligned with doc/zh/package-target-xml-spec.md for AI/tools without repo .md.
 // Split into named chunks: MSVC ~16kB string literal limit; edit the slice you need.
 constexpr const char* kXmlSpecEnThroughSection3 =
   R"SPEC(UP_XML_SPEC_REVISION=16

@@ -9,4 +9,4 @@
 | [database-design.md](database-design.md) | 持久化/缓存类数据（文件态） |
 | [interface-design.md](interface-design.md) | 程序间接口：CLI 约定、环境变量（不含 GUI 控件细节） |
 
-实现与运维细则见 `01-logic/`、`02-physical/`、`03-ops/`；用户可读长文仍以仓库根 `doc/user-manual*.md` 与 `README.md` 为准（与本阶段交叉引用）。
+实现与运维细则见 `01-logic/`、`02-physical/`、`03-ops/`；用户可读长文以 **`doc/zh/`** 下手册与教程**正文**为准，索引导航见 **`doc/README.md`**；总览仍以仓库根 **`README.md`** 为准（与本阶段交叉引用）。

@@ -22,5 +22,5 @@
 
 ## 相关资产
 
-- 详细工作流与 FAQ：`doc/user-manual.md`（中文）、`doc/user-manual.en.md`（英文）。
+- 详细工作流与 FAQ：`doc/zh/user-manual.md`（中文）、`doc/en/user-manual.md`（英文）；索引 **`doc/README.md`**。
 - 设计背景：`DESIGN.md`、`mindmap.mmd`。

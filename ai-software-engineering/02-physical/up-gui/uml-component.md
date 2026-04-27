@@ -9,7 +9,7 @@ flowchart TB
     OsQueue[gui_os_queue\nLogSink / UiTask 类型约定]
   end
 
-  subgraph Win32["platform / Win32"]
+  subgraph Win32["platform/win32/"]
     WMain[win32_gui.cpp\n消息循环与主窗]
     WIds[win32_gui_ids.hpp\n控件/菜单/WM 常量]
     WRunProc[win32_run_process\nstdout 行分块]
@@ -21,7 +21,7 @@ flowchart TB
   WRunProc --> WEnc[win32_encoding]
   WMain --> WPaths
 
-  subgraph Gtk["platform / GTK3"]
+  subgraph Gtk["platform/gtk/"]
     GRun[gtk_gui.cpp]
     GWin[gtk_gui_window]
     GHandlers[gtk_gui_handlers]
@@ -29,7 +29,7 @@ flowchart TB
     GState[gtk_gui_state]
   end
 
-  subgraph Cocoa["platform / Cocoa"]
+  subgraph Cocoa["platform/cocoa/"]
     CRun[cocoa_gui.mm]
     CWin[cocoa_gui_window]
     CH[cocoa_gui_handlers]

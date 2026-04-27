@@ -23,5 +23,5 @@ $ARCH = .\_build\Release\up.exe print-build-dir-name
 
 ## 延伸阅读
 
-- 图文版手册：`doc/user-manual.md`（中文）、`doc/user-manual.en.md`（英文）。
+- 图文版手册：**正文** `doc/zh/user-manual.md`（中文）、`doc/en/user-manual.md`（英文）；索引 **`doc/README.md`**。
 - 设计背景：`DESIGN.md`。
