@@ -980,7 +980,7 @@ int cmd_configure(const std::filesystem::path& cwd,
   dom_opt.cwd = cwd;
   dom_opt.package_files = package_files;
   dom_opt.target_files = target_files;
-  if (!build_dom_document(dom_opt, dom, dom_err)) {
+  if (!DomDocument::build(dom_opt, dom, dom_err)) {
     std::cerr << "configure: " << dom_err << "\n";
     return 3;
   }
@@ -988,7 +988,7 @@ int cmd_configure(const std::filesystem::path& cwd,
   std::vector<std::pair<std::filesystem::path, PackageDesc>> loaded_packages;
   std::map<std::string, std::filesystem::path> package_name_to_dir;
   std::map<std::string, PackageDesc> package_name_to_desc;
-  for (const auto& kv : dom.package_by_name) {
+  for (const auto& kv : dom.packages_by_name()) {
     const auto* pkg_node = kv.second;
     if (!pkg_node)
       continue;
@@ -1009,7 +1009,7 @@ int cmd_configure(const std::filesystem::path& cwd,
 
   std::vector<LoadedTarget> all_targets;
   std::map<std::string, size_t> target_index;  // package:target -> all_targets idx
-  for (const auto& kv : dom.package_by_name) {
+  for (const auto& kv : dom.packages_by_name()) {
     const auto* pkg_node = kv.second;
     if (!pkg_node)
       continue;
@@ -1040,7 +1040,7 @@ int cmd_configure(const std::filesystem::path& cwd,
   cli_verbose_phase("configure", "targets_bound");
 
   std::cout << "Package / target graph (DOM):\n";
-  print_dom_tree(dom, std::cout);
+  dom.print_tree(std::cout);
   cli_verbose_phase("configure", "graph_summary");
 
   const std::string host_arch = detect_arch_tag();
@@ -1325,8 +1325,8 @@ int cmd_configure(const std::filesystem::path& cwd,
                             pkg_vars, lt.desc.vars);
   };
   auto find_target_node = [&](const LoadedTarget& lt) -> const DomNode* {
-    const auto pit = dom.package_by_name.find(lt.package_name);
-    if (pit == dom.package_by_name.end() || !pit->second)
+    const auto pit = dom.packages_by_name().find(lt.package_name);
+    if (pit == dom.packages_by_name().end() || !pit->second)
       return nullptr;
     const auto* pkg = pit->second;
     for (const auto& child : pkg->children) {

@@ -16,7 +16,15 @@ set(UP_LIB_SOURCES
   infra/platform/path_check.cpp
   engine/xml/simple_xml.cpp
   engine/xml/var_subst.cpp
-  engine/dom/dom_model.cpp
+  engine/dom/dom_node_visitor.cpp
+  engine/dom/dom_document.cpp
+  engine/dom/script_execution.cpp
+  engine/dom/dom_types.hpp
+  engine/dom/dom_vars.hpp
+  engine/dom/dom_nodes.hpp
+  engine/dom/dom_node_visitor.hpp
+  engine/dom/dom_document.hpp
+  engine/dom/script_execution.hpp
   infra/platform/paths.cpp
   engine/commands/build.hpp
   engine/commands/configure.hpp

@@ -434,7 +434,7 @@ optional `when`), `<assets>` (same `from` / `to` / preprocess / postprocess patt
 
 | Topic | Source |
 |-------|--------|
-| DOM model / script execution context | src/lib/engine/dom/dom_model.hpp / src/lib/engine/dom/dom_model.cpp |
+| DOM model / script execution context | src/lib/engine/dom/dom_model.hpp (umbrella), dom_nodes.hpp, dom_node_visitor.{hpp,cpp}, dom_document.{hpp,cpp}, script_execution.{hpp,cpp} |
 | Load/parse XML | src/lib/engine/xml/simple_xml.cpp |
 | Types | src/lib/engine/xml/simple_xml.hpp (`PackageDesc`, `TargetDesc`, `ConfigFileEntry`, `DefineEntry`) |
 | Configure validation / graph | src/lib/engine/commands/configure.cpp |

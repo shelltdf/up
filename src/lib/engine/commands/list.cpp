@@ -135,7 +135,7 @@ int cmd_list(const std::filesystem::path& cwd, const std::vector<std::string>& a
   opt.cwd = cwd;
   opt.package_files = std::move(package_files);
   opt.target_files = std::move(target_files);
-  if (!build_dom_document(opt, doc, err)) {
+  if (!DomDocument::build(opt, doc, err)) {
     std::cerr << "list: " << err << "\n";
     return 3;
   }
@@ -144,11 +144,11 @@ int cmd_list(const std::filesystem::path& cwd, const std::vector<std::string>& a
   const bool stdout_xml = format == "xml";
   const bool stdout_tree = !stdout_json && !stdout_xml;
   if (stdout_tree && !quiet)
-    print_dom_tree(doc, std::cout);
+    doc.print_tree(std::cout);
   if (!xml_out.empty()) {
     if (xml_out.is_relative())
       xml_out = std::filesystem::absolute(cwd / xml_out).lexically_normal();
-    if (!write_dom_as_xml_file(doc, xml_out, err)) {
+    if (!doc.write_xml_file(xml_out, err)) {
       std::cerr << "list: " << err << "\n";
       return 4;
     }
@@ -158,7 +158,7 @@ int cmd_list(const std::filesystem::path& cwd, const std::vector<std::string>& a
   if (!json_out.empty()) {
     if (json_out.is_relative())
       json_out = std::filesystem::absolute(cwd / json_out).lexically_normal();
-    if (!write_dom_as_json_file(doc, json_out, err)) {
+    if (!doc.write_json_file(json_out, err)) {
       std::cerr << "list: " << err << "\n";
       return 4;
     }
@@ -166,13 +166,13 @@ int cmd_list(const std::filesystem::path& cwd, const std::vector<std::string>& a
       std::cout << "dom json exported: " << to_posix_path_string(json_out) << "\n";
   }
   if (stdout_json) {
-    if (!write_dom_as_json(doc, std::cout)) {
+    if (!doc.write_json(std::cout)) {
       std::cerr << "list: failed to print dom json\n";
       return 4;
     }
   }
   if (stdout_xml && !quiet) {
-    if (!write_dom_as_xml(doc, std::cout)) {
+    if (!doc.write_xml(std::cout)) {
       std::cerr << "list: failed to print dom xml\n";
       return 4;
     }
