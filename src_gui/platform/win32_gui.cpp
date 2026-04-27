@@ -5490,7 +5490,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 }  // namespace
 
-int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int show) {
+namespace up::gui::platform::win32 {
+
+int run(HINSTANCE hi, int show) {
   HRESULT hrCo = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
   (void)hrCo;
 
@@ -5533,3 +5535,5 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int show) {
   CoUninitialize();
   return static_cast<int>(msg.wParam);
 }
+
+}  // namespace up::gui::platform::win32

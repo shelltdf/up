@@ -9,7 +9,7 @@
 
 | 平台 | 主要文件 |
 |------|-----------|
-| Windows | `src_gui/up_gui_win32.cpp` |
+| Windows | `src_gui/main/main_win32.cpp`, `src_gui/platform/win32_gui.cpp` |
 | Linux | `src_gui/main/main_unix.cpp`、`src_gui/platform/gtk_gui.cpp`、`src_gui/core/gui_unix_shared.cpp` |
 | macOS | `src_gui/main/main_cocoa.mm`、`src_gui/platform/cocoa_gui.mm`、`src_gui/core/gui_unix_shared.cpp` |
 

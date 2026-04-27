@@ -4,7 +4,11 @@ set(UP_GUI_CORE_SOURCES
   core/gui_core_actions.cpp
 )
 if(WIN32)
-  set(UP_GUI_PLATFORM_SOURCES up_gui_win32.cpp resources/up_gui.rc)
+  set(UP_GUI_PLATFORM_SOURCES
+    main/main_win32.cpp
+    platform/win32_gui.cpp
+    resources/up_gui.rc
+  )
 elseif(APPLE)
   set(UP_GUI_PLATFORM_SOURCES
     main/main_cocoa.mm

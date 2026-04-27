@@ -191,7 +191,7 @@ up build --build-dir-name default
 ├── src/
 │   ├── exe/            # up.exe 入口（main 与命令分发）
 │   └── lib/            # up.lib 实现（engine + infra）
-├── src_gui/            # up-gui 外壳（Windows: up_gui_win32.cpp；Linux: GTK3；macOS: Cocoa；共享 gui_unix_shared）
+├── src_gui/            # up-gui 外壳（Windows: main/main_win32.cpp + platform/win32_gui.cpp；Linux: GTK3；macOS: Cocoa；共享 gui_unix_shared）
 └── test_projects/      # 测试包集合（每子目录一包）
 ```
 
