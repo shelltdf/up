@@ -1,4 +1,4 @@
----
+﻿---
 description: 初始化项目、补齐 ai-software-engineering 四阶段目录、只增不改；口令「初始化」或编辑文档结构时适用。
 globs: "**/ai-software-engineering/**"
 alwaysApply: false

@@ -1,8 +1,8 @@
-# 脚本与构建流程范例教程
+﻿# 脚本与构建流程范例教程
 
 > **文档索引**（`doc/zh` / `doc/en` 全部入口表）：[`../README.md`](../README.md)
 
-从「最小可运行包」到「条件源文件、自定义变量、复杂预处理/子工程」。**从零按步扩展**见 **`getting-started.md`**。**命令与路径**以仓库 `README.md` / **`user-manual.md`** 为准；**XML 细节**以 **`package-target-xml-spec.md`** 与 **`up spec`** 为准。
+从「最小可运行包」到「条件源文件、自定义变量、复杂预处理/子工程」。**从零按步扩展**见 **`getting-started.md`**。**命令与路径**以仓库 `README.md` / **`user-manual.md`** 为准；**XML 细节**以 **`package-target-xml-spec.md`** 与 **`gz spec`** 为准。
 
 ---
 
@@ -38,16 +38,16 @@
 在**包树根的上一级**（或任意 cwd，用 `--scan` 指到含 `package.xml` 的目录）执行：
 
 ```bash
-up configure
-up build --build-dir-name default
-up print-build-dir-name --build-dir-name default
-up run --install-dir-name <上一步输出的 arch 目录名> hello
+gz configure
+gz build --build-dir-name default
+gz print-build-dir-name --build-dir-name default
+gz run --install-dir-name <上一步输出的 arch 目录名> hello
 ```
 
 要点：
 
 - **`build`** 必须带 **`--build-dir-name`**，与 configure 使用的叶子名一致。  
-- **`run` / `test` / `pack`** 必须带 **`--install-dir-name`**，值为 **`.intermediate/install/` 下子目录名**，通常等于 **`up_cache.txt` 的 `arch=`** 或 **`up print-build-dir-name`** 的结果（**不是**构建叶子 `default` 本身）。
+- **`run` / `test` / `pack`** 必须带 **`--install-dir-name`**，值为 **`.intermediate/install/` 下子目录名**，通常等于 **`gz_cache.txt` 的 `arch=`** 或 **`gz print-build-dir-name`** 的结果（**不是**构建叶子 `default` 本身）。
 
 ---
 
@@ -60,7 +60,7 @@ up run --install-dir-name <上一步输出的 arch 目录名> hello
 ```xml
 <sources>
   <file from="main.cpp"/>
-  <file from="win_only.cpp" when="UP_OS==windows"/>
+  <file from="win_only.cpp" when="GZ_OS==windows"/>
 </sources>
 ```
 
@@ -96,10 +96,10 @@ up run --install-dir-name <上一步输出的 arch 目录名> hello
 ### 3.2 在 configure 时覆盖
 
 ```bash
-up configure --opt MY_REV=rc2
+gz configure --opt MY_REV=rc2
 ```
 
-或在 **`up_cache.txt`** 中增加一行 `MY_REV=rc2` 后再次 **configure**（注意合并顺序：**命令行与缓存后写覆盖**）。
+或在 **`gz_cache.txt`** 中增加一行 `MY_REV=rc2` 后再次 **configure**（注意合并顺序：**命令行与缓存后写覆盖**）。
 
 ### 3.3 在生成的头 / 源模板里使用
 
@@ -134,7 +134,7 @@ up configure --opt MY_REV=rc2
 
 **头文件 / 安装规则** 侧也有类似的 **`<headers>` … preprocess/postprocess** 与 **资源** 侧规则，见 `simple_xml.cpp` 解析与 `cmake_backend.cpp` / `ninja_backend.cpp` 生成逻辑。
 
-**与「消息 / 元编程挂钩」的对应关系**：合法 **`trigger`**、是否在 **configure** 派发、与 **`<preprocess>`** 优先级、包/目标 **Dom 继承**，见 **`script-messages.md`**（实现见 `src/lib/engine/dom/script_execution.cpp`）。
+**与「消息 / 元编程挂钩」的对应关系**：合法 **`trigger`**、是否在 **configure** 派发、与 **`<preprocess>`** 优先级、包/目标 **Dom 继承**，见 **`script-messages.md`**（实现见 `GroundZero/lib/engine/dom/script_execution.cpp`）。
 
 XML 里写了 **`command="..."`** 时，该字符串即最终交给后端的命令；**未写** `command` 时，configure 会尝试用同 trigger 的 **`<var type="script" … value="..."/>`** 的 **`value` 整段**作为命令（`resolve_script_command`：**有 XML 命令则不再合并脚本 var**）。当前仓库实现**不会**对 `value` 跑 Lua 虚拟机，名称里的 `script_type="lua"` 仅作类型筛选；要接 **moc/uic/rcc** 等外部程序，应把可执行命令行写在 **`preprocess command=`** 或上述 **`value`** 中。
 
@@ -155,8 +155,8 @@ XML 里写了 **`command="..."`** 时，该字符串即最终交给后端的命�
 ## 6. 调试变量合并结果
 
 - 每次 configure 后在 **`.intermediate/build/<叶子>/packages.md`** 查看包/目标及 **`<vars>` 与选项覆盖** 的摘要。  
-- 直接阅读 **`up_cache.txt`** 核对最终写入的 **`UP_*` 与自定义键**。  
-- 使用 **`up configure --verbose`**（或 **`UP_VERBOSE=1`**）查看阶段日志。
+- 直接阅读 **`gz_cache.txt`** 核对最终写入的 **`GZ_*` 与自定义键**。  
+- 使用 **`gz configure --verbose`**（或 **`GZ_VERBOSE=1`**）查看阶段日志。
 
 ---
 
@@ -227,7 +227,7 @@ XML 里写了 **`command="..."`** 时，该字符串即最终交给后端的命�
 ### 7.6 后端差异（务必读）
 
 - **Ninja**：对每个带 `preprocess` 的源，在编译该 `.o` 前生成 **stamp**，命令串来自 §4；**可执行目标与库目标行为一致**。
-- **CMake**（`src/lib/engine/backends/cmake/cmake_backend.cpp`）：当前仅为 **`static_library` / `shared_library`** 的 `<sources>` 生成 **`add_custom_command` + `add_dependencies`**，以及库上的 **`POST_BUILD`** postprocess；**`executable` 目标不会**为 `<sources>` 插入上述规则。若你使用 **CMake 作为 `UP` 生成后端**且目标是 **exe**，请任选其一：  
+- **CMake**（`GroundZero/lib/engine/backends/cmake/cmake_backend.cpp`）：当前仅为 **`static_library` / `shared_library`** 的 `<sources>` 生成 **`add_custom_command` + `add_dependencies`**，以及库上的 **`POST_BUILD`** postprocess；**`executable` 目标不会**为 `<sources>` 插入上述规则。若你使用 **CMake 作为 `UP` 生成后端**且目标是 **exe**，请任选其一：  
   - 把含 moc/uic/rcc 的代码放进 **`static_library` 子目标**，主程序 **`<dependency name="…"/>`** 链它；或  
   - 改用 **Ninja** 顶层构建；或  
   - 在包外维护上游 Qt CMake 工程，**手写**本包 `target.xml` 描述对预安装库的消费。
@@ -238,6 +238,6 @@ XML 里写了 **`command="..."`** 时，该字符串即最终交给后端的命�
 
 | 文档 | 内容 |
 |------|------|
-| `internal-variables.md` | 内置键、`up_cache` 固定行、`UP_*` 列表 |
+| `internal-variables.md` | 内置键、`gz_cache` 固定行、`GZ_*` 列表 |
 | `package-target-xml-spec.md` | XML / `when` / `config_files` |
 | `user-manual.md` | 终端用户命令与目录约定 |

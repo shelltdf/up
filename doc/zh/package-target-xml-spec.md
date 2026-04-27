@@ -1,14 +1,14 @@
-# `package.xml` 与 `target.xml` 规范说明
+﻿# `package.xml` 与 `target.xml` 规范说明
 
 > **文档索引**（`doc/zh` / `doc/en` 全部入口表）：[`../README.md`](../README.md)  
 > 英文入口（摘要/链接）：[`../en/package-target-xml-spec.md`](../en/package-target-xml-spec.md)
 
-本文档描述 **up** 当前实现对两种描述文件的**解析约定**与 **configure** 阶段的**语义约束**。实现采用轻量正则扫描（见 `src/lib/engine/xml/simple_xml.cpp`），**不是**完整 XML 校验器：建议仍写成良构 XML，并遵守下列可识别形态。与 **`up spec`** 内嵌英文规范不一致时，以 **`up spec`** 与源码为准；本文件侧重中文说明与仓库内交叉引用。
+本文档描述 **gz（GroundZero）** 当前实现对两种描述文件的**解析约定**与 **configure** 阶段的**语义约束**。实现采用轻量正则扫描（见 `GroundZero/lib/engine/xml/simple_xml.cpp`），**不是**完整 XML 校验器：建议仍写成良构 XML，并遵守下列可识别形态。与 **`gz spec`** 内嵌英文规范不一致时，以 **`gz spec`** 与源码为准；本文件侧重中文说明与仓库内交叉引用。
 
 ### 产品方向（推荐工作流）
 
 - **推荐**：用户**纯手写** **`package.xml`** 与 **`target.xml`**，显式描述源文件、`<headers>`、`<defines>`、`<dependency>`、预置库（**`<prebuilt>`** / **`imported_*`**）等；分步说明见 **[getting-started.md](getting-started.md)**。
-- **集成上游 CMake 第三方库时**：在 **包外** 用上游自带 CMake 完成 **`cmake --install` 到固定前缀**，再在 `up` 侧用 **`imported_installed_*` + `<install …/>`**（或 **`imported_*` + `<prebuilt>`**）手写声明安装产物与头文件路径。
+- **集成上游 CMake 第三方库时**：在 **包外** 用上游自带 CMake 完成 **`cmake --install` 到固定前缀**，再在 `gz` 侧用 **`imported_installed_*` + `<install …/>`**（或 **`imported_*` + `<prebuilt>`**）手写声明安装产物与头文件路径。
 
 ---
 
@@ -20,7 +20,7 @@
 | **`target.xml`** | 包内**每个构建目标独占一个子目录**，该目录下**恰好一个** `target.xml` | 声明目标名、类型、源文件、可选的头文件搜索路径、**目标级**依赖（其他 target，通常为库）。 |
 
 - **归属**：`target.xml` 必须位于某一 `package.xml` 所在目录的**子树内**；`configure` 会把 target 归到路径上**最近**的包根下（见 `configure.cpp` 中 `nearest_package_parent`）。
-- **扫描**：`up configure` 在扫描根（默认 cwd，或 `--scan` 指定目录）下**递归**查找所有 `package.xml` 与 `target.xml`。
+- **扫描**：`gz configure` 在扫描根（默认 cwd，或 `--scan` 指定目录）下**递归**查找所有 `package.xml` 与 `target.xml`。
 
 ---
 
@@ -65,7 +65,7 @@
 
 - 须存在 **`<target`** 起始标签；解析方式与 `package` 相同，取到第一个 **`>`** 为止。
 - **必选属性**
-  - **`name`**：CMake 目标名（与可执行文件名、`up run` 所用名等一致）。
+  - **`name`**：CMake 目标名（与可执行文件名、`gz run` 所用名等一致）。
 - **可选属性**
   - **`type`**：目标类型。省略时默认为 **`executable`**。实现识别（大小写按生成后端使用前为准，建议小写）：
     - **`executable`**：可执行程序。
@@ -164,7 +164,7 @@
 ### 2.4 包级变量 `<vars>`（可选）
 
 - 块 **`<vars>...</vars>`**，内为自闭合 **`<var name="KEY" value="VAL"/>`**（`value` 可省略表示空字符串）。
-- 每个 **KEY** 表示**默认值**，供本包下所有 `target.xml` 在 **`@KEY@` 替换**与 **`when`** 中使用；同一 KEY 还可在 **`up configure --opt KEY=...`** 或 **`up_cache.txt`** 中写入（键须符合实现允许的格式：所有 `UP_*`，以及除保留键外的 C 风格标识符），**configure 阶段最后应用，覆盖 XML 默认值**（见 §3.5 合并顺序）。
+- 每个 **KEY** 表示**默认值**，供本包下所有 `target.xml` 在 **`@KEY@` 替换**与 **`when`** 中使用；同一 KEY 还可在 **`gz configure --opt KEY=...`** 或 **`gz_cache.txt`** 中写入（键须符合实现允许的格式：所有 `GZ_*`，以及除保留键外的 C 风格标识符），**configure 阶段最后应用，覆盖 XML 默认值**（见 §3.5 合并顺序）。
 
 ### 2.5 包级编译宏 `<defines>`（可选）
 
@@ -176,7 +176,7 @@
 - 与 **`target.xml` 中 `<config_files>`** 同形：**`<config_files>...</config_files>`** 内若干 **`<file in="相对路径" to="相对路径"/>`**（`in`、`to` 均必填）。
 - **`in`**：相对 **`package.xml` 所在目录**（包根）。
 - **`to`**：相对 **`.intermediate/generated/<包名>/_package/`**（实现保留目录名 **`_package`**；请勿在本包内再使用同名编译目标目录以免混淆）。
-- **`@NAME@` / `${NAME}` 替换**：使用 **内置变量 + `package.xml` 中 `<vars>` + 本包内所有 `target.xml` 的 `<vars>`**（按 `configure` 收集目标的顺序依次叠加；**同名键以后写入者为准**，含同一 `<vars>` 块内靠后的 `<var/>`）+ **`--opt` / `up_cache.txt`**。内置 **`UP_TARGET_NAME` 在包级模板中默认为空串**，除非某个目标用 `<var name="UP_TARGET_NAME" …/>` 覆盖。
+- **`@NAME@` / `${NAME}` 替换**：使用 **内置变量 + `package.xml` 中 `<vars>` + 本包内所有 `target.xml` 的 `<vars>`**（按 `configure` 收集目标的顺序依次叠加；**同名键以后写入者为准**，含同一 `<vars>` 块内靠后的 `<var/>`）+ **`--opt` / `gz_cache.txt`**。内置 **`GZ_TARGET_NAME` 在包级模板中默认为空串**，除非某个目标用 `<var name="GZ_TARGET_NAME" …/>` 覆盖。
 - **生成时机**：`configure` 对每个含条目的包生成一次；生成文件加入本包内**每一个** **`executable` / `static_library` / `shared_library`** 目标的编译源列表，并把 **`generated/<包名>/_package/`** 加入这些目标的编译期 **include 路径**。
 
 ### 2.7 脚本型 `<var type="script">`（消息 / trigger）
@@ -190,14 +190,14 @@
 
 #### 变量层（后者覆盖前者）
 
-用于 **目标级** `<config_files>` 模板中的 **`@NAME@` / `${NAME}`** 替换（完整合并栈），**包级** `<config_files>` 使用 **第 1、2 层**后将本包内 **各目标第 3 层** 的 `<vars>` **按目标收集顺序串成一层**再应用 **第 4 层**（工作区）；**`UP_TARGET_NAME`** 仍由内置给出（包级默认为空），可被目标 `<vars>` 覆盖。另用于 `<sources>` / `<headers>` 条目的 **`when="..."`** 求值：
+用于 **目标级** `<config_files>` 模板中的 **`@NAME@` / `${NAME}`** 替换（完整合并栈），**包级** `<config_files>` 使用 **第 1、2 层**后将本包内 **各目标第 3 层** 的 `<vars>` **按目标收集顺序串成一层**再应用 **第 4 层**（工作区）；**`GZ_TARGET_NAME`** 仍由内置给出（包级默认为空），可被目标 `<vars>` 覆盖。另用于 `<sources>` / `<headers>` 条目的 **`when="..."`** 求值：
 
-1. **内置**：`UP_OS`（`windows` | `linux` | `darwin`）、`UP_PACKAGE_NAME`、`UP_PACKAGE_VERSION`、`UP_TARGET_NAME`、`UP_TARGET_BUILD_SYSTEM`（`cmake` | `ninja`）、`UP_CONFIG`（`debug` | `release`）。
+1. **内置**：`GZ_OS`（`windows` | `linux` | `darwin`）、`GZ_PACKAGE_NAME`、`GZ_PACKAGE_VERSION`、`GZ_TARGET_NAME`、`GZ_TARGET_BUILD_SYSTEM`（`cmake` | `ninja`）、`GZ_CONFIG`（`debug` | `release`）。
 2. **`package.xml` 中 `<vars>`**（包级默认值）。
 3. **`target.xml` 中 `<vars>`**（目标级默认值；与包级同名时覆盖包级）。
-4. **工作区**：`--opt` 与 `up_cache.txt` 中与上述规则一致的 **KEY=VALUE**（与 `UP_*` 等选项共用一张表；**最后应用**，覆盖 XML 中的同名 `<vars>` 默认值）。
+4. **工作区**：`--opt` 与 `gz_cache.txt` 中与上述规则一致的 **KEY=VALUE**（与 `GZ_*` 等选项共用一张表；**最后应用**，覆盖 XML 中的同名 `<vars>` 默认值）。
 
-支持 **`@NAME@`** 与 **`${NAME}`**（`NAME` 为 C 标识符；类 CMake `configure_file` 子集）。**`<config_files>` 模板**：在替换前会扫描模板正文，凡 **`@NAME@`** / **`${NAME}`** 中的 `NAME` 为 C 标识符且**尚不在**合并变量表中，则**自动加入该键、值为空串**，占位符会被**删掉**（不再保留 `${…}` 原文）；需要真实类型名等请在 **`package.xml` / `target.xml` 的 `<vars>`** 或 **`--opt`** 中显式赋值。不解析 **`$<...>`**。**`when="..."`** 仍只用合并表，不会从模板收集键。`up configure` 生成的 **`packages.md`** 中会列出各包/目标的 `<vars>` 默认值，并标出该 KEY 是否也出现在本次 configure 的选项映射中（便于核对是否被 `--opt` / 缓存覆盖）。
+支持 **`@NAME@`** 与 **`${NAME}`**（`NAME` 为 C 标识符；类 CMake `configure_file` 子集）。**`<config_files>` 模板**：在替换前会扫描模板正文，凡 **`@NAME@`** / **`${NAME}`** 中的 `NAME` 为 C 标识符且**尚不在**合并变量表中，则**自动加入该键、值为空串**，占位符会被**删掉**（不再保留 `${…}` 原文）；需要真实类型名等请在 **`package.xml` / `target.xml` 的 `<vars>`** 或 **`--opt`** 中显式赋值。不解析 **`$<...>`**。**`when="..."`** 仍只用合并表，不会从模板收集键。`gz configure` 生成的 **`packages.md`** 中会列出各包/目标的 `<vars>` 默认值，并标出该 KEY 是否也出现在本次 configure 的选项映射中（便于核对是否被 `--opt` / 缓存覆盖）。
 
 #### `when` 适用的标签（当前实现）
 
@@ -205,7 +205,7 @@
 - **未实现（勿依赖；写了也不会按条件生效）**：**`<assets>`**、**`<define>`**、**`<dependency/>`**、**`<config_files>`** 内 **`<file>`**、**`<var>`**、包级行、**`<prebuilt/>`**、**`<install/>`**、预处理/后处理子标签、以及 **`<package>` / `<target>` 根标签**。
 - 产品上可为更多「行级」配置逐步统一 `when`，但需逐类定义语义并实现（例如跳过依赖与「未声明依赖」的边界）。
 
-#### `when` 表达式语法（与 `eval_when`，`src/lib/engine/xml/var_subst.cpp` 一致）
+#### `when` 表达式语法（与 `eval_when`，`GroundZero/lib/engine/xml/var_subst.cpp` 一致）
 
 对 `when="..."` 的字符串先做 **ASCII 首尾空白** 修剪，再按下列 **唯一一种** 形式匹配（**自上而下**；整串须完全属于该形式）：
 
@@ -228,11 +228,11 @@
 #### `<config_files>`（类 configure_file 的最小子集）
 
 - **目标级**（`target.xml`）：块 **`<config_files>...</config_files>`**，内为 **`<file in="模板相对路径" to="输出相对路径"/>`**（`in`、`to` 均必填）。`in` 相对 **`target.xml` 所在目录**；`to` 相对 **`.intermediate/generated/<包名>/<目标名>/`**，且须为安全相对路径（**不得**含 `..` 段、不得为绝对路径）。**`@NAME@`** 使用 **§3.5 完整变量层**。生成文件加入**该目标**的编译源列表，并把 **`generated/<包名>/<目标名>/`** 加入该目标的 **编译期 include 路径**。
-- **包级**（`package.xml`）：形状相同；`in` 相对 **包根**；`to` 相对 **`.intermediate/generated/<包名>/_package/`**（保留名 **`_package`**）。**`@NAME@` / `${NAME}`** 使用 **包级 `<vars>` + 本包内全部目标的 `<vars>`**（顺序与叠加规则见上）+ 工作区；**`UP_TARGET_NAME`** 默认为空。生成文件加入本包内**所有**原生编译目标的源列表，并把 **`generated/<包名>/_package/`** 加入这些目标的 **include 路径**。
+- **包级**（`package.xml`）：形状相同；`in` 相对 **包根**；`to` 相对 **`.intermediate/generated/<包名>/_package/`**（保留名 **`_package`**）。**`@NAME@` / `${NAME}`** 使用 **包级 `<vars>` + 本包内全部目标的 `<vars>`**（顺序与叠加规则见上）+ 工作区；**`GZ_TARGET_NAME`** 默认为空。生成文件加入本包内**所有**原生编译目标的源列表，并把 **`generated/<包名>/_package/`** 加入这些目标的 **include 路径**。
 - **`${NAME}`**（CMake **`configure_file`** 风格）：与 **`@NAME@`** 使用**同一套**合并后的变量表；`NAME` 须为 C 标识符（`${` 与 `}` 之间允许首尾空白）。**先做占位符收集**：模板里出现但表中**没有**的 `NAME` 会**以空串加入表**，再交替替换，故未在 XML / `--opt` 声明的占位符会变成**空展开**（不再保留 `${NAME}`）；需要非空内容必须在 **`<vars>`** 或 **`--opt`** 中提供。不解析 **`$<...>`** 生成器表达式。处理顺序：**反复交替 `@NAME@` 与 `${NAME}` 至不再变化（有上限）**，最后再做 **`#cmakedefine`**。
-- **`#cmakedefine` / `#cmakedefine01`**：在上述占位符替换之后，按与 CMake **`configure_file`** 相近的**子集**处理（见 `src/lib/engine/xml/var_subst.cpp` 中 `apply_cmakedefine_directives`）：未出现在合并变量表、或值为空 / `0` / `false` / `off` / `no` 视为假；`#cmakedefine01` 展开为 **`#define NAME 0`** 或 **`1`**；`#cmakedefine NAME` 为真则 **`#define NAME`**，否则 **`/* #undef NAME */`**；带尾部内容的 **`#cmakedefine NAME …`** 为真则输出 **`#define NAME …`**。用于 zlib 等 **`zconf.h.in`** 类模板；**不是**完整 CMake 生成器。
+- **`#cmakedefine` / `#cmakedefine01`**：在上述占位符替换之后，按与 CMake **`configure_file`** 相近的**子集**处理（见 `GroundZero/lib/engine/xml/var_subst.cpp` 中 `apply_cmakedefine_directives`）：未出现在合并变量表、或值为空 / `0` / `false` / `off` / `no` 视为假；`#cmakedefine01` 展开为 **`#define NAME 0`** 或 **`1`**；`#cmakedefine NAME` 为真则 **`#define NAME`**，否则 **`/* #undef NAME */`**；带尾部内容的 **`#cmakedefine NAME …`** 为真则输出 **`#define NAME …`**。用于 zlib 等 **`zconf.h.in`** 类模板；**不是**完整 CMake 生成器。
 
-**CMake 与 Ninja**：两后端均直接消费 **已由 up 写出的生成文件**（与普通源文件相同），当前实现**不**为此生成 CMake 的 `configure_file()`。若需要完整上游 CMake `configure_file` 语义，请在**包外**用上游工程处理。
+**CMake 与 Ninja**：两后端均直接消费 **已由 gz 写出的生成文件**（与普通源文件相同），当前实现**不**为此生成 CMake 的 `configure_file()`。若需要完整上游 CMake `configure_file` 语义，请在**包外**用上游工程处理。
 
 #### `<sources>` 上的 `when`
 
@@ -281,9 +281,9 @@
 
 | 话题 | 源码位置 |
 |------|----------|
-| 解析 `package.xml` / `target.xml` | `src/lib/engine/xml/simple_xml.cpp`（`load_package_xml` / `load_target_xml`） |
-| 依赖校验、生成后端 | `src/lib/engine/commands/configure.cpp` |
-| 变量合并、`@KEY@`、`when` | `src/lib/engine/xml/var_subst.cpp` |
-| 数据结构 | `src/lib/engine/xml/simple_xml.hpp`（`PackageDesc` / `TargetDesc`） |
+| 解析 `package.xml` / `target.xml` | `GroundZero/lib/engine/xml/simple_xml.cpp`（`load_package_xml` / `load_target_xml`） |
+| 依赖校验、生成后端 | `GroundZero/lib/engine/commands/configure.cpp` |
+| 变量合并、`@KEY@`、`when` | `GroundZero/lib/engine/xml/var_subst.cpp` |
+| 数据结构 | `GroundZero/lib/engine/xml/simple_xml.hpp`（`PackageDesc` / `TargetDesc`） |
 
 后续若引入 XSD/JSON Schema，可在本文件顶部增加版本号与变更记录。

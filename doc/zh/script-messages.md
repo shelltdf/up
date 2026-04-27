@@ -1,8 +1,8 @@
-# 脚本消息（trigger）总表：`package.xml` / `target.xml` 与 Lua 绑定
+﻿# 脚本消息（trigger）总表：`package.xml` / `target.xml` 与 Lua 绑定
 
 > **文档索引**（`doc/zh` / `doc/en` 全部入口表）：[`../README.md`](../README.md)
 
-本文档列出 **`up configure`** 阶段可识别的 **消息名**（XML 属性 **`trigger="..."`**），以及 **`<var type="script" …>`** 如何与 **`<preprocess>` / `<postprocess>`** 的 **`command`** 协同。实现入口：**`src/lib/engine/dom/script_execution.cpp`**（解析与解析命令）、**`src/lib/engine/commands/configure.cpp`**（`apply_script_command` 调用点）、**`src/lib/engine/xml/simple_xml.cpp`**（`is_supported_script_trigger`）。
+本文档列出 **`gz configure`** 阶段可识别的 **消息名**（XML 属性 **`trigger="..."`**），以及 **`<var type="script" …>`** 如何与 **`<preprocess>` / `<postprocess>`** 的 **`command`** 协同。实现入口：**`GroundZero/lib/engine/dom/script_execution.cpp`**（解析与解析命令）、**`GroundZero/lib/engine/commands/configure.cpp`**（`apply_script_command` 调用点）、**`GroundZero/lib/engine/xml/simple_xml.cpp`**（`is_supported_script_trigger`）。
 
 ---
 
@@ -44,7 +44,7 @@
 
 ## 3. 「Lua 绑定」与当前实现的真实行为
 
-- **命名**：历史与 **`up spec`** 使用 **`script_type="lua"`**；仓库内 **尚未接入 Lua 虚拟机** 去执行 `value` 中的语句。
+- **命名**：历史与 **`gz spec`** 使用 **`script_type="lua"`**；仓库内 **尚未接入 Lua 虚拟机** 去执行 `value` 中的语句。
 - **实际行为**：对某一 `trigger`，若对应 XML **已写** **`command="..."`**，则 **直接使用该字符串**，**不会**再读取同 trigger 的 **`<var type="script">`**。
 - 若 XML **未写** `command`（空串），则 **`resolve_script_command`** 会按 §1 的继承顺序查找 **`type="script"`** 且 **`trigger` 匹配** 且 **`script_type` 为 lua（或默认）** 的变量，取 **第一条** 的 **`value`** 作为 **整条 shell 命令**。
 - 因此：今天要把「可执行逻辑」绑在消息上，请把 **`value` 写成一行或多行 shell**（或调用 **`lua -e '...'`** 若本机 PATH 有 `lua`），而不是只写 `print(...)` 指望由宿主解释。
@@ -76,6 +76,6 @@
 | `script-tutorial.md` | `preprocess` / postprocess、Qt、CMake 后端差异 |
 | `internal-variables.md` | 标量变量与脚本 var 的区分 |
 | `package-target-xml-spec.md` | §2.7 脚本型 `<var>` 索引 |
-| `up spec` | 英文内嵌规范中的 Script var 行 |
+| `gz spec` | 英文内嵌规范中的 Script var 行 |
 
-若未来版本为 **`manual`** 或其它 trigger 增加 **真实 Lua 回调** 或 **多脚本合并策略**，以 **`up spec`** 与 **`script_execution.cpp`** 为准并更新本表。
+若未来版本为 **`manual`** 或其它 trigger 增加 **真实 Lua 回调** 或 **多脚本合并策略**，以 **`gz spec`** 与 **`script_execution.cpp`** 为准并更新本表。

@@ -1,10 +1,10 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Install runtime/dev components via CMake install COMPONENT (cmake --install).
 
-默认仅安装 COMPONENT up_runtime 下的两个可执行文件；可选 --with-dev
-额外安装 up_dev（当前包含 up.lib）。不会安装、不会触碰 test_projects/
-目录（测试包由 up 命令在各自 cwd / .intermediate 下处理）。
+默认仅安装 COMPONENT gz_runtime 下的两个可执行文件；可选 --with-dev
+额外安装 gz_dev（当前包含 gz.lib）。不会安装、不会触碰 test_projects/
+目录（测试包由 gz 命令在各自 cwd / .intermediate 下处理）。
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 
 # 与 CMakeLists.txt 中 install(... COMPONENT ...) 一致；与 test_projects/ 无关。
-UP_RUNTIME_COMPONENT = "up_runtime"
-UP_DEV_COMPONENT = "up_dev"
+GZ_RUNTIME_COMPONENT = "gz_runtime"
+GZ_DEV_COMPONENT = "gz_dev"
 
 
 def _run(cmd: list[str], cwd: Path) -> int:
@@ -40,8 +40,8 @@ def _run_build_py(root: Path, build_dir: Path, config: str) -> int:
 def main() -> int:
     root = Path(__file__).resolve().parent
     ap = argparse.ArgumentParser(
-        description=f"cmake --install for COMPONENT {UP_RUNTIME_COMPONENT!r} (optional {UP_DEV_COMPONENT!r})",
-        epilog="说明：默认只安装 up / up-gui；加 --with-dev 时额外安装 up.lib；与 test_projects 中的示例包无关。",
+        description=f"cmake --install for COMPONENT {GZ_RUNTIME_COMPONENT!r} (optional {GZ_DEV_COMPONENT!r})",
+        epilog="说明：默认只安装 gz / gz-gui；加 --with-dev 时额外安装 gz.lib；与 test_projects 中的示例包无关。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("--build-dir", type=Path, default=root / "_build", help="Same CMake build dir as build.py")
@@ -49,7 +49,7 @@ def main() -> int:
         "--prefix",
         type=Path,
         default=root / "dist",
-        help="Install prefix (bin/up.exe, bin/up-gui.exe under prefix)",
+        help="Install prefix (bin/gz.exe, bin/gz-gui.exe under prefix)",
     )
     ap.add_argument(
         "--config",
@@ -59,7 +59,7 @@ def main() -> int:
     ap.add_argument(
         "--with-dev",
         action="store_true",
-        help=f"Also install COMPONENT {UP_DEV_COMPONENT} (currently up.lib)",
+        help=f"Also install COMPONENT {GZ_DEV_COMPONENT} (currently gz.lib)",
     )
     ap.add_argument(
         "cmake_install_args",
@@ -88,7 +88,7 @@ def main() -> int:
         "--config",
         args.config,
         "--component",
-        UP_RUNTIME_COMPONENT,
+        GZ_RUNTIME_COMPONENT,
     ]
     cmd.extend(args.cmake_install_args)
     code = _run(cmd, root)
@@ -106,7 +106,7 @@ def main() -> int:
         "--config",
         args.config,
         "--component",
-        UP_DEV_COMPONENT,
+        GZ_DEV_COMPONENT,
     ]
     dev_cmd.extend(args.cmake_install_args)
     return _run(dev_cmd, root)

@@ -14,12 +14,12 @@
         比如 c++ mian 函数的 helloworld 程序模板。
         允许用户添加自己的自定义模板。
       多语言支持
-        up.exe up-gui.exe 都支持多语言显示，也就是根据当前操作系统的默认语言设置判断，如果是中文就显示中文，如果不是就都显示为英文。
+        gz.exe gz-gui.exe 都支持多语言显示，也就是根据当前操作系统的默认语言设置判断，如果是中文就显示中文，如果不是就都显示为英文。
         支持文件内容为中文，也就是支持 unicode utf8 utf16 等等编码。
         但是，文件路径不支持多语言，因为编译器不可能都支持中文路径。
-          即便 up 能支持中文路径，生成的代码能支持gcc中文路径编译吗？
+          即便 gz 能支持中文路径，生成的代码能支持gcc中文路径编译吗？
           所以在配置的时候就明确给出路径错误的信息。
-    up命令设计
+    gz命令设计
       工作模式
         configure
           配置包的依赖关系，生成具体的建造系统文件，比如 cmake。
@@ -32,7 +32,7 @@
         pack
           打包编译的结果，为目标形式，比如自动安装程序，apk，等等。
         迁移说明
-          从 CMake 等工程迁到 up：包外安装/对照源码后手写 package.xml 与 target.xml（已移除 reverse 子命令）。
+          从 CMake 等工程迁到 gz：包外安装/对照源码后手写 package.xml 与 target.xml（已移除 reverse 子命令）。
     包文件设计
       package.xml
         只包含一个 package 对象。
@@ -65,19 +65,19 @@
           hello_foo hello_demo hello_foo_test 各为子目录 每目录一个 target.xml。
           单元测试与 CTest。
     宿主工具开发与分发 Python
-      不参与包内行为树逻辑 仅构建安装打包 up 与 up-gui。
+      不参与包内行为树逻辑 仅构建安装打包 gz 与 gz-gui。
       build.py
-        只 cmake build 目标 up 与 up-gui。
+        只 cmake build 目标 gz 与 gz-gui。
       install.py
-        只 cmake install 分量 up_runtime。
+        只 cmake install 分量 gz_runtime。
       package.py
-        将 up 与 up-gui 打成 zip 或 tar.gz 归档。
+        将 gz 与 gz-gui 打成 zip 或 tar.gz 归档。
       与 test_projects 无编译交集。
     工作原理
-      使用 up.exe 命令行（必须是c++实现，静态crt连接。）
-        还可以提供一个 up-gui.exe 外壳（只能使用本地窗口系统）
+      使用 gz.exe 命令行（必须是c++实现，静态crt连接。）
+        还可以提供一个 gz-gui.exe 外壳（只能使用本地窗口系统）
           这个程序可以类似于 cmake-gui 的界面。
-          支持 win32；Linux 为 GTK3；macOS 为 Cocoa；GTK/Cocoa 经 `core/gui_persist` 读写设置并与 up 传参对齐。
+          支持 win32；Linux 为 GTK3；macOS 为 Cocoa；GTK/Cocoa 经 `core/gui_persist` 读写设置并与 gz 传参对齐。
           目标界面结构
             最上方是菜单栏。
               然后是工具栏。
@@ -87,12 +87,12 @@
             第四行是输出信息窗口。
             最后是状态栏。
           当前参考实现 win32
-            菜单栏 工具栏 CWD ScanDir Build Dir 安装目录 Option（列表三列+可按前缀分组） 运行参数 运行目标下拉 单元测试下拉 日志 状态栏 调用同目录 up.exe。
+            菜单栏 工具栏 CWD ScanDir Build Dir 安装目录 Option（列表三列+可按前缀分组） 运行参数 运行目标下拉 单元测试下拉 日志 状态栏 调用同目录 gz.exe。
             编译环境设置窗口（菜单/工具栏入口）
               Tab: 本地环境 / Android 环境 / emsdk 环境
               本地环境：建造系统/vcvars/编译器命中列表（表格：工具 路径 来源）
                 PATH 命中优先，再补充常见安装路径扫描；支持多命中并点选当前项。
-                vcvars 搜索 vcvars64/vcvars32/VsDevCmd；选择后运行 up.exe 前先 call 对应脚本。
+                vcvars 搜索 vcvars64/vcvars32/VsDevCmd；选择后运行 gz.exe 前先 call 对应脚本。
               Android 环境：SDK 路径 / NDK 路径（自动搜索）
                 NDK 来源：ANDROID_NDK_ROOT/HOME -> SDK 下 ndk 与 ndk-bundle -> 常见 SDK 路径。
                 多版本 NDK 保留全部命中，推荐值按版本号与修改时间选取。
@@ -107,8 +107,8 @@
         扫描完成后，会生成具体的后端文件。在 .intermediate/build 目录中。
         实现约定为 .intermediate/build 下按叶子名分子目录 例如 default 与 configure 的 build-dir-name 对应。
         这个过程是可以生成一个设置结果文件的，这里是保存了用户输入的开关和变量信息。类似于 cmake cache 文件的作用。
-        up_cache 规划
-          文件名为 up_cache.txt。
+        gz_cache 规划
+          文件名为 gz_cache.txt。
           放在 .intermediate/build 叶子目录内 含 arch 字段用于命名 install 子目录。
           configure 时加载 更新 写入。
       build 启动编译过程。
@@ -120,10 +120,10 @@
         单包生成顶层 CMake 同包多 target 库先于可执行体链接。
         CTest 注册每个 executable install 仅首个可执行体。
         arch 目录名已采用组合标签（例如 windows_x86_64_cmake_msvc_dynamic_release）。
-        Option 键名：UP_TARGET_DYNAMIC_LIBRARY / UP_TARGET_CRT / UP_TARGET_DEBUG / UP_TARGET_BUILD_SYSTEM。
-        UP_CMAKE_GENERATOR 仅在 UP_TARGET_BUILD_SYSTEM=cmake 时生效。
+        Option 键名：GZ_TARGET_DYNAMIC_LIBRARY / GZ_TARGET_CRT / GZ_TARGET_DEBUG / GZ_TARGET_BUILD_SYSTEM。
+        GZ_CMAKE_GENERATOR 仅在 GZ_TARGET_BUILD_SYSTEM=cmake 时生效。
     目录关系
-      执行 up.exe 会在当前 cwd 目录里产生一个中间文件目录
+      执行 gz.exe 会在当前 cwd 目录里产生一个中间文件目录
       中间目录（这是个真实存在的目录叫做 .intermediate）包含几个子目录
         build
           先按叶子名分子目录 如 default；cmake 模式生成 CMakeLists，ninja 模式在 out 目录生成 build.ninja。

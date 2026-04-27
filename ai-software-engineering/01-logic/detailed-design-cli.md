@@ -1,26 +1,26 @@
-# 详细设计：CLI 子命令与路径语义
+﻿# 详细设计：CLI 子命令与路径语义
 
 ## 构建目录叶子 `<leaf>`
 
 - 由 **`configure --build-dir-name <leaf>`** 指定；若省略则为 **`default`**。
 - 物理路径：**`<cwd>/.intermediate/build/<leaf>/`**。
-- **`build` 必填**：`up build --build-dir-name <leaf>`，且该目录下须已有 **`up_cache.txt`**（先成功 `configure`）。
+- **`build` 必填**：`gz build --build-dir-name <leaf>`，且该目录下须已有 **`gz_cache.txt`**（先成功 `configure`）。
 
 ## 安装目录名 `<installLeaf>`
 
 - **`run` / `test` / `pack` 使用**：`--install-dir-name <installLeaf>`。
 - **语义**：`<cwd>/.intermediate/install/<installLeaf>/`。
-- **与 `<leaf>` 的关系**：通常 **`<installLeaf>` 应等于 `up_cache.txt` 中的 `arch` 字段**，而不是构建叶子名 `default`。`build` 实现将安装前缀设为 `default_install_root(cwd) / arch`（见 `src/lib/engine/commands/build.cpp`）。
-- **获取方式**：在同一 cwd 下执行 **`up print-build-dir-name`**（默认读取 `.intermediate/build/default/up_cache.txt`，亦可通过 `--build-dir-name` / `--opt` 与 configure 对齐）。
+- **与 `<leaf>` 的关系**：通常 **`<installLeaf>` 应等于 `gz_cache.txt` 中的 `arch` 字段**，而不是构建叶子名 `default`。`build` 实现将安装前缀设为 `default_install_root(cwd) / arch`（见 `GroundZero/lib/engine/commands/build.cpp`）。
+- **获取方式**：在同一 cwd 下执行 **`gz print-build-dir-name`**（默认读取 `.intermediate/build/default/gz_cache.txt`，亦可通过 `--build-dir-name` / `--opt` 与 configure 对齐）。
 
 ## 典型脚本序列（PowerShell）
 
 ```powershell
-.\path\to\up.exe configure --scan test_projects
-$ARCH = .\path\to\up.exe print-build-dir-name
-.\path\to\up.exe build --build-dir-name default
-.\path\to\up.exe test --install-dir-name $ARCH
-.\path\to\up.exe run --install-dir-name $ARCH hello_demo
+.\path\to\gz.exe configure --scan test_projects
+$ARCH = .\path\to\gz.exe print-build-dir-name
+.\path\to\gz.exe build --build-dir-name default
+.\path\to\gz.exe test --install-dir-name $ARCH
+.\path\to\gz.exe run --install-dir-name $ARCH hello_demo
 ```
 
 ## `spec` 子命令
@@ -29,4 +29,4 @@ $ARCH = .\path\to\up.exe print-build-dir-name
 
 ## ~~`reverse`（逆向）~~（已移除）
 
-- 历史版本曾提供 **`up reverse`** 与 **`UP_ENABLE_REVERSE`** 构建开关；当前仓库**已删除**该子命令及 `src/lib/engine/reverse/` 实现。工程迁移请手写 **`package.xml` / `target.xml`**（见 `doc/zh/package-target-xml-spec.md` 文首）。
+- 历史版本曾提供 **`gz reverse`** 与 **`GZ_ENABLE_REVERSE`** 构建开关；当前仓库**已删除**该子命令及 `GroundZero/lib/engine/reverse/` 实现。工程迁移请手写 **`package.xml` / `target.xml`**（见 `doc/zh/package-target-xml-spec.md` 文首）。

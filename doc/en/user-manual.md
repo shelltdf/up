@@ -1,6 +1,6 @@
-# up User Manual
+﻿# gz User Manual (GroundZero)
 
-This manual is for first-time users of `up`. It helps you understand and run `up` from scratch with both CLI and `up-gui`.
+This manual is for first-time users of `gz` (GroundZero). It helps you understand and run `gz` from scratch with both CLI and `gz-gui`.
 
 > **Documentation index** (full `doc/zh` / `doc/en` table): [`../README.md`](../README.md)
 
@@ -16,7 +16,7 @@ This manual is for first-time users of `up`. It helps you understand and run `up
 
 If you only need a fast path, follow these steps.
 
-### Step 1: Build `up.exe`
+### Step 1: Build `gz.exe`
 
 Run in repository root:
 
@@ -25,17 +25,19 @@ cmake -S . -B _build -G "Visual Studio 17 2022" -A x64
 cmake --build _build --config Release
 ```
 
+> **Build directory:** **`_build`** is only an example. Use the same path you passed to **`cmake -B ...`** (for example **`_build_gz`**). Update the **`.\_build\Release\`** prefix in the next commands accordingly.
+
 ### Step 2: Run sample projects
 
 ```powershell
-.\_build\Release\up.exe configure --scan test_projects
-$ARCH = .\_build\Release\up.exe print-build-dir-name
-.\_build\Release\up.exe build --build-dir-name default
-.\_build\Release\up.exe test --install-dir-name $ARCH
-.\_build\Release\up.exe run --install-dir-name $ARCH hello_demo
+.\_build\Release\gz.exe configure --scan test_projects
+$ARCH = .\_build\Release\gz.exe print-build-dir-name
+.\_build\Release\gz.exe build --build-dir-name default
+.\_build\Release\gz.exe test --install-dir-name $ARCH
+.\_build\Release\gz.exe run --install-dir-name $ARCH hello_demo
 ```
 
-**Note:** `build` requires **`--build-dir-name`** (same leaf as `configure`, usually **`default`** if omitted). `run` / `test` / `pack` require **`--install-dir-name`**, which must name a **child directory under `.intermediate/install/`** — typically the **`arch`** string from **`up print-build-dir-name`** (or the `arch=` line in `up_cache.txt`), **not** the build leaf `default`.
+**Note:** `build` requires **`--build-dir-name`** (same leaf as `configure`, usually **`default`** if omitted). `run` / `test` / `pack` require **`--install-dir-name`**, which must name a **child directory under `.intermediate/install/`** — typically the **`arch`** string from **`gz print-build-dir-name`** (or the `arch=` line in `gz_cache.txt`), **not** the build leaf `default`.
 
 ### Step 3: Check outputs
 
@@ -47,7 +49,7 @@ $ARCH = .\_build\Release\up.exe print-build-dir-name
 
 ## 1. Overview: What it is and why it exists
 
-`up` (uni-package) is a data-driven package/build orchestrator. You describe package and target relationships with `package.xml` and `target.xml`, and `up` handles:
+`gz` (GroundZero) is a data-driven package/build orchestrator. You describe package and target relationships with `package.xml` and `target.xml`, and `gz` handles:
 
 1. Scanning descriptors and building a package/target graph
 2. Generating backend build files (mainly CMake now, also Ninja)
@@ -61,29 +63,29 @@ In C/C++ projects, common pain points are:
 - Scattered build/relationship definitions
 - High switching cost across build backends
 
-`up` follows a simple principle: data defines behavior.
+`gz` follows a simple principle: data defines behavior.
 
 ### Boundary with repo scripts
 
-`build.py` and `install.py` only build/install host tools (`up.exe`, `up-gui.exe`, and optional `up.lib` as dev component). They do not build packages under `test_projects`.
+`build.py` and `install.py` only build/install host tools (`gz.exe`, `gz-gui.exe`, and optional `gz.lib` as dev component). They do not build packages under `test_projects`.
 
 Source layout is split as:
 
-- `src/exe/`: CLI entry and command dispatch (`up.exe`)
-- `src/lib/`: core implementation (`up.lib`, including `engine` and `infra`)
+- `GroundZero/exe/`: CLI entry and command dispatch (`gz.exe`)
+- `GroundZero/lib/`: core implementation (`gz.lib`, including `engine` and `infra`)
 
 ---
 
 ## 2. Internal workflow details
 
-Main flow of `up`:
+Main flow of `gz`:
 
 1. **Scan**: find `package.xml` and `target.xml` under `cwd` (or `--scan` roots)
 2. **Attach**: each `target.xml` is attached to the nearest package root
 3. **Validate**:
    - package dependencies exist in the scan set
    - target dependencies resolve to library targets
-4. **Generate**: create backend files under **`.intermediate/build/<leaf>/`** (from **`configure --build-dir-name`**, default **`default`**) and write **`up_cache.txt`** (includes **`arch=`**)
+4. **Generate**: create backend files under **`.intermediate/build/<leaf>/`** (from **`configure --build-dir-name`**, default **`default`**) and write **`gz_cache.txt`** (includes **`arch=`**)
 5. **Build/install**: `build` installs to **`.intermediate/install/<arch>/`** where **`<arch>`** comes from the cache (usually **not** equal to **`<leaf>`**)
 6. **Follow-up**: `run` / `test` / `pack` use install trees; CLI requires **`--install-dir-name <arch>`**
 
@@ -111,16 +113,16 @@ Backend behavior:
   - `shared_library`
   - `asset_bundle` (install-only resources, no compile units)
   - `imported_static_library` / `imported_shared_library` (prebuilt SDKs; use `<prebuilt .../>`, paths relative to `target.xml` unless absolute). See [`test_projects/prebuilt_static_stub/`](../test_projects/prebuilt_static_stub/README.md) for an end-to-end sample (ships an MSVC `stub_import.lib`; the stub CMake writes to `lib/import/` so it is not ignored by the repo-root `dist/` `.gitignore` rule).
-  - `imported_installed_static_library` / `imported_installed_shared_library`: declare libraries **already installed** under this package’s install prefix (`CMAKE_INSTALL_PREFIX`). **Recommended:** run **`cmake --install`** (or vendor SDK) **outside** `up`, then hand-write `<install artifact="..."/>` (and `implib` on Windows for shared).
+  - `imported_installed_static_library` / `imported_installed_shared_library`: declare libraries **already installed** under this package’s install prefix (`CMAKE_INSTALL_PREFIX`). **Recommended:** run **`cmake --install`** (or vendor SDK) **outside** `gz`, then hand-write `<install artifact="..."/>` (and `implib` on Windows for shared).
 
-Rule boundary: `up` / `up-gui` must stay generic and do not embed per-project special cases. Dependency wiring, install artifacts, and include directories must be expressed explicitly via `package.xml` / `target.xml`.
+Rule boundary: `gz` / `gz-gui` must stay generic and do not embed per-project special cases. Dependency wiring, install artifacts, and include directories must be expressed explicitly via `package.xml` / `target.xml`.
 
 ### 3.1b `CMAKE_PREFIX_PATH` merging
 
 The generated super-build receives **`CMAKE_PREFIX_PATH`** built as:
 
 1. This configure’s install prefix (`.intermediate/install/<arch>/` for the current `cwd`), **always first**.
-2. Extra directories from **`--opt UP_CMAKE_PREFIX_PATH=dir1;dir2`** (semicolon-separated). Relative entries are resolved against **`cwd`**.
+2. Extra directories from **`--opt GZ_CMAKE_PREFIX_PATH=dir1;dir2`** (semicolon-separated). Relative entries are resolved against **`cwd`**.
 
 Duplicates are removed after canonicalization.
 
@@ -133,7 +135,7 @@ In addition, when the primary package declares dependencies that expose `importe
   - Intra-package: `myLib`
   - Cross-package: `otherPkg:otherLib`
   - **Visibility (CMake backend)**: optional **`visibility="private|public|interface"`** (default **`private`**, case-insensitive), mapping to **`PRIVATE` / `PUBLIC` / `INTERFACE`** in `target_link_libraries`. **Executable** targets must not use **`interface`** on a dependency (configure fails). Library-to-library chained `target_link_libraries` is not generated today; ensure consumers (for example the final exe) link all needed libraries.
-  - **`when`** is **not** evaluated on `<dependency/>` yet; which tags support conditions and the expression grammar are defined by **`up spec`** and **[`../zh/package-target-xml-spec.md`](../zh/package-target-xml-spec.md)**.
+  - **`when`** is **not** evaluated on `<dependency/>` yet; which tags support conditions and the expression grammar are defined by **`gz spec`** and **[`../zh/package-target-xml-spec.md`](../zh/package-target-xml-spec.md)**.
 
 ### 3.3 `<headers>` block (`from/to`)
 
@@ -164,7 +166,7 @@ Legacy `<dir>...</dir>` syntax is no longer supported.
 - C++17 compiler
 - On Windows, Visual Studio 2022 + MSVC recommended
 
-### 4.2 Build `up` (repo root)
+### 4.2 Build `gz` (repo root)
 
 Option A: manual CMake
 
@@ -172,6 +174,8 @@ Option A: manual CMake
 cmake -S . -B _build -G "Visual Studio 17 2022" -A x64
 cmake --build _build --config Release
 ```
+
+(See **Section 0** for the **build directory** note: **`_build`** is only an example; keep it consistent with your **`cmake -B ...`** path.)
 
 The legacy **`project`** subcommand and **`--project-dir`** flag are removed with no alias.
 
@@ -186,22 +190,22 @@ python package.py
 ### 4.3 CLI quick flow
 
 ```powershell
-.\_build\Release\up.exe configure --scan test_projects
-$ARCH = .\_build\Release\up.exe print-build-dir-name
-.\_build\Release\up.exe build --build-dir-name default
-.\_build\Release\up.exe test --install-dir-name $ARCH
-.\_build\Release\up.exe run --install-dir-name $ARCH hello_demo
+.\_build\Release\gz.exe configure --scan test_projects
+$ARCH = .\_build\Release\gz.exe print-build-dir-name
+.\_build\Release\gz.exe build --build-dir-name default
+.\_build\Release\gz.exe test --install-dir-name $ARCH
+.\_build\Release\gz.exe run --install-dir-name $ARCH hello_demo
 ```
 
-Common commands (see also `up --help`):
+Common commands (see also `gz --help`):
 
-- `up configure [--build-dir-name <leaf>] [--scan <dir>]... [--opt KEY=VALUE]...`
-- `up build --build-dir-name <leaf>`
-- `up run --install-dir-name <name> <target-name>`
-- `up test --install-dir-name <name> [test-target-name]`
-- `up pack --install-dir-name <name>...`
-- `up list [--format tree|json|xml] [--xml <path>] [--json <path>] [--quiet]`
-- `up spec` / `up print-build-dir-name`
+- `gz configure [--build-dir-name <leaf>] [--scan <dir>]... [--opt KEY=VALUE]...`
+- `gz build --build-dir-name <leaf>`
+- `gz run --install-dir-name <name> <target-name>`
+- `gz test --install-dir-name <name> [test-target-name]`
+- `gz pack --install-dir-name <name>...`
+- `gz list [--format tree|json|xml] [--xml <path>] [--json <path>] [--quiet]`
+- `gz spec` / `gz print-build-dir-name`
 
 `list` option behavior summary:
 
@@ -212,23 +216,23 @@ Common commands (see also `up --help`):
 
 ### 4.4 Work in a single package directory
 
-If `up` is on PATH:
+If `gz` is on PATH:
 
 ```powershell
-up configure
-$ARCH = up print-build-dir-name
-up build --build-dir-name default
-up test --install-dir-name $ARCH
-up run --install-dir-name $ARCH rock_app_one
+gz configure
+$ARCH = gz print-build-dir-name
+gz build --build-dir-name default
+gz test --install-dir-name $ARCH
+gz run --install-dir-name $ARCH rock_app_one
 ```
 
-### 4.5 `up-gui` quick flow
+### 4.5 `gz-gui` quick flow
 
-`up-gui` is a thin GUI shell (Win32 on Windows, GTK3 on Linux, Cocoa on macOS) that runs `up` / `up.exe` from the same install directory.
+`gz-gui` is a thin GUI shell (Win32 on Windows, GTK3 on Linux, Cocoa on macOS) that runs `gz` / `gz.exe` from the same install directory.
 
 Suggested flow:
 
-1. Open `up-gui`
+1. Open `gz-gui`
 2. In Environment Settings, select:
    - build system
    - compiler
@@ -238,7 +242,7 @@ Suggested flow:
 5. Run `Build`
 6. Optionally run `Test` / `Run`
 
-The GUI passes selected settings to `up.exe` via `--opt`.
+The GUI passes selected settings to `gz.exe` via `--opt`.
 
 ### 4.6 Common workflow templates
 
@@ -258,14 +262,14 @@ The GUI passes selected settings to `up.exe` via `--opt`.
 #### Template C: Verify `<headers>` install layout
 
 1. Use `from/to` entries in `<headers>` (`dir/file/glob`)
-2. Run `up configure`, then `up build --build-dir-name default` (or the same leaf you used for configure)
-3. Check `.intermediate/install/<arch>/include/` (**`<arch>`** from `up print-build-dir-name` or `up_cache.txt`)
+2. Run `gz configure`, then `gz build --build-dir-name default` (or the same leaf you used for configure)
+3. Check `.intermediate/install/<arch>/include/` (**`<arch>`** from `gz print-build-dir-name` or `gz_cache.txt`)
 
 #### Template D: Import third-party CMake SDK (hand-written)
 
-1. **Outside** `up`, run **`cmake --install`** on the vendor tree (or install a shipped SDK) so `lib/` / `include/` are stable.
+1. **Outside** `gz`, run **`cmake --install`** on the vendor tree (or install a shipped SDK) so `lib/` / `include/` are stable.
 2. Hand-write **`package.xml`** / **`target.xml`**: use **`imported_installed_*` + `<install .../>`** or **`imported_*` + `<prebuilt>`** plus **`<headers>`** (see **[`../zh/getting-started.md`](../zh/getting-started.md)**).
-3. Run **`up configure` / `up build`** (§4.3); consume from another package with `<dependency name="pkg:target"/>`.
+3. Run **`gz configure` / `gz build`** (§4.3); consume from another package with `<dependency name="pkg:target"/>`.
 4. Library-only packages (no executable) are supported for configure/build.
 
 ---
@@ -294,13 +298,13 @@ Possible causes:
 - build not completed
 - running under the wrong package/root
 
-Use **`up print-build-dir-name`** and run **`up run --install-dir-name <arch> <name>`**.
+Use **`gz print-build-dir-name`** and run **`gz run --install-dir-name <arch> <name>`**.
 
 ### Q4: `test` finds no tests
 
 Make sure:
 
-- **`up test --install-dir-name <arch>`** uses the same **`<arch>`** as the last successful configure/build
+- **`gz test --install-dir-name <arch>`** uses the same **`<arch>`** as the last successful configure/build
 - configure/build succeeded
 - target type is `executable`
 - command is executed from the correct package/scan scope

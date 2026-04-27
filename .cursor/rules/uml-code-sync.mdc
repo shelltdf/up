@@ -1,4 +1,4 @@
----
+﻿---
 description: UML Markdown 与代码同步开发模式（uml.sync 与三类 *.md 契约）
 globs: "**/*.{md,uml.md,class.md,code.md}", "**/uml.sync.md"
 alwaysApply: false

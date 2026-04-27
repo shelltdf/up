@@ -1,4 +1,4 @@
----
+﻿---
 description: 运行时依赖与分发资产的 License 归集到仓库根 THIRD_PARTY_LICENSES*（不含仅 dev 依赖）。
 globs: "**/package.json", "**/pnpm-lock.yaml", "**/package-lock.json", "**/Cargo.toml", "**/go.mod", "**/THIRD_PARTY_LICENSES.md", "**/THIRD_PARTY_LICENSES.txt", "**/licenses/**"
 alwaysApply: false

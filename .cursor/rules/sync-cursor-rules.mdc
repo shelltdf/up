@@ -1,4 +1,4 @@
----
+﻿---
 description: 同步 rules、同步 cursor rules、更新 rules、rules 对齐、从别的项目复制了规则——迁入规则后对当前仓库做对齐与验证。
 alwaysApply: false
 ---

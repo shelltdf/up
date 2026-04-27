@@ -1,6 +1,6 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Pack up.exe/up-gui.exe (+ optional up.lib) into an archive.
+"""Pack gz.exe/gz-gui.exe (+ optional gz.lib) into an archive.
 
 默认只打包宿主工具，与 test_projects/ 无关。
 约定：package.py 会先执行 install.py；install.py 会先执行 build.py。
@@ -35,25 +35,25 @@ def _run_install_py(root: Path, build_dir: Path, config: str, prefix: Path, with
     return subprocess.call(cmd, cwd=str(root))
 
 
-def _find_installed_up_pair(prefix: Path) -> tuple[Path, Path]:
-    """Return (up, up-gui) paths under install prefix/bin."""
+def _find_installed_gz_pair(prefix: Path) -> tuple[Path, Path]:
+    """Return (gz, gz-gui) paths under install prefix/bin."""
     bin_dir = prefix / "bin"
     if sys.platform == "win32":
-        up = bin_dir / "up.exe"
-        gui = bin_dir / "up-gui.exe"
+        gz_cli = bin_dir / "gz.exe"
+        gui = bin_dir / "gz-gui.exe"
     else:
-        up = bin_dir / "up"
-        gui = bin_dir / "up-gui"
-    if up.is_file() and gui.is_file():
-        return up, gui
-    raise FileNotFoundError(f"找不到已安装文件: {up} / {gui}")
+        gz_cli = bin_dir / "gz"
+        gui = bin_dir / "gz-gui"
+    if gz_cli.is_file() and gui.is_file():
+        return gz_cli, gui
+    raise FileNotFoundError(f"找不到已安装文件: {gz_cli} / {gui}")
 
 
 def _default_archive_path(root: Path, fmt: str, config: str) -> Path:
     (root / "dist").mkdir(parents=True, exist_ok=True)
     sys_name = platform.system().lower().replace(" ", "")
     machine = platform.machine().lower().replace(" ", "")
-    base = f"up-tools_{sys_name}_{machine}_{config.lower()}"
+    base = f"gz-tools_{sys_name}_{machine}_{config.lower()}"
     ext = ".zip" if fmt == "zip" else ".tar.gz"
     return (root / "dist" / f"{base}{ext}").resolve()
 
@@ -61,32 +61,32 @@ def _default_archive_path(root: Path, fmt: str, config: str) -> Path:
 def _readme_bytes(with_dev: bool) -> bytes:
     text = (
         "Contents:\n"
-        "  bin/up (or up.exe)\n"
-        "  bin/up-gui (or up-gui.exe)\n"
-        + ("  lib/up.lib\n" if with_dev else "")
+        "  bin/gz (or gz.exe)\n"
+        "  bin/gz-gui (or gz-gui.exe)\n"
+        + ("  lib/gz.lib\n" if with_dev else "")
         + "\n"
         "Keep both binaries in the same directory.\n"
-        "up-gui runs up from the same folder.\n"
+        "gz-gui runs gz from the same folder.\n"
     )
     return text.encode("utf-8")
 
 
-def _write_zip(out: Path, up: Path, gui: Path, dev_lib: Path | None) -> None:
+def _write_zip(out: Path, gz_cli: Path, gui: Path, dev_lib: Path | None) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     readme = _readme_bytes(dev_lib is not None)
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.write(up, f"bin/{up.name}")
+        zf.write(gz_cli, f"bin/{gz_cli.name}")
         zf.write(gui, f"bin/{gui.name}")
         if dev_lib is not None:
             zf.write(dev_lib, f"lib/{dev_lib.name}")
         zf.writestr("README_PACKAGE.txt", readme)
 
 
-def _write_tar_gz(out: Path, up: Path, gui: Path, dev_lib: Path | None) -> None:
+def _write_tar_gz(out: Path, gz_cli: Path, gui: Path, dev_lib: Path | None) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     readme = _readme_bytes(dev_lib is not None)
     with tarfile.open(out, "w:gz") as tf:
-        tf.add(up, arcname=f"bin/{up.name}")
+        tf.add(gz_cli, arcname=f"bin/{gz_cli.name}")
         tf.add(gui, arcname=f"bin/{gui.name}")
         if dev_lib is not None:
             tf.add(dev_lib, arcname=f"lib/{dev_lib.name}")
@@ -98,7 +98,7 @@ def _write_tar_gz(out: Path, up: Path, gui: Path, dev_lib: Path | None) -> None:
 def main() -> int:
     root = Path(__file__).resolve().parent
     ap = argparse.ArgumentParser(
-        description="Zip/tar.gz up + up-gui for distribution",
+        description="Zip/tar.gz gz + gz-gui for distribution",
         epilog="示例: python package.py   或   python package.py -o dist/my.zip",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -114,9 +114,9 @@ def main() -> int:
     ap.add_argument(
         "--with-dev",
         action="store_true",
-        help="Also include up.lib (installs up_dev component before packing)",
+        help="Also include gz.lib (installs gz_dev component before packing)",
     )
-    ap.add_argument("-o", "--output", type=Path, default=None, help="输出归档路径（默认 dist/up-tools_*.zip）")
+    ap.add_argument("-o", "--output", type=Path, default=None, help="输出归档路径（默认 dist/gz-tools_*.zip）")
     args = ap.parse_args()
     build_dir = args.build_dir
     if not build_dir.is_absolute():
@@ -131,15 +131,15 @@ def main() -> int:
         return code
     dev_lib: Path | None = None
     if args.with_dev:
-        candidate = prefix / "lib" / "up.lib"
+        candidate = prefix / "lib" / "gz.lib"
         if not candidate.is_file():
-            print("error: --with-dev requested but lib/up.lib not found under prefix", file=sys.stderr)
+            print("error: --with-dev requested but lib/gz.lib not found under prefix", file=sys.stderr)
             return 2
         dev_lib = candidate
 
 
     try:
-        up, gui = _find_installed_up_pair(prefix)
+        gz_cli, gui = _find_installed_gz_pair(prefix)
     except FileNotFoundError as e:
         print("error:", e, file=sys.stderr)
         return 2
@@ -155,9 +155,9 @@ def main() -> int:
         out = (root / out).resolve()
 
     if fmt == "zip":
-        _write_zip(out, up, gui, dev_lib)
+        _write_zip(out, gz_cli, gui, dev_lib)
     else:
-        _write_tar_gz(out, up, gui, dev_lib)
+        _write_tar_gz(out, gz_cli, gui, dev_lib)
 
     print("wrote", out)
     return 0

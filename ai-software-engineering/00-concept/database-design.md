@@ -1,17 +1,17 @@
-# 数据与存储设计（广义）
+﻿# 数据与存储设计（广义）
 
 本工具不依赖服务端数据库；**状态以文件为主**。
 
-## `up_cache.txt`
+## `gz_cache.txt`
 
-- **位置**：`.intermediate/build/<leaf>/up_cache.txt`（`<leaf>` 与 `configure --build-dir-name` 对应，默认 `default`）。
-- **用途**：记录 `cwd`、`arch`、主包名、生成文件路径、`scan_roots` 以及以 `UP_` 前缀为主的选项键值（及符合 C 标识符的自定义键），供 `build` / `print-build-dir-name` 等读取。
-- **版本行**：`up.cache.version=1`（实现写入，用于未来演进）。
+- **位置**：`.intermediate/build/<leaf>/gz_cache.txt`（`<leaf>` 与 `configure --build-dir-name` 对应，默认 `default`）。
+- **用途**：记录 `cwd`、`arch`、主包名、生成文件路径、`scan_roots` 以及以 `GZ_` 前缀为主的选项键值（及符合 C 标识符的自定义键），供 `build` / `print-build-dir-name` 等读取。
+- **版本行**：`gz.cache.version=1`（实现写入，用于未来演进）。
 
 ## GUI 设置
 
-- **文件**：`up_gui_settings.txt`（由 `up-gui` 维护，具体路径与字段以实现为准）。
-- **用途**：持久化编译环境与路径类选项；在发起 `configure` 时转为 `--opt` 传给 `up`。
+- **文件**：`gz_gui_settings.txt`（由 `gz-gui` 维护，具体路径与字段以实现为准）。
+- **用途**：持久化编译环境与路径类选项；在发起 `configure` 时转为 `--opt` 传给 `gz`。
 
 ## 其它
 

@@ -1,4 +1,4 @@
-# Script `trigger` message table (entry)
+﻿# Script `trigger` message table (entry)
 
 > **Documentation index**: **[../README.md](../README.md)**
 

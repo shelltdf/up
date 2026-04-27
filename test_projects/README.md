@@ -1,8 +1,8 @@
-# test_projects
+﻿# test_projects
 
 本目录下每一个子目录都是一个独立测试包：根目录放 `package.xml`；每个 CMake 目标独占一个子目录，子目录内恰好一个 `target.xml`。`<sources>` 中的路径相对于该 `target.xml` 所在目录。`configure` 会为整包生成 `add_library` / `add_executable` 并将同包下库链接到各可执行目标。
 
-与 `build.py` / `install.py` 的关系：仓库根的 `build.py`、`install.py` 只构建并安装宿主工具 `up.exe` 与 `up-gui.exe`，不包含、不编译、不安装 `test_projects/` 下的测试包。
+与 `build.py` / `install.py` 的关系：仓库根的 `build.py`、`install.py` 只构建并安装宿主工具 `gz.exe` 与 `gz-gui.exe`，不包含、不编译、不安装 `test_projects/` 下的测试包。
 
 ## 子项目一览
 
@@ -56,7 +56,7 @@ flowchart LR
 
 ## 规则化约束（重要）
 
-`up` / `up-gui` 的行为是**泛化规则引擎**，不内置任何针对具体第三方项目（库名、仓库名、目录布局）的特判。  
+`gz` / `gz-gui` 的行为是**泛化规则引擎**，不内置任何针对具体第三方项目（库名、仓库名、目录布局）的特判。  
 当你在真实项目中接入第三方代码库时，若自动探测信息不足，请通过 `package.xml` / `target.xml` 显式补齐，而不是依赖工具内置“项目知识”。
 
 最小迁移清单（无特判前提）：
@@ -72,7 +72,7 @@ flowchart LR
 3. 依赖引用
    - 包内：`<dependency name="myLib"/>`
    - 跨包：`<dependency name="otherPkg:otherLib"/>`
-   - CMake 后端可选 **`visibility="private|public|interface"`**（默认 `private`）；可执行目标不得使用 `interface`。细则见 **`up spec`** 与 `doc/zh/package-target-xml-spec.md`。
+   - CMake 后端可选 **`visibility="private|public|interface"`**（默认 `private`）；可执行目标不得使用 `interface`。细则见 **`gz spec`** 与 `doc/zh/package-target-xml-spec.md`。
 
 ---
 
@@ -172,67 +172,69 @@ flowchart LR
 
 ---
 
-## 在仓库根目录执行（已构建 `up.exe`）
+## 在仓库根目录执行（已构建 `gz.exe`）
+
+> **路径**：下列 **`.\_build\Release\`** 中的 **`_build`** 为 CMake 构建目录示例名，请与你在仓库根执行 **`cmake -B ...`** 时使用的目录一致（例如 **`_build_gz\Release\`**）。
 
 ```powershell
-.\_build\Release\up.exe configure --scan test_projects
-.\_build\Release\up.exe build
-.\_build\Release\up.exe test
-.\_build\Release\up.exe run hello_demo
+.\_build\Release\gz.exe configure --scan test_projects
+.\_build\Release\gz.exe build
+.\_build\Release\gz.exe test
+.\_build\Release\gz.exe run hello_demo
 ```
 
 单独验证数据文件安装与加载（在 `test_projects` 目录内）：
 
 ```powershell
 Set-Location test_projects
-..\_build\Release\up.exe configure --scan .
-..\_build\Release\up.exe build
-..\_build\Release\up.exe run data_loader
+..\_build\Release\gz.exe configure --scan .
+..\_build\Release\gz.exe build
+..\_build\Release\gz.exe run data_loader
 ```
 
 单独验证元编程工具示例（在 `test_projects` 目录内）：
 
 ```powershell
 Set-Location test_projects
-..\_build\Release\up.exe configure --scan .
-..\_build\Release\up.exe build
-..\_build\Release\up.exe run moc
-..\_build\Release\up.exe run uic
-..\_build\Release\up.exe run rc
+..\_build\Release\gz.exe configure --scan .
+..\_build\Release\gz.exe build
+..\_build\Release\gz.exe run moc
+..\_build\Release\gz.exe run uic
+..\_build\Release\gz.exe run rc
 ```
 
 单独验证插件加载示例（在 `test_projects` 目录内）：
 
 ```powershell
 Set-Location test_projects\plugin_runtime
-..\..\_build\Release\up.exe configure
-..\..\_build\Release\up.exe build
-..\..\_build\Release\up.exe run plugin_loader_test
-..\..\_build\Release\up.exe test
+..\..\_build\Release\gz.exe configure
+..\..\_build\Release\gz.exe build
+..\..\_build\Release\gz.exe run plugin_loader_test
+..\..\_build\Release\gz.exe test
 ```
 
 仅验证父子包示例（在 `test_projects` 目录内）：
 
 ```powershell
 Set-Location test_projects\hello_parent_child
-..\..\_build\Release\up.exe configure
-..\..\_build\Release\up.exe build
-..\..\_build\Release\up.exe test
-..\..\_build\Release\up.exe run hello_parent_child_app
+..\..\_build\Release\gz.exe configure
+..\..\_build\Release\gz.exe build
+..\..\_build\Release\gz.exe test
+..\..\_build\Release\gz.exe run hello_parent_child_app
 ```
 
 单独运行 `hello_simple_lib` 包内工具：
 
 ```powershell
-.\_build\Release\up.exe run hello_simple_lib_tool
+.\_build\Release\gz.exe run hello_simple_lib_tool
 ```
 
 在 `rock_stack` 包目录单独执行：
 
 ```powershell
 Set-Location test_projects\rock_stack
-..\_build\Release\up.exe configure
-..\_build\Release\up.exe build
-..\_build\Release\up.exe test
-..\_build\Release\up.exe run rock_app_one
+..\_build\Release\gz.exe configure
+..\_build\Release\gz.exe build
+..\_build\Release\gz.exe test
+..\_build\Release\gz.exe run rock_app_one
 ```

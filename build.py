@@ -1,9 +1,9 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Configure and build only the up and up-gui executables (CMake targets).
+"""Configure and build only the gz and gz-gui executables (CMake targets).
 
 仓库根 CMake 工程里只有这两个可执行目标；本脚本不会编译、不会改动
-test_projects/ 下的示例包（那些由 up configure/build 在 .intermediate 里单独生成）。
+test_projects/ 下的示例包（那些由 gz configure/build 在 .intermediate 里单独生成）。
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from pathlib import Path
 
 # 与 CMakeLists.txt 中 add_executable 名称一致；勿在此构建其它目标。
 # 仅影响 --build-dir（默认 _build）；与 test_projects/ 无交集。
-UP_CLI_TARGETS = ("up", "up-gui")
+GZ_CLI_TARGETS = ("gz", "gz-gui")
 
 
 def _run(cmd: list[str], cwd: Path) -> int:
@@ -27,7 +27,7 @@ def _run(cmd: list[str], cwd: Path) -> int:
 
 def _default_generator() -> tuple[list[str], Path | None]:
     """Extra cmake configure args for -G / toolset; returns (args, cwd_hint)."""
-    g = os.environ.get("UP_CMAKE_GENERATOR", "").strip()
+    g = os.environ.get("GZ_CMAKE_GENERATOR", "").strip()
     if g:
         return (["-G", g], None)
     if sys.platform == "win32":
@@ -40,8 +40,8 @@ def _default_generator() -> tuple[list[str], Path | None]:
 def main() -> int:
     root = Path(__file__).resolve().parent
     ap = argparse.ArgumentParser(
-        description="CMake configure + build for targets: " + ", ".join(UP_CLI_TARGETS),
-        epilog="说明：只构建宿主工具 up / up-gui；不编译 test_projects 中的测试包源码。",
+        description="CMake configure + build for targets: " + ", ".join(GZ_CLI_TARGETS),
+        epilog="说明：只构建宿主工具 gz / gz-gui；不编译 test_projects 中的测试包源码。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("--build-dir", type=Path, default=root / "_build", help="CMake build directory")
@@ -52,7 +52,7 @@ def main() -> int:
         help="Build configuration (MSVC multi-config)",
     )
     ap.add_argument(
-        "--generator", "-G", default="", help="CMake -G (overrides UP_CMAKE_GENERATOR and defaults)"
+        "--generator", "-G", default="", help="CMake -G (overrides GZ_CMAKE_GENERATOR and defaults)"
     )
     ap.add_argument("--clean", action="store_true", help="Remove build directory before configure")
     ap.add_argument(
@@ -86,7 +86,7 @@ def main() -> int:
         return code
 
     build_cmd = ["cmake", "--build", str(build_dir), "--config", args.config]
-    for t in UP_CLI_TARGETS:
+    for t in GZ_CLI_TARGETS:
         build_cmd.extend(["--target", t])
     return _run(build_cmd, root)
 

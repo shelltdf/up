@@ -1,7 +1,8 @@
-.intermediate/
+﻿.intermediate/
 _build/
+# Root-level CMake build dirs named _build*, e.g. _build_gz, _build_agent_rev
+/_build*/
 dist/
 /_tbuild
 /build
 /__pycache__
-/.up

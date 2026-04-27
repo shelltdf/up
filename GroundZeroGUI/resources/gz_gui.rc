@@ -1,0 +1,3 @@
+﻿// Application icon: mushroom cloud motif (1:1 ICO, multi-resolution).
+// Resource id 1 — must match kGzGuiAppIconResourceId in platform/win32/win32_gui_ids.hpp
+1 ICON "gz_gui.ico"

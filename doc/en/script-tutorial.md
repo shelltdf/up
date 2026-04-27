@@ -1,4 +1,4 @@
-# Scripts, preprocess, and Qt tutorial (entry)
+﻿# Scripts, preprocess, and Qt tutorial (entry)
 
 > **Documentation index**: **[../README.md](../README.md)**
 

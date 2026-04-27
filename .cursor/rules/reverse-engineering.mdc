@@ -1,4 +1,4 @@
----
+﻿---
 description: 逆向工程、反向生成文档、reverse engineer docs——仅在此类口令下执行；输出到 reverse-engineering 独立目录，不改动实现侧源码树。
 alwaysApply: false
 ---

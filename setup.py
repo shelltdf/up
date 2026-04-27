@@ -1,6 +1,6 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Install/uninstall up and up-gui with simple switches.
+"""Install/uninstall gz and gz-gui with simple switches.
 
 -i: install binaries to platform target directory
 -u: uninstall binaries from platform target directory
@@ -29,8 +29,8 @@ def _install_target_dir() -> Path:
 
 def _binary_names() -> tuple[str, str]:
     if sys.platform == "win32":
-        return ("up.exe", "up-gui.exe")
-    return ("up", "up-gui")
+        return ("gz.exe", "gz-gui.exe")
+    return ("gz", "gz-gui")
 
 
 def _copy_executable(src: Path, dst: Path) -> None:
@@ -63,27 +63,27 @@ def do_install(root: Path, build_dir: Path, config: str) -> int:
     src_bin = root / "dist" / "bin"
     target_dir = _install_target_dir()
     target_dir.mkdir(parents=True, exist_ok=True)
-    up_name, gui_name = _binary_names()
-    src_up = src_bin / up_name
-    src_gui = src_bin / gui_name
-    if not src_up.is_file() or not src_gui.is_file():
-        print(f"error: missing built binaries: {src_up} / {src_gui}", file=sys.stderr)
+    gz_name, gui_name = _binary_names()
+    built_cli = src_bin / gz_name
+    built_gui = src_bin / gui_name
+    if not built_cli.is_file() or not built_gui.is_file():
+        print(f"error: missing built binaries: {built_cli} / {built_gui}", file=sys.stderr)
         return 2
 
-    dst_up = target_dir / up_name
+    dst_gz = target_dir / gz_name
     dst_gui = target_dir / gui_name
-    print(f"+ copy {src_up} -> {dst_up}", flush=True)
-    _copy_executable(src_up, dst_up)
-    print(f"+ copy {src_gui} -> {dst_gui}", flush=True)
-    _copy_executable(src_gui, dst_gui)
+    print(f"+ copy {built_cli} -> {dst_gz}", flush=True)
+    _copy_executable(built_cli, dst_gz)
+    print(f"+ copy {built_gui} -> {dst_gui}", flush=True)
+    _copy_executable(built_gui, dst_gui)
     print(f"installed to {target_dir}")
     return 0
 
 
 def do_uninstall() -> int:
     target_dir = _install_target_dir()
-    up_name, gui_name = _binary_names()
-    targets = [target_dir / up_name, target_dir / gui_name]
+    gz_name, gui_name = _binary_names()
+    targets = [target_dir / gz_name, target_dir / gui_name]
     for p in targets:
         if p.exists():
             print(f"+ remove {p}", flush=True)
@@ -96,7 +96,7 @@ def do_uninstall() -> int:
 
 def main() -> int:
     root = Path(__file__).resolve().parent
-    ap = argparse.ArgumentParser(description="Install/uninstall up and up-gui.")
+    ap = argparse.ArgumentParser(description="Install/uninstall gz and gz-gui.")
     group = ap.add_mutually_exclusive_group(required=True)
     group.add_argument("-i", action="store_true", help="Install binaries")
     group.add_argument("-u", action="store_true", help="Uninstall binaries")
