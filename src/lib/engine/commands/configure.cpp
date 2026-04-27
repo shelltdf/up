@@ -994,17 +994,17 @@ int cmd_configure(const std::filesystem::path& cwd,
       continue;
     PackageDesc pkg;
     std::string err;
-    if (!load_package_xml(pkg_node->package_xml_path, pkg, err)) {
-      std::cerr << to_posix_path_string(pkg_node->package_xml_path) << ": " << err << "\n";
+    if (!load_package_xml(pkg_node->package_xml_path(), pkg, err)) {
+      std::cerr << to_posix_path_string(pkg_node->package_xml_path()) << ": " << err << "\n";
       return 3;
     }
     if (package_name_to_dir.count(pkg.name)) {
       std::cerr << "configure: duplicate package name: " << pkg.name << "\n";
       return 3;
     }
-    package_name_to_dir[pkg.name] = pkg_node->package_xml_path.parent_path();
+    package_name_to_dir[pkg.name] = pkg_node->package_xml_path().parent_path();
     package_name_to_desc[pkg.name] = pkg;
-    loaded_packages.push_back({pkg_node->package_xml_path, pkg});
+    loaded_packages.push_back({pkg_node->package_xml_path(), pkg});
   }
 
   std::vector<LoadedTarget> all_targets;
@@ -1013,23 +1013,23 @@ int cmd_configure(const std::filesystem::path& cwd,
     const auto* pkg_node = kv.second;
     if (!pkg_node)
       continue;
-    for (const auto& child : pkg_node->children) {
-      if (child->type != DomNodeType::Target)
+    for (const auto& child : pkg_node->children()) {
+      if (child->type() != DomNodeType::Target)
         continue;
       const auto* tgt_node = static_cast<const TargetNode*>(child.get());
       TargetDesc td;
       std::string err;
-      if (!load_target_xml(tgt_node->target_xml_path, td, err)) {
-        std::cerr << to_posix_path_string(tgt_node->target_xml_path) << ": " << err << "\n";
+      if (!load_target_xml(tgt_node->target_xml_path(), td, err)) {
+        std::cerr << to_posix_path_string(tgt_node->target_xml_path()) << ": " << err << "\n";
         return 3;
       }
       LoadedTarget lt;
-      lt.target_dir = tgt_node->target_xml_path.parent_path();
-      lt.package_name = pkg_node->name;
+      lt.target_dir = tgt_node->target_xml_path().parent_path();
+      lt.package_name = pkg_node->name();
       lt.desc = std::move(td);
       const std::string key = lt.package_name + ":" + lt.desc.name;
       if (target_index.count(key)) {
-        std::cerr << "configure: duplicate target key: " << key << " at " << to_posix_path_string(tgt_node->target_xml_path)
+        std::cerr << "configure: duplicate target key: " << key << " at " << to_posix_path_string(tgt_node->target_xml_path())
                   << "\n";
         return 3;
       }
@@ -1329,8 +1329,8 @@ int cmd_configure(const std::filesystem::path& cwd,
     if (pit == dom.packages_by_name().end() || !pit->second)
       return nullptr;
     const auto* pkg = pit->second;
-    for (const auto& child : pkg->children) {
-      if (child->type == DomNodeType::Target && child->name == lt.desc.name)
+    for (const auto& child : pkg->children()) {
+      if (child->type() == DomNodeType::Target && child->name() == lt.desc.name)
         return child.get();
     }
     return pkg;

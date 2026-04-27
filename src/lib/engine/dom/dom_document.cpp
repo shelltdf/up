@@ -14,9 +14,9 @@ namespace up {
 bool DomDocument::build(const BuildDomOptions& options, DomDocument& out, std::string& error) {
   out = DomDocument{};
   auto root = std::make_unique<GlobalNode>();
-  root->type = DomNodeType::Global;
-  root->name = "global";
-  root->workspace_root = options.cwd;
+  root->type_ = DomNodeType::Global;
+  root->name_ = "global";
+  root->workspace_root_ = options.cwd;
 
   std::map<std::filesystem::path, PackageNode*> package_by_dir;
   for (const auto& pkg_path : options.package_files) {
@@ -27,19 +27,19 @@ bool DomDocument::build(const BuildDomOptions& options, DomDocument& out, std::s
       return false;
     }
     auto node = std::make_unique<PackageNode>();
-    node->type = DomNodeType::Package;
-    node->name = pkg.name;
-    node->version = pkg.version;
-    node->package_xml_path = pkg_path;
-    node->dependencies = pkg.dependencies;
+    node->type_ = DomNodeType::Package;
+    node->name_ = pkg.name;
+    node->version_ = pkg.version;
+    node->package_xml_path_ = pkg_path;
+    node->dependencies_ = pkg.dependencies;
     if (pkg.external_cmake.has_value())
-      node->external_cmake_source_dir = pkg.external_cmake->source_dir;
+      node->external_cmake_source_dir_ = pkg.external_cmake->source_dir;
     for (const auto& kv : pkg.vars) {
       VarEntry e;
       e.name = kv.first;
       e.value.type = VarValueType::Scalar;
       e.value.value = kv.second;
-      node->vars.push_back(std::move(e));
+      node->vars_.push_back(std::move(e));
     }
     for (const auto& sv : pkg.scripts) {
       VarEntry e;
@@ -48,50 +48,50 @@ bool DomDocument::build(const BuildDomOptions& options, DomDocument& out, std::s
       e.value.script.script_type = sv.script_type.empty() ? "lua" : sv.script_type;
       e.value.script.trigger = sv.trigger;
       e.value.script.source = sv.source;
-      node->vars.push_back(std::move(e));
+      node->vars_.push_back(std::move(e));
     }
     for (const auto& d : pkg.defines)
-      node->defines.push_back(d.value.empty() ? d.name : (d.name + "=" + d.value));
+      node->defines_.push_back(d.value.empty() ? d.name : (d.name + "=" + d.value));
     for (const auto& cf : pkg.config_files)
-      node->config_files_in_to.push_back(cf.in + "::" + cf.to);
+      node->config_files_in_to_.push_back(cf.in + "::" + cf.to);
 
     package_by_dir[pkg_path.parent_path()] = node.get();
-    out.package_by_name_[node->name] = node.get();
-    root->children.push_back(std::move(node));
+    out.package_by_name_[node->name_] = node.get();
+    root->children_.push_back(std::move(node));
   }
 
   std::vector<PackageNode*> ordered;
-  for (auto& child : root->children) {
-    if (child->type == DomNodeType::Package)
+  for (auto& child : root->children_) {
+    if (child->type() == DomNodeType::Package)
       ordered.push_back(static_cast<PackageNode*>(child.get()));
   }
   std::sort(ordered.begin(), ordered.end(), [](const PackageNode* a, const PackageNode* b) {
-    return a->package_xml_path.parent_path().native().size() < b->package_xml_path.parent_path().native().size();
+    return a->package_xml_path().parent_path().native().size() < b->package_xml_path().parent_path().native().size();
   });
   for (PackageNode* pkg : ordered) {
     PackageNode* best_parent = nullptr;
-    const auto my_dir = pkg->package_xml_path.parent_path();
+    const auto my_dir = pkg->package_xml_path_.parent_path();
     for (PackageNode* maybe : ordered) {
       if (maybe == pkg)
         continue;
-      const auto pdir = maybe->package_xml_path.parent_path();
+      const auto pdir = maybe->package_xml_path_.parent_path();
       const std::string my = to_posix_path_string(my_dir);
       const std::string pd = to_posix_path_string(pdir);
       if (my.rfind(pd, 0) == 0 && my != pd) {
         if (!best_parent ||
-            to_posix_path_string(best_parent->package_xml_path.parent_path()).size() < pd.size()) {
+            to_posix_path_string(best_parent->package_xml_path_.parent_path()).size() < pd.size()) {
           best_parent = maybe;
         }
       }
     }
     if (!best_parent)
       continue;
-    for (auto it = root->children.begin(); it != root->children.end(); ++it) {
+    for (auto it = root->children_.begin(); it != root->children_.end(); ++it) {
       if (it->get() == pkg) {
         std::unique_ptr<DomNode> moved = std::move(*it);
-        root->children.erase(it);
-        moved->parent = best_parent;
-        best_parent->children.push_back(std::move(moved));
+        root->children_.erase(it);
+        moved->parent_ = best_parent;
+        best_parent->children_.push_back(std::move(moved));
         break;
       }
     }
@@ -117,19 +117,19 @@ bool DomDocument::build(const BuildDomOptions& options, DomDocument& out, std::s
     if (!owner)
       continue;
     auto target = std::make_unique<TargetNode>();
-    target->type = DomNodeType::Target;
-    target->name = td.name;
-    target->target_type = td.type;
-    target->target_xml_path = target_path;
-    target->parent = owner;
+    target->type_ = DomNodeType::Target;
+    target->name_ = td.name;
+    target->target_type_ = td.type;
+    target->target_xml_path_ = target_path;
+    target->parent_ = owner;
     for (const auto& dep : td.dependencies)
-      target->dependencies.push_back({dep.name, false});
+      target->dependencies_.push_back({dep.name, false});
     for (const auto& kv : td.vars) {
       VarEntry e;
       e.name = kv.first;
       e.value.type = VarValueType::Scalar;
       e.value.value = kv.second;
-      target->vars.push_back(std::move(e));
+      target->vars_.push_back(std::move(e));
     }
     for (const auto& sv : td.scripts) {
       VarEntry e;
@@ -138,9 +138,9 @@ bool DomDocument::build(const BuildDomOptions& options, DomDocument& out, std::s
       e.value.script.script_type = sv.script_type.empty() ? "lua" : sv.script_type;
       e.value.script.trigger = sv.trigger;
       e.value.script.source = sv.source;
-      target->vars.push_back(std::move(e));
+      target->vars_.push_back(std::move(e));
     }
-    owner->children.push_back(std::move(target));
+    owner->children_.push_back(std::move(target));
   }
 
   out.global_ = std::move(root);

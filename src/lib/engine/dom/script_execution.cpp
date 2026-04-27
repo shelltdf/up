@@ -52,12 +52,12 @@ std::vector<const ScriptValue*> collect_scripts_for_message(const ScriptExecutio
     return out;
   const DomNode* node = context.current_node;
   while (node) {
-    for (const auto& v : node->vars) {
+    for (const auto& v : node->vars()) {
       if (v.value.type == VarValueType::Script &&
           parse_message_type(v.value.script.trigger) == context.message_type)
         out.push_back(&v.value.script);
     }
-    node = node->parent;
+    node = node->parent();
   }
   return out;
 }
