@@ -18,7 +18,7 @@
 | [smoke_minimal_exe/](smoke_minimal_exe/) | **最小包冒烟**：仅可执行目标。 |
 | [hello_library_type/](hello_library_type/) | **`type="library"`**：随 **`GZ_TARGET_DYNAMIC_LIBRARY`** 在 configure 时解析为静/动库；可执行目标依赖默认自动链接。 |
 | [prebuilt_static_stub/](prebuilt_static_stub/) | 演示 **`prebuilt_static_library`** + **`<prebuilt import_lib="..."/>`**：链入预编译的 `stub_import.lib`（Windows MSVC x64 已提交 `lib/import/`；可再用 `lib/CMakeLists.txt` 重生）。 |
-| third-party CMake SDK（外部目录） | **推荐**：包外 `cmake --install` 后**手写** `imported_installed_*` / `prebuilt_*`（见 [`doc/zh/getting-started.md`](../doc/zh/getting-started.md)）。 |
+| third-party CMake SDK（外部目录） | **推荐**：包外 `cmake --install` 后 **vendor** 进本包，**手写** `prebuilt_*` + `<prebuilt>`（或 **`GZ_CMAKE_PREFIX_PATH`**；见 [`doc/zh/getting-started.md`](../doc/zh/getting-started.md)）。 |
 
 ### 包依赖关系
 
@@ -55,7 +55,7 @@ flowchart LR
 - `prebuilt_static_stub`：无包级依赖（预编译静态库导入示例）。
 - `third_party_cmake_sdk`（external）：外部目录示例节点，不属于仓库内 `test_projects/` 子目录；实际依赖关系取决于被导入 SDK 的 `package.xml/target.xml`。
 
-补充：当前实现支持“纯库包”配置/构建（无需 executable）。第三方 SDK 也可完全由手写 **`target.xml`**（含 `prebuilt_*` / `imported_installed_*`）描述，不必生成 `.targets/` 目录。
+补充：当前实现支持“纯库包”配置/构建（无需 executable）。第三方 SDK 也可完全由手写 **`target.xml`**（`prebuilt_*` 等）描述，不必生成 `.targets/` 目录。
 
 ## 规则化约束（重要）
 
@@ -66,12 +66,11 @@ flowchart LR
 
 1. `package.xml`
    - 声明包级依赖：`<dependency name="..."/>`
-   - 在包外构建/安装上游后在本包 `target.xml` 用 **`imported_installed_*`** 等声明产物。
+   - 在包外构建/安装上游后，将所需文件 **vendor** 进本包，在 `target.xml` 用 **`prebuilt_*`** 等声明。
 2. `target.xml`
-   - 预编译库：使用 `prebuilt_static_library` / `prebuilt_shared_library` + `<prebuilt .../>`
-   - 上游安装产物包装：使用 `imported_installed_static_library` / `imported_installed_shared_library` + `<install artifact="..."/>`
-   - Windows 的 `imported_installed_shared_library` 需要额外声明 `implib="..."`
-   - 头文件目录通过 `<interface_include dir="..."/>`（安装相对路径）或 `<headers>` 显式声明
+   - 预编译库：使用 `prebuilt_static_library` / `prebuilt_shared_library` + `<prebuilt .../>`（路径相对 `target.xml` 或绝对路径）
+   - Windows 的 `prebuilt_shared_library` 需能解析 **`.dll`** 与 **import `.lib`**
+   - 头文件目录用 **`<headers>`**（`from` 相对 `target.xml`）显式声明
 3. 依赖引用
    - 包内：`<dependency name="myLib"/>`
    - 跨包：`<dependency name="otherPkg:otherLib"/>`

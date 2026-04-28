@@ -62,12 +62,6 @@ struct ConfigureTargetModel {
   /** CMake `target_link_libraries`: target name + visibility keyword (private|public|interface). */
   std::vector<std::pair<std::string, std::string>> links;
   bool imported_prebuilt = false;
-  // True: IMPORTED_* paths are ${CMAKE_INSTALL_PREFIX}/<rel> (installed artifact layout).
-  bool imported_from_install_prefix = false;
-  std::string install_rel_artifact;
-  std::string install_rel_interface_include;
-  // Windows shared IMPORTED: import library path relative to CMAKE_INSTALL_PREFIX.
-  std::string install_rel_implib;
   // IMPORTED_LOCATION (shared: primary binary), IMPORTED_IMPLIB (Windows .lib)
   std::string imported_location;
   std::string imported_implib;

@@ -97,12 +97,6 @@ bool parse_one_target_object(const std::string& obj, GzRedistManifestTarget& t, 
   extract_json_string(obj, "install_rel_import_lib", t.install_rel_import_lib);
   extract_json_string(obj, "install_rel_location", t.install_rel_location);
   extract_json_string(obj, "install_rel_dll", t.install_rel_dll);
-  std::string u;
-  if (extract_json_string(obj, "use_installed_wrap", u))
-    t.use_installed_wrap = (u == "1" || u == "true");
-  extract_json_string(obj, "install_rel_artifact", t.install_rel_artifact);
-  extract_json_string(obj, "install_rel_implib", t.install_rel_implib);
-  extract_json_string(obj, "installed_iface_include", t.installed_iface_include);
   std::string deps;
   const std::string dk = "\"dependency_names\":[";
   const size_t dp = obj.find(dk);
@@ -257,10 +251,7 @@ bool write_gz_redist_manifest_json(const std::filesystem::path& path, const GzRe
       << json_escape_string(t.emit_name) << "\",\"emit_subdir\":\"" << json_escape_string(t.emit_subdir) << "\",\"emit_type\":\""
       << json_escape_string(t.emit_type) << "\",\"install_rel_import_lib\":\"" << json_escape_string(t.install_rel_import_lib)
       << "\",\"install_rel_location\":\"" << json_escape_string(t.install_rel_location) << "\",\"install_rel_dll\":\""
-      << json_escape_string(t.install_rel_dll) << "\",\"use_installed_wrap\":\"" << (t.use_installed_wrap ? "true" : "false")
-      << "\",\"install_rel_artifact\":\"" << json_escape_string(t.install_rel_artifact) << "\",\"install_rel_implib\":\""
-      << json_escape_string(t.install_rel_implib) << "\",\"installed_iface_include\":\""
-      << json_escape_string(t.installed_iface_include) << "\",\"dependency_names\":[";
+      << json_escape_string(t.install_rel_dll) << "\",\"dependency_names\":[";
     for (size_t di = 0; di < t.dependency_names.size(); ++di) {
       if (di)
         o << ',';
@@ -322,11 +313,6 @@ bool read_gz_redist_manifest_json(const std::filesystem::path& path, GzRedistMan
     extract_json_string(raw, "link", m.layout.link);
     extract_json_string(raw, "config", m.layout.config);
     extract_json_string(raw, "crt", m.layout.crt);
-    if (m.layout.os.empty()) {
-      std::string idl;
-      if (extract_json_string(raw, "install_dir_leaf", idl) && !idl.empty())
-        decompose_to_layout(idl, m.layout);
-    }
   }
   m.package_dependencies.clear();
   if (!parse_deps_array(raw, m.package_dependencies)) {
@@ -354,28 +340,17 @@ int emit_gz_redistribution_xml(const std::filesystem::path& install_root, const 
   }
 
   for (const auto& t : m.targets) {
-    if (t.use_installed_wrap) {
-      if (!file_exists_under(install_root, t.install_rel_artifact)) {
-        error = "missing installed artifact: " + t.install_rel_artifact;
-        return 5;
-      }
-      if (!t.install_rel_implib.empty() && !file_exists_under(install_root, t.install_rel_implib)) {
-        error = "missing installed implib: " + t.install_rel_implib;
-        return 5;
-      }
-    } else {
-      if (!t.install_rel_import_lib.empty() && !file_exists_under(install_root, t.install_rel_import_lib)) {
-        error = "missing prebuilt import_lib: " + t.install_rel_import_lib;
-        return 6;
-      }
-      if (!t.install_rel_location.empty() && !file_exists_under(install_root, t.install_rel_location)) {
-        error = "missing prebuilt location: " + t.install_rel_location;
-        return 6;
-      }
-      if (!t.install_rel_dll.empty() && !file_exists_under(install_root, t.install_rel_dll)) {
-        error = "missing prebuilt dll: " + t.install_rel_dll;
-        return 6;
-      }
+    if (!t.install_rel_import_lib.empty() && !file_exists_under(install_root, t.install_rel_import_lib)) {
+      error = "missing prebuilt import_lib: " + t.install_rel_import_lib;
+      return 6;
+    }
+    if (!t.install_rel_location.empty() && !file_exists_under(install_root, t.install_rel_location)) {
+      error = "missing prebuilt location: " + t.install_rel_location;
+      return 6;
+    }
+    if (!t.install_rel_dll.empty() && !file_exists_under(install_root, t.install_rel_dll)) {
+      error = "missing prebuilt dll: " + t.install_rel_dll;
+      return 6;
     }
   }
 
@@ -406,14 +381,7 @@ int emit_gz_redistribution_xml(const std::filesystem::path& install_root, const 
       de.visibility = "private";
       tdsc.dependencies.push_back(std::move(de));
     }
-    if (t.use_installed_wrap) {
-      TargetDesc::InstalledWrapDesc iw;
-      iw.artifact = t.install_rel_artifact;
-      iw.implib = t.install_rel_implib;
-      iw.interface_include = t.installed_iface_include;
-      iw.layout = m.layout;
-      tdsc.installed_wrap = std::move(iw);
-    } else {
+    {
       TargetDesc::PrebuiltDesc pb;
       pb.import_lib = rebase_install_rel_to_target_dir(install_root, td, t.install_rel_import_lib);
       pb.location = rebase_install_rel_to_target_dir(install_root, td, t.install_rel_location);

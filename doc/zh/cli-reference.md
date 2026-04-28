@@ -76,6 +76,7 @@ gz --help | -h | help
 | **2** | **参数缺失/非法**、常见「找不到缓存/目录」等可恢复错误（各子命令 stderr 有说明）。 |
 | **3** | 部分重型步骤失败（如 **`list`** DOM 构建失败以外的写盘失败等，见各命令实现）。 |
 | **4** | **`list`**：导出 XML/JSON 文件或向 stdout 写 DOM 失败。 |
+| **5** | **`configure`**：生成后端图/目标模型等**业务失败**（含 **`target.xml` `type`** 不在允许集合时 stderr **`configure: unknown target type "…" for target "…"`**；预置/导入目标等其它校验失败亦可能为 **5**，见 **`configure.cpp`**）。 |
 | **6** | **`list`**：`package.xml` / `target.xml` 路径含 **非 ASCII**。 |
 | **8** | **`build`**：存在 **`gz_redist_manifest.json`** 但**内容无法解析**（JSON 损坏等）。若文件**不存在**则**跳过**二次分发并 **0**（主包无库类目标时 **`configure`** 可能不写该文件）。 |
 | **9** | **`build`**：二次分发 XML **落盘或安装树校验失败**（缺预期二进制等）。 |
@@ -128,6 +129,8 @@ gz configure [--build-dir-name <叶子>] [--scan <目录>]... [--opt KEY=VALUE].
 | **`--opt KEY=VALUE`** | 否 | 可重复；亦可 **`--opt=KEY=VALUE`**。用于覆盖 **`GZ_*`** 及项目自定义键（合并规则见 **`internal-variables.md`** / **`gz spec`**）。 |
 
 **路径**：扫描到的 XML 路径必须 **ASCII**（否则 configure 失败）。
+
+**`type` 与退出码 5**：**`target.xml`** 的 **`type`** 须为 **[`package-target-xml-spec.md`](package-target-xml-spec.md) §3.1** 与实现白名单中的值；若不在白名单，stderr 为 **`configure: unknown target type "…" for target "…" in …/target.xml`**，**退出码 5**（与其它 **configure** 业务失败共享 **5**；完整列表见上表与 **`GroundZero/lib/engine/commands/configure.cpp`**）。
 
 **`GZ_TARGET_DYNAMIC_LIBRARY`（兼容 `GZ_DYNAMIC_LIBRARY`）**：写入 **`--opt`** 或缓存后参与 **`arch`** 组合中的 static/dynamic 段，并在 **`configure`** 内把 **`target.xml`** 的 **`type="library"`** 解析为 **`static_library`** 或 **`shared_library`** 再生成后端工程；**`static_library` / `shared_library`** 始终强制对应形态，**不受**此项覆盖。字段级约定见 **[`package-target-xml-spec.md`](package-target-xml-spec.md) §3.1**。
 

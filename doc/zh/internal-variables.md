@@ -79,7 +79,7 @@
 1. 当前 **cwd** 下本配置的安装前缀 **`.intermediate/install/<arch>/`**（始终排在最前，便于优先找到本工作区已安装的包）。
 2. **`--opt GZ_CMAKE_PREFIX_PATH=路径1;路径2`** 中的额外前缀（如第三方 SDK 的 CMake 包根）；相对路径按 **cwd** 解析。
 
-此外，当主包声明依赖且依赖包存在 **`imported_installed_*`** 目标时，`configure` 会尝试把这些已知安装信息映射为常见 **`find_package`** 缓存变量并传给主包聚合 CMake（例如 `<PKG>_LIBRARY` / `<PKG>_LIBRARY_DEBUG` / `<PKG>_INCLUDE_DIR` 等），以降低仅靠 `CMAKE_PREFIX_PATH` 仍解析不稳的情况。Windows 下会优先选择 **`implib`** 或 **`.lib`**，避免把 **`.dll`** 误传入链接变量。
+聚合 CMake 的 **`find_package`** 行为仍**完全**由你写的 **CMake 侧** 与 **`CMAKE_PREFIX_PATH` / `GZ_CMAKE_PREFIX_PATH`** 决定；`gz` **不**为第三方库名生成特判的缓存变量。
 
 ---
 

@@ -118,42 +118,6 @@ std::string normalize_install_rel_path(std::string s) {
   return s;
 }
 
-bool configure_installed_import_target_model(const LoadedTarget& lt,
-                                             bool imported_installed_shared,
-                                             ConfigureTargetModel& tm) {
-  if (!lt.desc.installed_wrap.has_value()) {
-    std::cerr << "configure: target \"" << lt.desc.name << "\" (" << lt.desc.type << ") requires <install artifact=\"...\"/> in "
-              << to_posix_path_string(lt.target_dir / "target.xml") << "\n";
-    return false;
-  }
-  const std::string rel_art = normalize_install_rel_path(lt.desc.installed_wrap->artifact);
-  if (rel_art.empty()) {
-    std::cerr << "configure: target \"" << lt.desc.name << "\": <install artifact=\"...\"/> must not be empty\n";
-    return false;
-  }
-  tm.imported_prebuilt = true;
-  tm.imported_from_install_prefix = true;
-  tm.install_rel_artifact = rel_art;
-  tm.imported_location = std::string("${CMAKE_INSTALL_PREFIX}/") + rel_art;
-  const std::string iface = normalize_install_rel_path(lt.desc.installed_wrap->interface_include);
-  if (!iface.empty())
-    tm.install_rel_interface_include = iface;
-  if (imported_installed_shared) {
-#if defined(_WIN32)
-    const std::string rel_imp = normalize_install_rel_path(lt.desc.installed_wrap->implib);
-    if (rel_imp.empty()) {
-      std::cerr << "configure: imported_installed_shared_library \"" << lt.desc.name
-                << "\" on Windows requires <install implib=\"...\"/> (import .lib under install prefix).\n";
-      return false;
-    }
-    tm.install_rel_implib = rel_imp;
-    tm.imported_implib = std::string("${CMAKE_INSTALL_PREFIX}/") + rel_imp;
-    tm.imported_dll = tm.imported_location;
-#endif
-  }
-  return true;
-}
-
 void append_cmake_prefix_unique(std::vector<std::filesystem::path>& dedup,
                                 const std::filesystem::path& candidate,
                                 const std::filesystem::path& cwd) {
@@ -378,11 +342,8 @@ void try_write_gz_redist_manifest_json(const std::filesystem::path& manifest_pat
       continue;
     const std::string& ty = lt.desc.type;
     if (ty == "static_library" || ty == "shared_library" || ty == "library" || ty == "prebuilt_static_library" ||
-        ty == "prebuilt_shared_library" || ty == "imported_installed_static_library" ||
-        ty == "imported_installed_shared_library") {
-      if (ty == "imported_installed_static_library" || ty == "imported_installed_shared_library")
-        orig_emit[lt.desc.name] = lt.desc.name;
-      else if (ty == "prebuilt_static_library" || ty == "prebuilt_shared_library")
+        ty == "prebuilt_shared_library") {
+      if (ty == "prebuilt_static_library" || ty == "prebuilt_shared_library")
         orig_emit[lt.desc.name] = lt.desc.name;
       else {
         if (lt.desc.name.rfind("prebuilt_", 0) == 0)
@@ -425,22 +386,8 @@ void try_write_gz_redist_manifest_json(const std::filesystem::path& manifest_pat
     else if (lt.desc.type == "shared_library")
       mt.emit_type = "prebuilt_shared_library";
 
-    if (lt.desc.type == "imported_installed_static_library" || lt.desc.type == "imported_installed_shared_library") {
-      if (!lt.desc.installed_wrap.has_value())
-        continue;
-      mt.use_installed_wrap = true;
-      mt.install_rel_artifact = normalize_install_rel_path(lt.desc.installed_wrap->artifact);
-      mt.install_rel_implib = normalize_install_rel_path(lt.desc.installed_wrap->implib);
-      mt.installed_iface_include = normalize_install_rel_path(lt.desc.installed_wrap->interface_include);
-      mt.emit_type = lt.desc.type;
-    } else if (lt.desc.type == "prebuilt_static_library" || lt.desc.type == "prebuilt_shared_library") {
-      if (tm.imported_from_install_prefix) {
-        mt.use_installed_wrap = true;
-        mt.install_rel_artifact = normalize_install_rel_path(tm.install_rel_artifact);
-        mt.install_rel_implib = normalize_install_rel_path(tm.install_rel_implib);
-        mt.installed_iface_include = normalize_install_rel_path(tm.install_rel_interface_include);
-        mt.emit_type = lt.desc.type;
-      } else if (lt.desc.type == "prebuilt_static_library") {
+    if (lt.desc.type == "prebuilt_static_library" || lt.desc.type == "prebuilt_shared_library") {
+      if (lt.desc.type == "prebuilt_static_library") {
         const std::string fn = std::filesystem::path(tm.imported_location).filename().string();
         mt.install_rel_import_lib = fn.empty() ? "" : ("lib/" + fn);
       } else {
@@ -710,8 +657,7 @@ void write_packages_md(const std::filesystem::path& out_path,
   } else if (!intra_package_target_graph_pkg.empty() && graph_model.targets.size() == build_targets.size()) {
     auto is_lib_target = [](const std::string& ty) {
       return ty == "static_library" || ty == "shared_library" || ty == "library" || ty == "prebuilt_static_library" ||
-             ty == "prebuilt_shared_library" || ty == "imported_installed_static_library" ||
-             ty == "imported_installed_shared_library";
+             ty == "prebuilt_shared_library";
     };
     std::set<std::string> primary_lib_names;
     for (const auto& lt : all_targets) {
@@ -1069,8 +1015,7 @@ int run_configure(const ConfigureRequest& req) {
     if (!require_ascii_path(lt.target_dir))
       return 6;
     if (lt.desc.type == "asset_bundle" || lt.desc.type == "prebuilt_static_library" ||
-        lt.desc.type == "prebuilt_shared_library" || lt.desc.type == "imported_installed_static_library" ||
-        lt.desc.type == "imported_installed_shared_library")
+        lt.desc.type == "prebuilt_shared_library")
       continue;
     for (const auto& s : lt.desc.sources) {
       const auto sp = (lt.target_dir / s).lexically_normal();
@@ -1113,9 +1058,7 @@ int run_configure(const ConfigureRequest& req) {
       const auto& dep_lt = all_targets[it->second];
       const bool dep_is_link_lib =
           (dep_lt.desc.type == "static_library" || dep_lt.desc.type == "shared_library" || dep_lt.desc.type == "library" ||
-           dep_lt.desc.type == "prebuilt_static_library" || dep_lt.desc.type == "prebuilt_shared_library" ||
-           dep_lt.desc.type == "imported_installed_static_library" ||
-           dep_lt.desc.type == "imported_installed_shared_library");
+           dep_lt.desc.type == "prebuilt_static_library" || dep_lt.desc.type == "prebuilt_shared_library");
       const bool dep_is_asset_bundle = (dep_lt.desc.type == "asset_bundle");
       if (!(dep_is_link_lib || dep_is_asset_bundle)) {
         std::cerr << "configure: target dependency must reference a library or asset_bundle target: " << dep_key << "\n";
@@ -1326,8 +1269,7 @@ int run_configure(const ConfigureRequest& req) {
 
   auto is_lib = [](const TargetDesc& t) {
     return t.type == "static_library" || t.type == "shared_library" || t.type == "library" || t.type == "prebuilt_static_library" ||
-           t.type == "prebuilt_shared_library" || t.type == "imported_installed_static_library" ||
-           t.type == "imported_installed_shared_library";
+           t.type == "prebuilt_shared_library";
   };
 
   if (!equals_ci(build_system, "cmake") && !equals_ci(build_system, "ninja")) {
@@ -1566,7 +1508,16 @@ int run_configure(const ConfigureRequest& req) {
     }
   }
 
+  const auto target_type_string_is_recognized = [](const std::string& t) {
+    return t == "executable" || t == "library" || t == "static_library" || t == "shared_library" || t == "asset_bundle" ||
+           t == "prebuilt_static_library" || t == "prebuilt_shared_library";
+  };
   for (const auto& lt : build_targets) {
+    if (!target_type_string_is_recognized(lt.desc.type)) {
+      std::cerr << "configure: unknown target type \"" << lt.desc.type << "\" for target \"" << lt.desc.name << "\" in "
+                << to_posix_path_string(lt.target_dir / "target.xml") << "\n";
+      return 5;
+    }
     ConfigureTargetModel tm;
     tm.name = lt.desc.name;
     tm.type = lt.desc.type;
@@ -1575,13 +1526,8 @@ int run_configure(const ConfigureRequest& req) {
     const bool asset_only = (lt.desc.type == "asset_bundle");
     const bool prebuilt_static = (lt.desc.type == "prebuilt_static_library");
     const bool prebuilt_shared = (lt.desc.type == "prebuilt_shared_library");
-    const bool imported_installed_static = (lt.desc.type == "imported_installed_static_library");
-    const bool imported_installed_shared = (lt.desc.type == "imported_installed_shared_library");
 
-    if (imported_installed_static || imported_installed_shared) {
-      if (!configure_installed_import_target_model(lt, imported_installed_shared, tm))
-        return 5;
-    } else if (prebuilt_static || prebuilt_shared) {
+    if (prebuilt_static || prebuilt_shared) {
       if (!lt.desc.prebuilt.has_value()) {
         std::cerr << "configure: target \"" << lt.desc.name << "\" (" << lt.desc.type << ") requires <prebuilt .../> in "
                   << to_posix_path_string(lt.target_dir / "target.xml") << "\n";
@@ -1785,12 +1731,10 @@ int run_configure(const ConfigureRequest& req) {
           if (!is_lib(pl.desc))
             continue;
           if (link_mode == "static" &&
-              (pl.desc.type == "static_library" || pl.desc.type == "library" || pl.desc.type == "prebuilt_static_library" ||
-               pl.desc.type == "imported_installed_static_library"))
+              (pl.desc.type == "static_library" || pl.desc.type == "library" || pl.desc.type == "prebuilt_static_library"))
             tm.links.emplace_back(pl.desc.name, "private");
           else if (link_mode == "dynamic" &&
-                   (pl.desc.type == "shared_library" || pl.desc.type == "library" || pl.desc.type == "prebuilt_shared_library" ||
-                    pl.desc.type == "imported_installed_shared_library"))
+                   (pl.desc.type == "shared_library" || pl.desc.type == "library" || pl.desc.type == "prebuilt_shared_library"))
             tm.links.emplace_back(pl.desc.name, "private");
         }
         if (tm.links.empty()) {

@@ -100,7 +100,7 @@
 
 ### 3.1 package / target、类型、依赖、`<headers>`
 
-- **package** / **target** 的角色，**`type`** 全集（`executable`、`library`、`static_library`、`shared_library`、`asset_bundle`、`prebuilt_*`、读入时规范化的旧名等）、**`<dependency>`**（含 **`visibility`**）、**`<headers>`** 的 **`from`/`to`**、**`<prebuilt>` / `<install>`**：一律以 **[package-target-xml-spec.md](package-target-xml-spec.md)**（§3.1、§3.3、§3.6 等）与 **`gz spec`** 为准。  
+- **package** / **target** 的角色，**`type`** 全集（`executable`、`library`、`static_library`、`shared_library`、`asset_bundle`、`prebuilt_*` 等）、**`<dependency>`**（含 **`visibility`**）、**`<headers>`** 的 **`from`/`to`**、**`<prebuilt …/>`**：一律以 **[package-target-xml-spec.md](package-target-xml-spec.md)**（§3.1、§3.3、§3.6 等）与 **`gz spec`** 为准。  
 - **预置库示例**：[`test_projects/prebuilt_static_stub/README.md`](../../test_projects/prebuilt_static_stub/README.md)。  
 - **原则**：`gz` / `gz-gui` 不对具体第三方库做内置特判；关系与路径均在 XML 中显式声明。
 
@@ -153,7 +153,7 @@
 - **模板 A：新增本包库目标** — 新建目标子目录 + **`target.xml`** + 源码 → 在 exe 的 **`target.xml`** 写 **`<dependency name="库名"/>`** → **`configure` → `print-build-dir-name` → `build` → `test`/`run`**（参数规则见 **cli-reference**）。  
 - **模板 B：跨包依赖** — **`package.xml`** 声明包级 **`<dependency/>`** → 目标里 **`otherPkg:otherTarget`** → **`configure --scan`** 覆盖各包根。  
 - **模板 C：头文件安装布局** — **`<headers>`** 的 **`from`/`to`** 见 **package-target-xml-spec** §3.3；装完看 **`.intermediate/install/<名>/include/`**。  
-- **模板 D：第三方 CMake SDK** — 包外安装 → 手写 **`imported_installed_*` + `<install/>`** 或 **`prebuilt_*` + `<prebuilt>`**（**getting-started** 第 7～8 步）→ **`configure` / `build`** → 消费方 **`<dependency name="pkg:target"/>`**。
+- **模板 D：第三方 CMake SDK** — 包外安装或官方 SDK → **vendor** 进本包或设 **`GZ_CMAKE_PREFIX_PATH`**，手写 **`prebuilt_*` + `<prebuilt>`** + **`<headers>`**（**getting-started** 第 7～8 步）→ **`configure` / `build`** → 消费方 **`<dependency name="pkg:target"/>`**。
 
 ---
 
@@ -202,7 +202,7 @@
 
 ### Q7：纯库包（没有 executable）能不能 configure/build？
 
-可以。当前实现已支持“仅库目标”的包（包括 `imported_installed_*` 包装目标）。  
+可以。当前实现已支持“仅库目标”的包（例如仅 **`prebuilt_*`** 或仅编译型库目标）。  
 `configure` 只要求主包至少有一个 `target.xml`，不再强制必须有可执行目标。
 
 ---

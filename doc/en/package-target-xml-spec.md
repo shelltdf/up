@@ -39,7 +39,7 @@ Inside **`<package>`** in **`package.xml`** and **`<target>`** in **`target.xml`
 - **`package.xml`**: **`<vars>`**, **`<defines>`**, **`<config_files>`**
 - **`target.xml`**: **`<sources>`**, **`<headers>`**, **`<assets>`**, **`<vars>`**, **`<defines>`**, **`<config_files>`**
 
-**Void / self-closing tags** (e.g. **`<prebuilt …/>`**, **`<install …/>`**, **`<dependency …/>`**) may repeat: **`<prebuilt/>`** / **`<install/>`** — the **last** successful parse wins for that model slot; **`<dependency/>`** is still collected by global regex; order is list order.
+**Void / self-closing tags** (e.g. **`<prebuilt …/>`**, **`<dependency …/>`**) may repeat: **`<prebuilt/>`** — the **last** non-empty parse wins for the prebuilt slot; **`<dependency/>`** is still collected by global regex; order is list order.
 
 **Bare `<file>…</file>`** (not inside `<sources>`): only scanned **when there is no** **`<sources>…</sources>`** block in the file; if **any** `<sources>` block exists, sources come **only** from those block bodies; **outer** bare `<file>` is ignored.
 
@@ -96,7 +96,7 @@ If a `target.xml` uses **`OtherPkg:TheirLib`**, **`OtherPkg`** must appear in th
     - **`asset_bundle`**: no compile/link; install content from at least one of **`sources` / `<assets>` / `<headers>`** (see table); typical use is **`<assets>`**.
     - **`prebuilt_static_library`**: **`<prebuilt …/>`** points at a prebuilt static **`.lib` / `.a`**, etc.; path relative to **`target.xml`** dir or absolute.
     - **`prebuilt_shared_library`**: **`<prebuilt …/>`** for a prebuilt shared library; on Windows resolve **`.dll`** (**`dll=`** / **`location=`**) and import **`.lib`** (**`import_lib=`**).
-    - **Read compatibility**: legacy **`imported_static_library` / `imported_shared_library`** are accepted and normalized to **`prebuilt_*`**; new projects should use **`prebuilt_*`**.
+  - Any **`type=`** not listed above is **rejected at `configure` time** as an **unknown** target type: stderr **`configure: unknown target type "…" for target "…"`**; **exit code 5** (**[`cli-reference.md`](cli-reference.md) §3 / §5**; see `configure.cpp`).
 
 Type vs key child tags (current implementation):
 
@@ -107,19 +107,16 @@ Type vs key child tags (current implementation):
 | `prebuilt_static_library` | not required | **required** | Paths relative to `target.xml` (or absolute) |
 | `prebuilt_shared_library` | not required | **required** | Windows: dll + import lib must resolve |
 
-#### 3.1.1 **`<prebuilt/>`** and **`<install/>`** (binary **layout** metadata)
+#### 3.1.1 **`<prebuilt/>`** (binary **layout** metadata)
 
-- There is **no** **`install_dir_leaf=…`** attribute: the install root segment name comes from **configure** / the **`.intermediate/`
-  cache** (**`arch=`** and **`compose_arch_tag`**) and is **not** repeated on these void tags.
-- **Authoring:** besides **`import_lib` / `location` / `dll`** (or **`artifact` / `implib`**) use the optional **split** attributes
+- The install root segment name for the current `gz` build comes from **configure** / the **`.intermediate/` cache** (**`arch=`** and **`compose_arch_tag`**); it is **not** duplicated on **`<prebuilt/>`**.
+- **Authoring:** besides **`import_lib` / `location` / `dll`**, use the optional **split** attributes
   that mirror **`compose_arch_tag`** in **`GroundZero/lib/infra/platform/paths.cpp`**: **`os`**, **`cpu`**, **`build_system`**, **`toolchain`**, **`link`**, **`config`**, **`crt`**. Do not use a single long **`arch=…`** for new files.
-- **`gz build` redistribution** **`target.xml` / schema 3 `gz_redist_manifest.json`** **emit** those split fields only
-  (no **`install_dir_leaf`** JSON key).
-- **Read compatibility (deprecated):** legacy **`arch=…`**, or an old deprecated **`install_dir_leaf=…`**, is still read and used
-  only to run **`try_decompose_compose_arch_tag`**; split fields are filled when the string is recognized, and the monolith is
-  not written back.
-- **`imported_installed_*` `<install …/>`**: same layout attributes; **`<interface_include dir="…"/>`** is still a separate
-  child element, unchanged.
+- **`gz build` redistribution** **`target.xml` / schema 3 `gz_redist_manifest.json`** **emit** those split fields; the JSON has no
+  extra “install directory leaf” key—only the same split fields as **`<prebuilt/>`**.
+- **Read compatibility (deprecated monolithic `arch` only):** on **`<prebuilt/>`**, legacy monolithic **`arch=…`** is read only to run
+  **`try_decompose_compose_arch_tag`**
+  in-memory; split fields are set when recognized, and the monolith is not written back. For manifests, **schema 1** **`arch`** is handled the same way. **New files** should use split fields.
 
 ### 3.2 Source files `<file> ... </file>`
 
@@ -216,7 +213,7 @@ Supports **`@NAME@`** and **`${NAME}`** (`NAME` C identifier; CMake `configure_f
 #### Tags where `when` is evaluated (today)
 
 - **Implemented**: **`<sources>`** `<file>`/`<glob>` with `from=` (void or paired opening tag `when`); **`<headers>`** `<dir>`/`<file>`/`<glob>` `when`.
-- **Not implemented (do not rely)**: **`<assets>`**, **`<define>`**, **`<dependency/>`**, **`<config_files>`** inner `<file>`, **`<var>`**, package-level rows, **`<prebuilt/>`**, **`<install/>`**, preprocess/postprocess child tags, **`<package>` / `<target>`** root attributes.
+- **Not implemented (do not rely)**: **`<assets>`**, **`<define>`**, **`<dependency/>`**, **`<config_files>`** inner `<file>`, **`<var>`**, package-level rows, **`<prebuilt/>`**, preprocess/postprocess child tags, **`<package>` / `<target>`** root attributes.
 - More row-level `when` may be added product-by-product with defined semantics.
 
 #### `when` expression grammar (matches `eval_when`, `var_subst.cpp`)
@@ -308,6 +305,6 @@ If XSD/JSON Schema is added later, document version and changelog at the top of 
 
 - **`gz pack` (archive only)**: archives the **install root** from **`--install-dir-name`** (**.intermediate/install/<arch>/`**, including **`bin/`**, **`lib/`**, **`include/`**, …) via **CPack** when available, else **archive** backends. It **does not** generate or rewrite **`package.xml` / `target.xml`**. If **`gz-redist/`** already exists under that install tree (see below), it is **included** in the archive. Code: **`pack.cpp`**, **`run_pack_backend`** in **`backend_dispatch.cpp`**.
 
-- **`gz build` (redistribution XML on by default)**: after a successful **build + install**, **`gz`** reads **`.intermediate/build/<leaf>/gz_redist_manifest.json`** (written by **`gz configure`** when applicable). When the manifest exists and lists **`targets`**, it writes **`<install>/gz-redist/package.xml`** and **`<install>/gz-redist/<emit-name>/target.xml`**: library-like targets are emitted for downstream **`gz configure --scan`**; **`<prebuilt …/>` / `<install …/>`** carry the **split layout** attributes from §3.1.1 (and **`imported_installed_*`** still use **`<install …/>`** with paths **relative to the install prefix / `CMAKE_INSTALL_PREFIX`**). **Schema 1** manifests with only a legacy **`arch`** string are **upgraded** on read when possible. **`executable`** and **`asset_bundle`** targets are **not** included in the manifest (MVP). Disable with **`--no-emit-redistribution-xml`** or **`GZ_EMIT_REDIST_XML=0` / `false` / `off` / `no`**. Code: **`build.cpp`**, **`redist_emit.cpp`**; manifest authoring: **`configure.cpp`** (`try_write_gz_redist_manifest_json`).
+- **`gz build` (redistribution XML on by default)**: after a successful **build + install**, **`gz`** reads **`.intermediate/build/<leaf>/gz_redist_manifest.json`** (written by **`gz configure`** when applicable). When the manifest exists and lists **`targets`**, it writes under the **install root** (the **`--install-dir-name`** tree): **`gz-redist/package.xml`** and **`gz-redist/<emit-name>/target.xml`**. Emitted library-like targets use **`<prebuilt …/>`** with **split layout** fields from §3.1.1. **Schema 1** manifests with only a legacy **`arch`** string are **upgraded** on read when possible. **`executable`** and **`asset_bundle`** targets are **not** included in the manifest (MVP). Disable with **`--no-emit-redistribution-xml`** or **`GZ_EMIT_REDIST_XML=0` / `false` / `off` / `no`**. Code: **`build.cpp`**, **`redist_emit.cpp`**; manifest authoring: **`configure.cpp`** (`try_write_gz_redist_manifest_json`).
 
-- **Consumption hint**: ship **`gz-redist/`** next to **`bin/`**, **`lib/`**, **`include/`** under one install prefix; when **`gz-redist`** is used as the **package root** for scanning, its parent directory should match the **install prefix** implied by **`<install>`** / **`<prebuilt>`** paths above.
+- **Consumption hint**: ship **`gz-redist/`** next to **`bin/`**, **`lib/`**, **`include/`** under one install prefix; when **`gz-redist`** is used as the **package root** for scanning, its parent directory should match the **install prefix** for rebased **`<prebuilt/>`** library paths in those **`target.xml`** files.

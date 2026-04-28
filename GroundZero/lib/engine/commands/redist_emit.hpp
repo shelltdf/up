@@ -22,11 +22,6 @@ struct GzRedistManifestTarget {
   std::string install_rel_import_lib;
   std::string install_rel_location;
   std::string install_rel_dll;
-  /** imported_installed_*: `<install artifact=` / `implib=` (install-prefix-relative, POSIX). */
-  bool use_installed_wrap = false;
-  std::string install_rel_artifact;
-  std::string install_rel_implib;
-  std::string installed_iface_include;
   /** Values already remapped for `<dependency name="…"/>` in emitted target.xml */
   std::vector<std::string> dependency_names;
 };

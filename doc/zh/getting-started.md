@@ -160,16 +160,15 @@ hello_pkg/
 
 ---
 
-## 第 8 步：第三方库 — 包外 `install` + 手写 **`imported_installed_*`**
+## 第 8 步：第三方库 — 包外 `install` 产物**纳入**本包（**`prebuilt_*`**）
 
-适用于：上游是 **CMake**（或其它构建），你已在 **包外** 把库 **`install` 到与本包一致的安装前缀**（或与 **`artifact=`** 相对关系一致的路径），希望在 `gz` 里只**声明**产物。
+适用于：上游已在**包外** `install` 或官方 SDK 已解压，你希望在本仓库**固定**可复现布局：把需要的 **`lib/`、`include/`、`.dll` 等** **复制 / 软链接**到包内（如 **`vendor/…`**），或放在**稳定绝对路径**上，再用 **`prebuilt_static_library` / `prebuilt_shared_library`** 指向它们（**路径相对 `target.xml` 或绝对**；与第 7 步相同机制）。
 
-1. **不要**依赖自动逆向：在仓库旁或 CI 中单独对上游执行 **`cmake --install`**（或上游官方安装包），得到 `.lib` / `.so` / 头文件等固定布局。
-2. 在本包 **`target.xml`** 中声明 **`imported_installed_static_library` / `imported_installed_shared_library`**，用 **`<install artifact="..." />`**（及 Windows 下 **`implib`** 等）指向**相对 `CMAKE_INSTALL_PREFIX`** 的安装路径；见 **`package-target-xml-spec.md`** 类型表。
-3. 用 **`<headers>`** 或 **`interface_include`**（若适用）暴露给消费方。
-4. 可执行目标 **`<dependency name="…"/>`** 链接该导入目标。
+1. 在 CI 或本机脚本中完成上游 **`cmake --install`**（或展开官方包），只取本包需要的子树。
+2. 将子树** vendoring** 到本包（推荐可提交路径），在 **`target.xml`** 中写 **`<prebuilt …/>` + `<headers>`**；见 **`package-target-xml-spec.md` §3.1** 与第 7 步示例工程 **`test_projects/prebuilt_import_demo/`**。
+3. 若**聚合 CMake** 仍需 **`find_package`** 其它前缀，在 **`--opt GZ_CMAKE_PREFIX_PATH=…`** 中追加；详见 **`internal-variables.md`** §4.1。
 
-**对照**：仓库 **`test_projects/smoke_minimal_exe/`** 为**最小可执行目标**冒烟示例。
+**对照**：**`test_projects/smoke_minimal_exe/`** 为**最小可执行**冒烟；第三方库包装见 **`prebuilt_import_demo/`** 与第 7 步。
 
 ---
 
@@ -178,7 +177,7 @@ hello_pkg/
 **推荐路径**：
 
 1. **阅读上游**：列出源文件、公共头、宏、`link_libraries`、安装规则；在 `gz` 侧为每个编译单元建 **`target.xml`**，用 **`<sources>` / `<headers>` / `<defines>` / `<dependency>`** 重写依赖图。
-2. **第三方 / 子树**：若在包外已安装，用 **`imported_installed_*` + `<install …/>`**；若只有预编译 SDK，用 **`prebuilt_*` + `<prebuilt>`**（见第 7 步）。
+2. **第三方 / 子树**：将安装产物**纳入**本包目录后，用 **`prebuilt_*` + `<prebuilt>`**；若需 **`find_package`** 额外前缀，用 **`GZ_CMAKE_PREFIX_PATH`**（见第 7～8 步、**`internal-variables.md`**）。
 3. **渐进迁移**：可先让主程序依赖 **`prebuilt_*`** 包装现有二进制，再逐步把源码移入 **`static_library`** 目标。
 4. **历史说明**：旧版若曾依赖已移除的子命令或内嵌构建描述，请按 **`gz spec`** 与 **`package-target-xml-spec.md`** 改为纯手写 XML。
 
@@ -186,14 +185,14 @@ hello_pkg/
 
 ## 移植专题 B：把 **Qt** 程序迁到 `gz`
 
-**思路**：Qt 由 **官方安装或包外 CMake install** 提供；`gz` **只手写**源、宏、**`<dependency>`** 指向 **`prebuilt_*`**（或 **`imported_installed_*`**）或本包自编译库；**moc / uic / rcc** 用 **`<preprocess>`** 或包在 **`static_library`** 里以规避 CMake 后端对 **exe 源级 preprocess** 的限制。
+**思路**：Qt 由 **官方安装或包外 CMake install** 提供；`gz` **只手写**源、宏、**`<dependency>`** 指向 **`prebuilt_*`**（vendored 的 `.lib` / 头）或本包自编译库；**moc / uic / rcc** 用 **`<preprocess>`** 或包在 **`static_library`** 里以规避 CMake 后端对 **exe 源级 preprocess** 的限制。
 
 | 原 CMake/Qt 概念 | 在 `gz` 中的对应 |
 |------------------|------------------|
 | `target_sources` / `add_executable` | **`<sources><file>…`** |
 | `target_include_directories` | **`<headers>`**（安装 + include 推导） |
 | `target_compile_definitions` | **`<defines>`** |
-| `find_package(Qt…)` + 链接 | **`<dependency>`** 指向 **`prebuilt_*`** / **`imported_installed_*`**（或本包 **`static_library`/`shared_library`**）；**手写** Qt 安装前缀下的库与头 |
+| `find_package(Qt…)` + 链接 | **`<dependency>`** 指向 **`prebuilt_*`** 或本包 **`static_library` / `shared_library`**；**手写** vendored 或 **`GZ_CMAKE_PREFIX_PATH`** 下的库与头 |
 | `AUTOMOC` / `AUTOUIC` / `AUTORCC` | **手写** **`moc`/`uic`/`rcc`** 命令行，见 **`script-tutorial.md` §8** |
 
 ---
@@ -203,7 +202,7 @@ hello_pkg/
 | 形态 | 建议做法 |
 |------|----------|
 | **Header-only** | 无链接目标：用 **`<headers>`** 暴露 include；或 **`asset_bundle`** / 安装规则按项目需要。 |
-| **官方提供 CMake + install** | **包外** `cmake --install` 到约定前缀，再 **`imported_installed_*` + `<install …/>`** 手写描述。 |
+| **官方提供 CMake + install** | **包外** `cmake --install` 后，将所需文件 **vendor** 进本包，再 **`prebuilt_*` + `<prebuilt>`**；或 **`GZ_CMAKE_PREFIX_PATH`** 指向其前缀。 |
 | **仅预编译 .lib/.dll/.so** | **`prebuilt_static_library` / `prebuilt_shared_library`** + **`<prebuilt>`** + **`<headers>`**。 |
 | **需打补丁、多步配置** | 仍在**包外**脚本化上游构建；`gz` 侧用 **`preprocess`** 或 vendored 源码目标承接生成物，见 **`script-tutorial.md`**。 |
 | **与本仓库另一 `gz` 包协作** | 多包 **`<dependency name="包名"/>`** + **`包名:目标名`**。 |

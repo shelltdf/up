@@ -18,7 +18,7 @@ flowchart LR
 
 ## 主数据流
 
-1. **configure**：文件系统扫描 → 解析 XML → 构建内存图 → 写 `.intermediate/build/<leaf>/` 下生成物与 `gz_cache.txt`（含 **`arch=`**）。
+1. **configure**：文件系统扫描 → 解析 XML → 对 **`target.xml` 的 `type=` 做白名单校验**（与 **`doc/zh/package-target-xml-spec.md` §3.1** 及实现 `GroundZero/lib/engine/commands/configure.cpp` 一致，未知类型则 **configure** 失败，**退出码 5**）→ 构建内存图 → 写 `.intermediate/build/<leaf>/` 下生成物与 `gz_cache.txt`（含 **`arch=`**）。
 2. **build**：以 `<leaf>` 定位构建目录 → 读 `arch` 与 `GZ_TARGET_BUILD_SYSTEM` 等 → 安装到 **`.intermediate/install/<arch>/`**。
 3. **run / test / pack**：以 **`--install-dir-name`** 指向的安装前缀（即上述 `<arch>` 目录名）定位 `bin/` 与测试元数据。
 

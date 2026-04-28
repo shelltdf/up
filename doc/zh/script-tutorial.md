@@ -170,7 +170,7 @@ XML 里写了 **`command="..."`** 时，该字符串即最终交给后端的命�
 1. **工作目录与路径**：`command` 由 **shell/cmd** 执行；请使用相对 **目标目录**（`target.xml` 所在目录）的可靠路径。**注意**：与 **`<config_files>`** 模板不同，`preprocess` 的 **`command` 字符串在 configure 阶段不会做 `@KEY@` / `${KEY}` 替换**；若要用「可配置 Qt 路径」，可依赖 **构建时 `PATH`**、写 **包装脚本**（脚本内读环境变量），或在 **`<vars>`** 中维护语义后由你在命令里手写可解析片段（例如仅 Unix 下用 `$QTDIR/bin/moc`，由 shell 展开）。
 2. **生成物必须显式列出**：例如 `moc` 写出 `gen/moc_widget.cpp`，则目标里要有 **`<file from="gen/moc_widget.cpp"/>`**（并保证 preprocess 先创建该文件）；不要假设「只编译 widget.cpp 就会自动带上 moc 输出」。
 3. **包含目录**：`uic` 生成的 `ui_*.h`、`moc` 生成文件若放在子目录，需 **`target.xml` 的 `<includes>`**（若项目支持）或包级约定，使编译器能找到 `#include "ui_mainwindow.h"` 等。
-4. **链接 Qt 库**：在 **`target.xml`** 的 **`<dependency name="…"/>`** 指向已安装好的 **导入库目标**（`prebuilt_*` / `imported_installed_*`）或本包编译库；**推荐**在包外安装 Qt 再手写依赖；本节只解决「生成代码」一步。
+4. **链接 Qt 库**：在 **`target.xml`** 的 **`<dependency name="…"/>`** 指向已声明的 **导入库目标**（`prebuilt_*` 或本包编译库）；**推荐** vendored 或 **`GZ_CMAKE_PREFIX_PATH`** 指到 Qt 前缀；本节只解决「生成代码」一步。
 
 ### 7.2 **moc**（元对象编译器）
 

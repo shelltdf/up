@@ -12,10 +12,12 @@
 
 ### Changed
 
-- **`target.xml` 磁盘预置库类型重命名**：**`imported_static_library` / `imported_shared_library`** 改为 **`prebuilt_static_library` / `prebuilt_shared_library`**（与 **`<prebuilt …/>`** 语义一致）；读入时仍接受旧 **`type`** 并规范化为新名。文档、**`gz spec`**、**`test_projects/prebuilt_*`** 已同步。
+- **`imported_installed_static_library` / `imported_installed_shared_library`** 与 void **`<install …/>`**：已从**有效** `target.xml` 形态中移除；第三方库请用 **`prebuilt_*` + `<prebuilt>`**（vendored 或绝对路径）及 **`GZ_CMAKE_PREFIX_PATH`** 等；**`GZ_XML_SPEC_REVISION=32`**。同步更新 **`doc/zh|en/package-target-xml-spec.md`**、**`getting-started`**、**`user-manual`**、**`cli-reference`**、**`internal-variables`**、**`README.md`**、**`test_projects/README.md`** 等。
+- **布局元数据文档与内嵌 `gz spec`**：不再出现已废弃的 **`install_dir_leaf`** 表述；**`GZ_XML_SPEC_REVISION=30`**。实现侧将 **`simple_xml.cpp`** 中自旧式 **`arch` 长串**补全分字段的辅助函数重命名为 **`maybe_enrich_layout_from_legacy_arch`**（行为不变：仍仅处理 **`arch`/`arch_legacy`**）。
+- **`target.xml` 目标 `type`**：**configure** 对**未在规范中列出**的 **`type`** 做白名单校验（`unknown target type`）；与 **`package-target-xml-spec.md`** 中允许的类型表一致（见 **`GroundZero/lib/engine/commands/configure.cpp`**）。**`doc/zh|en/cli-reference.md`** §3 已补充**退出码 5** 与 **`doc/zh|en/package-target-xml-spec.md`** §3.1 对齐。
 - **`target.xml` `type="library"`**：configure 时按 **`GZ_TARGET_DYNAMIC_LIBRARY`**（及 **`GZ_DYNAMIC_LIBRARY`**）解析为 **`static_library`** 或 **`shared_library`** 再生成 CMake/Ninja；**`static_library` / `shared_library`** 仍强制固定链接形态。详见 **`doc/zh/package-target-xml-spec.md`**、**`doc/zh/internal-variables.md`**、**`doc/zh/cli-reference.md`**（**`configure`** 节）、**`doc/zh/user-manual.md`**、**`doc/zh/getting-started.md`**、**`doc/zh/script-tutorial.md`**、**`doc/en/user-manual.md`** 与 **`gz spec`**；示例包 **`test_projects/hello_library_type/`**。
 - **`gz reverse`**：子命令及 **`GroundZero/lib/engine/reverse/`**、**`GZ_ENABLE_REVERSE`** 构建开关**已删除**；CLI / **gz-gui** 不再暴露逆向入口。工程迁移请手写 **`package.xml` / `target.xml`**。
-- **旧版包级内嵌上游 CMake 与 ExternalProject 聚合路径**：已从解析与 CMake 生成中**完全移除**；**`imported_installed_*`** 仅依赖包外安装与手写 **`target.xml`** 声明。
+- **旧版包级内嵌上游 CMake 与 ExternalProject 聚合路径**：已从解析与 CMake 生成中**完全移除**；第三方库改由 **`prebuilt_*`**、**`GZ_CMAKE_PREFIX_PATH`** 与手写 **`target.xml`** 描述。
 - **实现侧文档**：用户可读正文统一在 **`doc/zh/`**（中文）与 **`doc/en/`**（英文入口/全文）；**`doc/README.md`** 为双语索引。已移除 `doc/` 根目录下与 `zh/` 重复的同名跳转 `.md`，根 **`README.md`** / **`DESIGN.md`** 等改为直接链接 **`doc/zh/...`**（用户手册另链 **`doc/en/user-manual.md`**）。
 - 各 **`doc/zh/*.md`**、**`doc/en/*.md`** 文首增加指向 **`doc/README.md`** 的索引导航（含脚本教程、`trigger` 表、内置变量、XML 规范等）。
 - 根 **`README.md`**：标题与命令表、目录树、`package.py`/`install.py` 说明与 **`gz list`** 示例全部对齐 **GroundZero / gz**（去除残留的 `uni-package` / `up` 子命令表述）。

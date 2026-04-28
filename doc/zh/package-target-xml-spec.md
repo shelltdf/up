@@ -39,7 +39,7 @@
 - **`package.xml`**：**`<vars>`**、**`<defines>`**、**`<config_files>`**
 - **`target.xml`**：**`<sources>`**、**`<headers>`**、**`<assets>`**、**`<vars>`**、**`<defines>`**、**`<config_files>`**
 
-**自闭合/无体标签**（如 **`<prebuilt …/>`**、**`<install …/>`**、**`<dependency …/>`**）可出现多次：**`<prebuilt/>`**、**`<install/>`** 以**最后一次**有效声明覆盖模型中的预置库 / 安装包装信息；**`<dependency/>`** 仍为全文正则匹配，顺序即依赖列表顺序。
+**自闭合/无体标签**（如 **`<prebuilt …/>`**、**`<dependency …/>`**）可出现多次：**`<prebuilt/>`** 以**最后一次**有效声明覆盖预置库信息；**`<dependency/>`** 仍为全文正则匹配，顺序即依赖列表顺序。
 
 **裸 `<file>…</file>`**（无 **`<sources>`** 包裹）：仅当文件中**不存在任何** **`<sources>…</sources>`** 块时，才对全文匹配裸 `<file>`；只要出现过至少一个 `<sources>` 块，则**只**从各 `<sources>` 块体收集源，**不再**从块外收集裸 `<file>`。
 
@@ -96,7 +96,7 @@
     - **`asset_bundle`**：不参与编译链接；安装内容由 **`sources` / `<assets>…</assets>` / `<headers>`** 三者至少其一描述（见下表），其中 **`asset_bundle`** 的典型用法是 **`<assets>`**。
     - **`prebuilt_static_library`**：**`<prebuilt …/>`** 指向磁盘上的预置静态库（`.lib` / `.a` 等）；路径相对 **`target.xml`** 所在目录或绝对路径。
     - **`prebuilt_shared_library`**：**`<prebuilt …/>`** 指向磁盘上的预置动态库；Windows 需可解析 **`.dll`**（**`dll=`** / **`location=`**）与 **import `.lib`**（**`import_lib=`**）。
-    - **兼容（读入）**：旧名 **`imported_static_library`** / **`imported_shared_library`** 仍被接受，读入后规范化为 **`prebuilt_static_library`** / **`prebuilt_shared_library`**；新工程请直接使用 **`prebuilt_*`**。
+  - 未在以上各条列出的 **`type`** 在 **configure** 时按**未知目标类型**拒绝：stderr 含 **`configure: unknown target type "…" for target "…"`**；**退出码 5**（**[`cli-reference.md`](cli-reference.md) §3 / §5**；实现见 **`configure.cpp`**）。
 
 类型与关键子标签约束（当前实现）：
 
@@ -107,14 +107,13 @@
 | `prebuilt_static_library` | 不需要 | 需要 | 路径相对 `target.xml`（或绝对路径） |
 | `prebuilt_shared_library` | 不需要 | 需要 | Windows 需可解析 dll + import lib |
 
-#### 3.1.1 预置库 **`<prebuilt/>`** 与已安装包装 **`<install/>`**（二进制**布局**元数据）
+#### 3.1.1 预置库 **`<prebuilt/>`**（二进制**布局**元数据）
 
-- **不**再使用 **`install_dir_leaf=…` 属性**：安装根下单段目录名由 **`gz configure` 写入的 `arch`（`compose_arch_tag` 结果）/ `gz_cache.txt` 的 `arch=`** 等表达，**不在**此处重复。
-- 在 **`import_lib` / `location` / `dll`**（或 **`artifact` / `implib`**）之外，使用**多个可选属性**表达布局维度：
+- 安装根下单段目录名由 **`gz configure` 写入的 `arch`（`compose_arch_tag` 结果）/ `gz_cache.txt` 的 `arch=`** 等表达；**`<prebuilt/>` 上的布局分字段不重复**该名单段名。
+- 在 **`import_lib` / `location` / `dll`** 之外，使用**多个可选属性**表达布局维度：
   - **`os` / `cpu` / `build_system` / `toolchain` / `link`（`static`｜`dynamic`）/ `config`（`debug`｜`release`）/ `crt`**：与 build 时选项一致（**`crt`** 在 Windows 上常见，非 Windows 常为空）；定义见 `GroundZero/lib/infra/platform/paths.cpp` 的 **`compose_arch_tag`**、**`try_decompose_compose_arch_tag`**。
-- **`gz build` 产出的** **`target.xml` / `schema` 3 的 `gz_redist_manifest.json`** 只写**上述分字段**（**无** `install_dir_leaf` / JSON 里**无**对应键）。
-- **读入兼容（弃用）**：旧 **`arch="…"`** 或已废弃的 **`install_dir_leaf="…"`** 仍可读，**仅**用于在解析阶段尝试**反拆**为分字段（不原样回写该长串；见实现）。
-- **`<install …/>`（`imported_installed_*`）**：同上；**`<interface_include dir="…"/>`** 仍为独立子元素，形状不变。
+- **`gz build` 二次分发** 写出的 **`target.xml` / `schema` 3 的 `gz_redist_manifest.json`** 只写**上述分字段**；**JSON** 无单独的「安装目录名单段」键，与 **`<prebuilt/>`** 分字段一一对应。
+- **读入兼容（弃用 `arch` 长串）**：**`<prebuilt/>`** 上旧式 **`arch="…"` 单长串**仍可在解析时**反拆**为分字段（不原样回写）；**manifest** 的 **schema 1** 中 **`arch`** 同理。新文件应写分字段。第三方已安装到磁盘其它前缀的库，请用 **`<prebuilt/>`** 指向**相对 `target.xml` 或绝对路径**下的 `.lib` / `.dll` / `.so` 等，并配合 **`<headers>`**。
 
 ### 3.2 源文件 `<file> ... </file>`
 
@@ -230,7 +229,7 @@
 #### `when` 适用的标签（当前实现）
 
 - **已实现求值**：**`<sources>`** 内带 `from=` 的 **`<file>` / `<glob>`**（自闭合或配对开标签上的 `when`）；**`<headers>`** 内 **`<dir>` / `<file>` / `<glob>`** 上的 `when`。
-- **未实现（勿依赖；写了也不会按条件生效）**：**`<assets>`**、**`<define>`**、**`<dependency/>`**、**`<config_files>`** 内 **`<file>`**、**`<var>`**、包级行、**`<prebuilt/>`**、**`<install/>`**、预处理/后处理子标签、以及 **`<package>` / `<target>` 根标签**。
+- **未实现（勿依赖；写了也不会按条件生效）**：**`<assets>`**、**`<define>`**、**`<dependency/>`**、**`<config_files>`** 内 **`<file>`**、**`<var>`**、包级行、**`<prebuilt/>`**、预处理/后处理子标签、以及 **`<package>` / `<target>` 根标签**。（历史文档中的 **`<install …/>`** 若仍出现在文件里，当前解析器**不识别**；请改用 **`<prebuilt/>`**。）
 - 产品上可为更多「行级」配置逐步统一 `when`，但需逐类定义语义并实现（例如跳过依赖与「未声明依赖」的边界）。
 
 #### `when` 表达式语法（与 `eval_when`，`GroundZero/lib/engine/xml/var_subst.cpp` 一致）
@@ -322,6 +321,6 @@
 
 - **`gz pack`（仅归档）**：只对 **`--install-dir-name`** 所指的 **安装树根**（**`.intermediate/install/<arch>/`**，内含 **`bin/`**、**`lib/`**、**`include/`** 等）做 **归档**（PowerShell **`Compress-Archive`** / **`tar`**，或 **CPack** 可用时走 **CPack**）。**`pack` 不生成**新的 **`package.xml` / `target.xml`**，也**不改写**源码型目标。若安装树下已存在 **`gz-redist/`**（见下），会**随安装树一并**被打进归档。实现：**`GroundZero/lib/engine/commands/pack.cpp`**、**`run_pack_backend`**（**`backend_dispatch.cpp`**）。
 
-- **`gz build`（默认生成二次分发 XML）**：在 **编译 + install 成功之后**，默认读取 **`.intermediate/build/<叶子>/gz_redist_manifest.json`**（由 **`gz configure`** 根据当前图写入；**`schema` 3** 为分字段、**无** `install_dir_leaf` 键；若主包无可导出库目标则可能**不创建**该文件）。当 manifest 存在且含 **`targets`** 时，在安装根下写入 **`gz-redist/package.xml`** 及 **`gz-redist/<emit-name>/target.xml`**；**`<prebuilt/>` / `<install/>`** 仅带 **§3.1.1** 的**分字段**（旧 **`schema` 1/2** 清单可读并尽量反拆）。**`executable`** 与 **`asset_bundle`** 当前**不写入** manifest（MVP）。可用 **`--no-emit-redistribution-xml`** 或 **`GZ_EMIT_REDIST_XML=0` / `false` / `off` / `no`**（大小写不敏感）关闭。实现：**`build.cpp`**、**`redist_emit.cpp`**；清单生成：**`configure.cpp`**（`try_write_gz_redist_manifest_json`）。
+- **`gz build`（默认生成二次分发 XML）**：在 **编译 + install 成功之后**，默认读取 **`.intermediate/build/<叶子>/gz_redist_manifest.json`**（由 **`gz configure`** 根据当前图写入；**`schema` 3** 为分字段；若主包无可导出库目标则可能**不创建**该文件）。当 manifest 存在且含 **`targets`** 时，在安装根下写入 **`gz-redist/package.xml`** 及 **`gz-redist/<emit-name>/target.xml`**；二次分发的 **`target.xml`** 中**仅**出现 **`<prebuilt …/>`**（**§3.1.1** 分字段；旧 **`schema` 1** 的 **`arch`** 可读入后**反拆**为布局；**`schema` 2/3** 自 JSON 读分字段）。**`executable`** 与 **`asset_bundle`** 当前**不写入** manifest（MVP）。可用 **`--no-emit-redistribution-xml`** 或 **`GZ_EMIT_REDIST_XML=0` / `false` / `off` / `no`**（大小写不敏感）关闭。实现：**`build.cpp`**、**`redist_emit.cpp`**；清单生成：**`configure.cpp`**（`try_write_gz_redist_manifest_json`）。
 
 - **消费提示**：二次分发包可将 **`gz-redist/`** 与 **`bin/`、`lib/`、`include/`** 置于同一安装前缀下分发；下游将 **`gz-redist` 的父目录** 当作安装前缀、将 **`gz-redist`** 当作**包根**扫描时，应与上述路径约定一致。

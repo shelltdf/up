@@ -130,8 +130,7 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
   for (const auto& t : model.targets) {
     if (!t.imported_prebuilt)
       continue;
-    const bool sh =
-        (t.type == "prebuilt_shared_library" || t.type == "imported_installed_shared_library");
+    const bool sh = (t.type == "prebuilt_shared_library");
     cm << "add_library(" << t.name << " " << (sh ? "SHARED" : "STATIC") << " IMPORTED)\n";
     if (sh) {
       cm << "if(WIN32)\n";
@@ -154,11 +153,7 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
         cm << " \"" << inc << "\"";
       cm << ")\n";
     }
-    if (t.imported_from_install_prefix) {
-      if (!t.install_rel_interface_include.empty())
-        cm << "target_include_directories(" << t.name << " INTERFACE \"${CMAKE_INSTALL_PREFIX}/"
-           << cmake_escape_string_value(t.install_rel_interface_include) << "\")\n";
-    } else if (pkg_src_root) {
+    if (pkg_src_root) {
       cm << "target_include_directories(" << t.name << " INTERFACE \""
           << to_posix_path_string(std::filesystem::absolute(*pkg_src_root)) << "\")\n";
     }
@@ -279,8 +274,6 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
 
   for (const auto& t : model.targets) {
     if (!t.imported_prebuilt)
-      continue;
-    if (t.imported_from_install_prefix)
       continue;
     if (t.type == "prebuilt_shared_library") {
       cm << "if(WIN32)\n";

@@ -169,7 +169,7 @@ Supported **`trigger`** values and **`manual`**: **`script-messages.md`** (`is_s
 1. **Working directory / paths**: `command` runs under **shell/cmd**; use paths reliable relative to the **target directory** (`target.xml` dir). **Unlike `<config_files>` templates**, **`preprocess` `command` is not `@KEY@` / `${KEY}` substituted at configure**; for configurable Qt paths, use **PATH at build time**, **wrapper scripts**, or hand-embed fragments you control.
 2. **List every generated file**: if `moc` writes `gen/moc_widget.cpp`, the target must include **`<file from="gen/moc_widget.cpp"/>`** and preprocess must create it first.
 3. **Include dirs**: if `uic` writes `gen/ui_mainwindow.h`, ensure compile **include paths** cover `gen/` (via **`<headers>`** / generated include dirs as your project does).
-4. **Link Qt**: **`<dependency>`** to **`prebuilt_*` / `imported_installed_*`** or in-repo libraries; **prefer** Qt installed outside gz; this section covers **codegen** only.
+4. **Link Qt**: **`<dependency>`** to **`prebuilt_*`** or in-repo libraries; **prefer** vendored Qt binaries or **`GZ_CMAKE_PREFIX_PATH`** to Qt’s prefix; this section covers **codegen** only.
 
 ### 7.2 **moc**
 

@@ -160,16 +160,15 @@ Example: **`test_projects/prebuilt_import_demo/`**.
 
 ---
 
-## Step 8: Third-party — out-of-tree `install` + hand-written **`imported_installed_*`**
+## Step 8: Third-party — fold an out-of-tree `install` into the package (**`prebuilt_*`**)
 
-When upstream is **CMake** (or other) and you **`install` outside the gz package** to a prefix consistent with **`artifact=`** layout, and you only **declare** artifacts in gz.
+When upstream was **`cmake --install`** (or an official SDK tree) and you want a **reproducible** layout in this repo: **copy or symlink** the needed **`lib/`**, **`include/`**, **`.dll`**, etc. into the package (e.g. under **`vendor/…`**) or place them on a **stable absolute path**, then use **`prebuilt_static_library` / `prebuilt_shared_library`** (paths **relative to `target.xml` or absolute**; same as Step 7).
 
-1. Do **not** rely on reverse engineering: run **`cmake --install`** (or vendor installer) **outside** gz.
-2. In **`target.xml`**, declare **`imported_installed_static_library` / `imported_installed_shared_library`** with **`<install artifact="..."/>`** (and Windows **`implib`**, etc.) **relative to `CMAKE_INSTALL_PREFIX`**; see type table in **`package-target-xml-spec.md`**.
-3. **`<headers>`** or **`interface_include`** for consumers.
-4. Executable **`<dependency .../>`**.
+1. In CI or a local script, run upstream **`cmake --install`** (or unpack the SDK) and take the subtree you need.
+2. Vendor it into the package; in **`target.xml`** use **`<prebuilt …/>` and `<headers>`**; see **`package-target-xml-spec.md` §3.1** and **`test_projects/prebuilt_import_demo/`** (Step 7).
+3. If the **aggregate CMake** still needs extra **`find_package` roots**, add them via **`--opt GZ_CMAKE_PREFIX_PATH=...`**; see **`internal-variables.md` §4.1**.
 
-Cross-check: **`test_projects/smoke_minimal_exe/`** is a minimal executable smoke sample.
+Cross-check: **`test_projects/smoke_minimal_exe/`** is a minimal executable smoke sample; third-party packaging uses **`prebuilt_import_demo/`** and Step 7.
 
 ---
 
@@ -178,7 +177,7 @@ Cross-check: **`test_projects/smoke_minimal_exe/`** is a minimal executable smok
 **Recommended path**:
 
 1. **Read upstream**: list sources, public headers, macros, `link_libraries`, install rules; in gz create one **`target.xml`** per compile unit with **`<sources>` / `<headers>` / `<defines>` / `<dependency>`** rewriting the graph.
-2. **Third-party / subtrees**: if installed outside package, use **`imported_installed_*` + `<install …/>`**; if only SDK binaries, **`prebuilt_*` + `<prebuilt>`** (Step 7).
+2. **Third-party / subtrees**: after folding install output into the repo (or using absolute paths), use **`prebuilt_*` + `<prebuilt>`**; for extra **`find_package` prefixes** use **`GZ_CMAKE_PREFIX_PATH`** (Steps 7–8, **`internal-variables.md`**).
 3. **Incremental**: start with **`prebuilt_*`** wrapping existing binaries, then move sources into **`static_library`** targets.
 4. **History**: removed subcommands / embedded upstream CMake paths are gone; migrate per **`gz spec`** and **`package-target-xml-spec.md`** to pure hand-written XML.
 
@@ -186,14 +185,14 @@ Cross-check: **`test_projects/smoke_minimal_exe/`** is a minimal executable smok
 
 ## Migration topic B: **Qt** app → gz
 
-**Idea**: Qt comes from **official install or out-of-tree CMake install**; gz **only hand-writes** sources, macros, **`<dependency>`** to **`prebuilt_*`** / **`imported_installed_*`** or in-repo libraries; **moc / uic / rcc** via **`<preprocess>`** or a **`static_library`** sub-target to avoid CMake-backend limits on **exe**-level source preprocess.
+**Idea**: Qt comes from **official install or out-of-tree CMake install**; gz **only hand-writes** sources, macros, **`<dependency>`** to **`prebuilt_*`** (vendored **`.lib`** / headers) or in-repo libraries; **moc / uic / rcc** via **`<preprocess>`** or a **`static_library`** sub-target to avoid CMake-backend limits on **exe**-level source preprocess.
 
 | CMake/Qt concept | In `gz` |
 |------------------|---------|
 | `target_sources` / `add_executable` | **`<sources><file>…`** |
 | `target_include_directories` | **`<headers>`** (install + include inference) |
 | `target_compile_definitions` | **`<defines>`** |
-| `find_package(Qt…)` + link | **`<dependency>`** to **`prebuilt_*` / `imported_installed_*`** (or in-package **`static_library`/`shared_library`**); **hand-write** libs/headers under Qt prefix |
+| `find_package(Qt…)` + link | **`<dependency>`** to **`prebuilt_*`** or in-package **`static_library`/`shared_library`**; **hand-write** vendored libs/headers or set **`GZ_CMAKE_PREFIX_PATH`** to Qt’s prefix |
 | `AUTOMOC` / `AUTOUIC` / `AUTORCC` | **Hand-write** **`moc`/`uic`/`rcc`** command lines, see **`script-tutorial.md` §8** |
 
 ---
@@ -203,7 +202,7 @@ Cross-check: **`test_projects/smoke_minimal_exe/`** is a minimal executable smok
 | Shape | Suggested approach |
 |-------|-------------------|
 | **Header-only** | No link target: **`<headers>`** only, or **`asset_bundle`** / install as needed. |
-| **Official CMake + install** | **`cmake --install`** outside gz, then **`imported_installed_*` + `<install …/>`**. |
+| **Official CMake + install** | **`cmake --install`** outside gz, then **vendor** needed files and use **`prebuilt_*` + `<prebuilt>`**, or point **`GZ_CMAKE_PREFIX_PATH`** at that prefix. |
 | **Prebuilt .lib/.dll/.so only** | **`prebuilt_static_library` / `prebuilt_shared_library` + `<prebuilt>` + `<headers>`**. |
 | **Patches / multi-step configure** | Keep upstream build **outside** gz; use **`preprocess`** or vendored source targets, **`script-tutorial.md`**. |
 | **Another gz package in this repo** | Package **`<dependency name="PkgName"/>`** + **`PkgName:TargetName`**. |

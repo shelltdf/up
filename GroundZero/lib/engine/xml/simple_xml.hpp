@@ -18,7 +18,7 @@ struct GzBinaryLayout {
   std::string link;  // "static" | "dynamic" (from GZ_TARGET_DYNAMIC_LIBRARY)
   std::string config;  // "debug" | "release"
   std::string crt;  // e.g. "dynamic_md"; often empty on non-Windows
-  /** Legacy read: deprecated monolithic `arch="..."` (or old `install_dir_leaf="..."`); used only to run `try_decompose_compose_arch_tag`, then cleared when possible. */
+  /** Legacy read: deprecated monolithic `arch="..."`; used only to run `try_decompose_compose_arch_tag`, then cleared when possible. */
   std::string arch_legacy;
   bool empty() const {
     return os.empty() && cpu.empty() && build_system.empty() && toolchain.empty() && link.empty() && config.empty() &&
@@ -95,23 +95,12 @@ struct TargetDesc {
     GzBinaryLayout layout;
   };
 
-  // Artifact paths relative to CMAKE_INSTALL_PREFIX (populate by out-of-band install / CI).
-  struct InstalledWrapDesc {
-    std::string artifact;           // e.g. lib/foo.lib — relative to CMAKE_INSTALL_PREFIX
-    std::string interface_include;  // e.g. include — optional, INTERFACE include dir under prefix
-    std::string implib;             // Windows shared: import .lib (relative to prefix)
-    GzBinaryLayout layout;
-  };
-
   std::string name;
   std::string type;  // executable | library | static_library | shared_library | asset_bundle |
-                      // prebuilt_static_library | prebuilt_shared_library |
-                      // imported_installed_static_library | imported_installed_shared_library
-                      // (load_target_xml also accepts legacy imported_{static,shared}_library)
+                      // prebuilt_static_library | prebuilt_shared_library
   std::vector<std::string> sources;
   std::vector<SourceEntry> source_entries;
   std::optional<PrebuiltDesc> prebuilt;
-  std::optional<InstalledWrapDesc> installed_wrap;
   /** `<dependency name="..." visibility="private|public|interface"/>` — `name` is package:target or same-package target. */
   struct DependencyEntry {
     std::string name;

@@ -100,13 +100,14 @@ $ARCH = .\_build\Release\gz.exe print-build-dir-name
 
 **推荐流程**：
 
-1. 在包外对上游执行 **`cmake --install`**（或解压 SDK），得到确定的 `lib/`、`include/` 等目录。
-2. 在本仓库或你的工程里**手写** **`package.xml`**（包名、可选包级依赖）与 **`target.xml`**：用 **`imported_installed_*` + `<install artifact="..."/>`** 指向安装前缀下的 `.lib` / `.so`，或用 **`prebuilt_*` + `<prebuilt>`** 指向 vendored 二进制；用 **`<headers>`** 暴露头文件。
-3. **`gz configure --scan …`** → **`gz build --build-dir-name …`**；`run` / `test` / `pack` 仍使用 **`--install-dir-name $ARCH`**（`$ARCH` 来自 **`gz print-build-dir-name`** 或 **`gz_cache.txt` 的 `arch=`**）。
+1. 在包外对上游执行 **`cmake --install`**（或解压 SDK），将需要的 **`lib/`、`include/`** 等**复制或硬链接**到本包可提交目录（例如 `vendor/zlib/…`），或放在**绝对路径**可访问位置。
+2. 在本仓库或你的工程里**手写** **`package.xml`**（包名、可选包级依赖）与 **`target.xml`**：用 **`prebuilt_static_library` / `prebuilt_shared_library`** + **`<prebuilt …/>`** 指向**相对 `target.xml` 或绝对路径**的 `.lib` / `.dll` / `.so`；用 **`<headers>`** 暴露头文件（见 **[`doc/zh/getting-started.md`](doc/zh/getting-started.md)** 第 7 步）。
+3. 若聚合 CMake 需要 **`find_package`**，在 **`gz configure --opt GZ_CMAKE_PREFIX_PATH=…`** 中追加第三方安装前缀（分号分隔），与 **[`doc/zh/internal-variables.md`](doc/zh/internal-variables.md)** §4.1 一致。
+4. **`gz configure --scan …`** → **`gz build --build-dir-name …`**；`run` / `test` / `pack` 仍使用 **`--install-dir-name $ARCH`**（`$ARCH` 来自 **`gz print-build-dir-name`** 或 **`gz_cache.txt` 的 `arch=`**）。
 
-**`configure`** 仍会把本工作区 **`.intermediate/install/<arch>/`** 并入 **`CMAKE_PREFIX_PATH`**，并在多包场景下尽量为 **`find_package`** 推导常见缓存变量（若你仍在 CMake 聚合后端中消费上游 CMake 工程）。规则约束不变：**无**针对 zlib/FBX 等具体库名的内置特判，一切靠 XML 声明。
+**`configure`** 会把本工作区 **`.intermediate/install/<arch>/`** 排在 **`CMAKE_PREFIX_PATH`** 最前；**无**针对具体第三方库名的内置特判，链接与头文件路径以 **`target.xml`** 声明与 **`GZ_CMAKE_PREFIX_PATH`** 为准。
 
-最小示例（`artifact` 相对安装前缀）：
+最小示例（`prebuilt`，路径相对本 `target.xml` 目录下的 `vendor/`）：
 
 ```xml
 <!-- package.xml -->
@@ -117,17 +118,21 @@ $ARCH = .\_build\Release\gz.exe print-build-dir-name
 
 ```xml
 <!-- 例如 zlibstatic/target.xml -->
-<target name="zlibstatic" type="imported_installed_static_library">
-  <install artifact="lib/zlibstatic.lib"/>
-  <interface_include dir="include"/>
+<target name="zlibstatic" type="prebuilt_static_library">
+  <prebuilt import_lib="vendor/zlib/lib/zlibstatic.lib"/>
+  <headers>
+    <dir from="vendor/zlib/include" to=""/>
+  </headers>
 </target>
 ```
 
 ```xml
-<!-- .targets/zlib_shared/target.xml (Windows) -->
-<target name="zlib_shared" type="imported_installed_shared_library">
-  <install artifact="bin/zlib1.dll" implib="lib/zlib.lib"/>
-  <interface_include dir="include"/>
+<!-- zlib_shared/target.xml (Windows 示例) -->
+<target name="zlib_shared" type="prebuilt_shared_library">
+  <prebuilt import_lib="vendor/zlib/lib/zlib.lib" location="vendor/zlib/bin/zlib1.dll"/>
+  <headers>
+    <dir from="vendor/zlib/include" to=""/>
+  </headers>
 </target>
 ```
 

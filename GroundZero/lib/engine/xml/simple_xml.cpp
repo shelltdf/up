@@ -44,8 +44,6 @@ std::string trim_copy(std::string s) {
 }
 
 void parse_gz_binary_layout_attrs(const std::string& head, GzBinaryLayout& b) {
-  std::string idl;
-  attr_string(head, "install_dir_leaf", idl);
   attr_string(head, "os", b.os);
   attr_string(head, "cpu", b.cpu);
   attr_string(head, "build_system", b.build_system);
@@ -54,7 +52,6 @@ void parse_gz_binary_layout_attrs(const std::string& head, GzBinaryLayout& b) {
   attr_string(head, "config", b.config);
   attr_string(head, "crt", b.crt);
   attr_string(head, "arch", b.arch_legacy);
-  idl = trim_copy(idl);
   b.os = trim_copy(b.os);
   b.cpu = trim_copy(b.cpu);
   b.build_system = trim_copy(b.build_system);
@@ -63,15 +60,13 @@ void parse_gz_binary_layout_attrs(const std::string& head, GzBinaryLayout& b) {
   b.config = trim_copy(b.config);
   b.crt = trim_copy(b.crt);
   b.arch_legacy = trim_copy(b.arch_legacy);
-  if (b.arch_legacy.empty() && !idl.empty())
-    b.arch_legacy = idl;  // deprecated; coalesced for decompose only, never emitted
 }
 
 void normalize_gz_binary_layout_in_place(GzBinaryLayout& b) {
   (void)b;
 }
 
-void maybe_enrich_layout_from_composed_install_leaf(GzBinaryLayout& b) {
+void maybe_enrich_layout_from_legacy_arch(GzBinaryLayout& b) {
   if (!b.os.empty() || b.arch_legacy.empty())
     return;
   std::string os, cpu, bs, tc, link, conf, crt;
@@ -459,55 +454,9 @@ void parse_all_prebuilt_void_tags(const std::string& raw, TargetDesc& out) {
     pb.dll = trim_copy(pb.dll);
     parse_gz_binary_layout_attrs(head, pb.layout);
     normalize_gz_binary_layout_in_place(pb.layout);
-    maybe_enrich_layout_from_composed_install_leaf(pb.layout);
+    maybe_enrich_layout_from_legacy_arch(pb.layout);
     if (!pb.import_lib.empty() || !pb.location.empty() || !pb.dll.empty() || !pb.layout.empty())
       out.prebuilt = std::move(pb);
-    scan = gt + 1;
-  }
-}
-
-void parse_all_install_void_tags(const std::string& raw, TargetDesc& out) {
-  const std::string open = "<install";
-  size_t scan = 0;
-  while (true) {
-    const size_t io = raw.find(open, scan);
-    if (io == std::string::npos)
-      break;
-    const size_t after = io + open.size();
-    if (after < raw.size()) {
-      const unsigned char uc = static_cast<unsigned char>(raw[after]);
-      if (std::isalnum(uc) || uc == '_' || uc == '-' || uc == ':') {
-        scan = io + 1;
-        continue;
-      }
-    }
-    const size_t gt = raw.find('>', io);
-    if (gt == std::string::npos)
-      break;
-    const size_t next_io = raw.find(open, gt + 1);
-    const size_t zone_end = (next_io == std::string::npos) ? raw.size() : next_io;
-    const std::string head = raw.substr(io, gt - io + 1);
-    std::string art;
-    if (attr_string(head, "artifact", art)) {
-      TargetDesc::InstalledWrapDesc iw;
-      iw.artifact = trim_copy(art);
-      attr_string(head, "implib", iw.implib);
-      iw.implib = trim_copy(iw.implib);
-      parse_gz_binary_layout_attrs(head, iw.layout);
-      normalize_gz_binary_layout_in_place(iw.layout);
-      maybe_enrich_layout_from_composed_install_leaf(iw.layout);
-      const size_t iface_open = raw.find("<interface_include", gt + 1);
-      if (iface_open != std::string::npos && iface_open < zone_end) {
-        const size_t iface_gt = raw.find('>', iface_open);
-        if (iface_gt != std::string::npos && iface_gt < zone_end) {
-          const std::string ih = raw.substr(iface_open, iface_gt - iface_open + 1);
-          attr_string(ih, "dir", iw.interface_include);
-          iw.interface_include = trim_copy(iw.interface_include);
-        }
-      }
-      if (!iw.artifact.empty())
-        out.installed_wrap = std::move(iw);
-    }
     scan = gt + 1;
   }
 }
@@ -644,13 +593,6 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
     return false;
 
   parse_all_prebuilt_void_tags(raw, out);
-  parse_all_install_void_tags(raw, out);
-
-  // Legacy type names (read-only compatibility); canonical names are prebuilt_* .
-  if (out.type == "imported_static_library")
-    out.type = "prebuilt_static_library";
-  else if (out.type == "imported_shared_library")
-    out.type = "prebuilt_shared_library";
 
   error.clear();
   return true;
@@ -706,8 +648,7 @@ bool write_target_xml(std::ostream& out, const TargetDesc& desc) {
   out << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
   out << "<target name=\"" << xml_escape_text(desc.name) << "\" type=\"" << xml_escape_text(desc.type) << "\">\n";
   const bool skip_sources =
-      desc.type == "asset_bundle" || desc.type == "prebuilt_static_library" || desc.type == "prebuilt_shared_library" ||
-      desc.type == "imported_installed_static_library" || desc.type == "imported_installed_shared_library";
+      desc.type == "asset_bundle" || desc.type == "prebuilt_static_library" || desc.type == "prebuilt_shared_library";
   if (!desc.vars.empty() || !desc.scripts.empty()) {
     out << "  <vars>\n";
     for (const auto& v : desc.vars) {
@@ -788,16 +729,6 @@ bool write_target_xml(std::ostream& out, const TargetDesc& desc) {
       out << " dll=\"" << xml_escape_text(pb.dll) << "\"";
     write_gz_binary_layout_attrs(out, pb.layout);
     out << "/>\n";
-  }
-  if (desc.installed_wrap.has_value()) {
-    const auto& iw = *desc.installed_wrap;
-    out << "  <install artifact=\"" << xml_escape_text(iw.artifact) << "\"";
-    if (!iw.implib.empty())
-      out << " implib=\"" << xml_escape_text(iw.implib) << "\"";
-    write_gz_binary_layout_attrs(out, iw.layout);
-    out << "/>\n";
-    if (!iw.interface_include.empty())
-      out << "  <interface_include dir=\"" << xml_escape_text(iw.interface_include) << "\"/>\n";
   }
   if (!desc.dependencies.empty()) {
     for (const auto& d : desc.dependencies) {

@@ -75,6 +75,7 @@ Otherwise the subcommand returns **exit code 2** with an **`invalid ...`** style
 | **2** | **Missing/invalid args**, common “cache/dir not found” recoverable errors (stderr explains). |
 | **3** | Some heavy steps failed (e.g. **`list`** non-DOM write failures—see each command). |
 | **4** | **`list`**: failed to export XML/JSON to a file or write DOM to stdout. |
+| **5** | **`configure`**: **business failure** when generating the backend graph / target model (e.g. **`target.xml` `type`** not in the allowed set ⇒ stderr **`configure: unknown target type "…" for target "…"`**; other prebuilt/import checks may also return **5**—see `configure.cpp`). |
 | **6** | **`list`**: `package.xml` / `target.xml` path contains **non-ASCII**. |
 | **8** | **`build`**: **`gz_redist_manifest.json`** exists but **cannot be parsed** (corrupt JSON, etc.). If the file is **missing**, redistribution is **skipped** with **exit 0** (configure may omit the file when the primary package has no library-like targets). |
 | **9** | **`build`**: redistribution XML **emit failed** (missing expected binaries under the install tree, etc.). |
@@ -124,6 +125,8 @@ gz configure [--build-dir-name <leaf>] [--scan <dir>]... [--opt KEY=VALUE]...
 | **`--opt KEY=VALUE`** | No | Repeatable; also **`--opt=KEY=VALUE`**. Overrides **`GZ_*`** and project keys (see **`internal-variables.md`** / **`gz spec`**). |
 
 **Paths**: scanned XML paths must be **ASCII-only** (otherwise configure fails).
+
+**`type` and exit code 5**: **`target.xml` `type`** must be one of the values listed in **[`package-target-xml-spec.md`](package-target-xml-spec.md) §3.1** and accepted by the implementation whitelist. If it is not recognized, stderr prints **`configure: unknown target type "…" for target "…" in …/target.xml`**, **exit 5** (other **`configure` failures** may also use **5**—see the table above and `GroundZero/lib/engine/commands/configure.cpp`).
 
 **`GZ_TARGET_DYNAMIC_LIBRARY` (alias `GZ_DYNAMIC_LIBRARY`)**: participates in **`arch`** static/dynamic segment and resolves **`target.xml` `type="library"`** to **`static_library`** or **`shared_library`** before backend emission; **`static_library` / `shared_library`** are **not** overridden by this. See **[`package-target-xml-spec.md`](package-target-xml-spec.md) §3.1**.
 

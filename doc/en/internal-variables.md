@@ -78,7 +78,7 @@ When configure generates an **aggregate** top-level CMake project for multiple p
 1. This configure’s install prefix under **cwd**: **`.intermediate/install/<arch>/`** (always **first**, so workspace-installed packages are found first).
 2. Extra directories from **`--opt GZ_CMAKE_PREFIX_PATH=dir1;dir2`** (e.g. third-party SDK CMake roots); relative paths resolve against **cwd**.
 
-Additionally, when the primary package depends on another package that exposes **`imported_installed_*`** targets, configure tries to map those install artifacts/includes to common **`find_package`** cache variables for the aggregate CMake (e.g. `<PKG>_LIBRARY`, `<PKG>_LIBRARY_DEBUG`, `<PKG>_INCLUDE_DIR`) to reduce flakiness when **`CMAKE_PREFIX_PATH`** alone is insufficient. On Windows, **`implib`** or **`.lib`** is preferred so **`.dll`** is not passed into linker-library variables.
+**`find_package` behavior in the aggregate CMake** is entirely up to your **CMake** code and **`CMAKE_PREFIX_PATH` / `GZ_CMAKE_PREFIX_PATH`**; `gz` does **not** inject package-specific **`<PKG>_LIBRARY` / `INCLUDE_DIR` cache variables** for third-party names.
 
 ---
 

@@ -85,7 +85,7 @@ Path names, allowed characters, and **`print-build-dir-name`**: **[`cli-referenc
 
 ### 3.1 Package / target, types, dependencies, `<headers>`
 
-Full **`type`** list, **`<dependency>`** (including **`visibility`**), **`<headers>`** **`from`/`to`**, **`<prebuilt>` / `<install>`**: **[`package-target-xml-spec.md`](package-target-xml-spec.md)** and **`gz spec`**. Prebuilt sample: **[`test_projects/prebuilt_static_stub/README.md`](../test_projects/prebuilt_static_stub/README.md)**.
+Full **`type`** list, **`<dependency>`** (including **`visibility`**), **`<headers>`** **`from`/`to`**, **`<prebuilt …/>`**: **[`package-target-xml-spec.md`](package-target-xml-spec.md)** and **`gz spec`**. Prebuilt sample: **[`test_projects/prebuilt_static_stub/README.md`](../test_projects/prebuilt_static_stub/README.md)**.
 
 ### 3.2 Aggregate CMake and `CMAKE_PREFIX_PATH`
 
@@ -136,7 +136,7 @@ The GUI passes selected settings to `gz.exe` via `--opt`.
 - **A — New library target**: new dir + **`target.xml`** + **`<dependency>`** from exe → **`configure` → `print-build-dir-name` → `build` → `test`/`run`** (flags: **cli-reference**).  
 - **B — Cross-package**: **`package.xml`** package dep + **`otherPkg:target`** + **`--scan`**.  
 - **C — Headers layout**: **`from`/`to`** in **package-target-xml-spec** §3.3; inspect **`.intermediate/install/<name>/include/`**.  
-- **D — Third-party SDK**: vendor install + hand-written **`imported_installed_*`** or **`prebuilt_*`** (**getting-started** steps 7–8) → **`configure` / `build`** → **`<dependency name="pkg:target"/>`**.
+- **D — Third-party SDK**: vendor the install tree (or set **`GZ_CMAKE_PREFIX_PATH`**) + hand-written **`prebuilt_*` + `<prebuilt>`** + **`<headers>`** (**getting-started** steps 7–8) → **`configure` / `build`** → **`<dependency name="pkg:target"/>`**.
 
 Library-only packages are supported.
 
@@ -187,7 +187,7 @@ Cross-package dependencies are usually invisible in single-package scan scope. R
 
 ### Q7: Can a library-only package (no executable) run configure/build?
 
-Yes. Library-only packages are supported, including pure **`imported_installed_*`** wrappers.  
+Yes. Library-only packages are supported (for example only **`prebuilt_*`** or only compile targets).  
 `configure` requires at least one **`target.xml`** under the primary package, but no longer requires an executable target.
 
 ---
