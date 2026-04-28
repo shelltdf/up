@@ -107,6 +107,20 @@ Type vs key child tags (current implementation):
 | `prebuilt_static_library` | not required | **required** | Paths relative to `target.xml` (or absolute) |
 | `prebuilt_shared_library` | not required | **required** | Windows: dll + import lib must resolve |
 
+#### 3.1.1 **`<prebuilt/>`** and **`<install/>`** (binary **layout** metadata)
+
+- There is **no** **`install_dir_leaf=…`** attribute: the install root segment name comes from **configure** / the **`.intermediate/`
+  cache** (**`arch=`** and **`compose_arch_tag`**) and is **not** repeated on these void tags.
+- **Authoring:** besides **`import_lib` / `location` / `dll`** (or **`artifact` / `implib`**) use the optional **split** attributes
+  that mirror **`compose_arch_tag`** in **`GroundZero/lib/infra/platform/paths.cpp`**: **`os`**, **`cpu`**, **`build_system`**, **`toolchain`**, **`link`**, **`config`**, **`crt`**. Do not use a single long **`arch=…`** for new files.
+- **`gz build` redistribution** **`target.xml` / schema 3 `gz_redist_manifest.json`** **emit** those split fields only
+  (no **`install_dir_leaf`** JSON key).
+- **Read compatibility (deprecated):** legacy **`arch=…`**, or an old deprecated **`install_dir_leaf=…`**, is still read and used
+  only to run **`try_decompose_compose_arch_tag`**; split fields are filled when the string is recognized, and the monolith is
+  not written back.
+- **`imported_installed_*` `<install …/>`**: same layout attributes; **`<interface_include dir="…"/>`** is still a separate
+  child element, unchanged.
+
 ### 3.2 Source files `<file> ... </file>`
 
 - One pair **`<file>`** … **`</file>`** per source (whitespace in tag names must match implementation regex; prefer canonical `<file>...</file>`).
@@ -294,6 +308,6 @@ If XSD/JSON Schema is added later, document version and changelog at the top of 
 
 - **`gz pack` (archive only)**: archives the **install root** from **`--install-dir-name`** (**.intermediate/install/<arch>/`**, including **`bin/`**, **`lib/`**, **`include/`**, …) via **CPack** when available, else **archive** backends. It **does not** generate or rewrite **`package.xml` / `target.xml`**. If **`gz-redist/`** already exists under that install tree (see below), it is **included** in the archive. Code: **`pack.cpp`**, **`run_pack_backend`** in **`backend_dispatch.cpp`**.
 
-- **`gz build` (redistribution XML on by default)**: after a successful **build + install**, **`gz`** reads **`.intermediate/build/<leaf>/gz_redist_manifest.json`** (written by **`gz configure`** when applicable). When the manifest exists and lists **`targets`**, it writes **`<install>/gz-redist/package.xml`** and **`<install>/gz-redist/<emit-name>/target.xml`**: library-like targets are emitted for downstream **`gz configure --scan`** (mostly **`prebuilt_*` + `<prebuilt>`** with paths **relative to each `target.xml` directory**; **`imported_installed_*`** keep **`<install …/>`** with paths **relative to the install prefix / `CMAKE_INSTALL_PREFIX`**). **`executable`** and **`asset_bundle`** targets are **not** included in the manifest (MVP). Disable with **`--no-emit-redistribution-xml`** or **`GZ_EMIT_REDIST_XML=0` / `false` / `off` / `no`**. Code: **`build.cpp`**, **`redist_emit.cpp`**; manifest authoring: **`configure.cpp`** (`try_write_gz_redist_manifest_json`).
+- **`gz build` (redistribution XML on by default)**: after a successful **build + install**, **`gz`** reads **`.intermediate/build/<leaf>/gz_redist_manifest.json`** (written by **`gz configure`** when applicable). When the manifest exists and lists **`targets`**, it writes **`<install>/gz-redist/package.xml`** and **`<install>/gz-redist/<emit-name>/target.xml`**: library-like targets are emitted for downstream **`gz configure --scan`**; **`<prebuilt …/>` / `<install …/>`** carry the **split layout** attributes from §3.1.1 (and **`imported_installed_*`** still use **`<install …/>`** with paths **relative to the install prefix / `CMAKE_INSTALL_PREFIX`**). **Schema 1** manifests with only a legacy **`arch`** string are **upgraded** on read when possible. **`executable`** and **`asset_bundle`** targets are **not** included in the manifest (MVP). Disable with **`--no-emit-redistribution-xml`** or **`GZ_EMIT_REDIST_XML=0` / `false` / `off` / `no`**. Code: **`build.cpp`**, **`redist_emit.cpp`**; manifest authoring: **`configure.cpp`** (`try_write_gz_redist_manifest_json`).
 
 - **Consumption hint**: ship **`gz-redist/`** next to **`bin/`**, **`lib/`**, **`include/`** under one install prefix; when **`gz-redist`** is used as the **package root** for scanning, its parent directory should match the **install prefix** implied by **`<install>`** / **`<prebuilt>`** paths above.

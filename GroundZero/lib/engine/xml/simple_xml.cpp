@@ -43,6 +43,50 @@ std::string trim_copy(std::string s) {
   return s.substr(b, e - b);
 }
 
+void parse_gz_binary_layout_attrs(const std::string& head, GzBinaryLayout& b) {
+  std::string idl;
+  attr_string(head, "install_dir_leaf", idl);
+  attr_string(head, "os", b.os);
+  attr_string(head, "cpu", b.cpu);
+  attr_string(head, "build_system", b.build_system);
+  attr_string(head, "toolchain", b.toolchain);
+  attr_string(head, "link", b.link);
+  attr_string(head, "config", b.config);
+  attr_string(head, "crt", b.crt);
+  attr_string(head, "arch", b.arch_legacy);
+  idl = trim_copy(idl);
+  b.os = trim_copy(b.os);
+  b.cpu = trim_copy(b.cpu);
+  b.build_system = trim_copy(b.build_system);
+  b.toolchain = trim_copy(b.toolchain);
+  b.link = trim_copy(b.link);
+  b.config = trim_copy(b.config);
+  b.crt = trim_copy(b.crt);
+  b.arch_legacy = trim_copy(b.arch_legacy);
+  if (b.arch_legacy.empty() && !idl.empty())
+    b.arch_legacy = idl;  // deprecated; coalesced for decompose only, never emitted
+}
+
+void normalize_gz_binary_layout_in_place(GzBinaryLayout& b) {
+  (void)b;
+}
+
+void maybe_enrich_layout_from_composed_install_leaf(GzBinaryLayout& b) {
+  if (!b.os.empty() || b.arch_legacy.empty())
+    return;
+  std::string os, cpu, bs, tc, link, conf, crt;
+  if (!try_decompose_compose_arch_tag(b.arch_legacy, os, cpu, bs, tc, link, conf, crt))
+    return;
+  b.os = std::move(os);
+  b.cpu = std::move(cpu);
+  b.build_system = std::move(bs);
+  b.toolchain = std::move(tc);
+  b.link = std::move(link);
+  b.config = std::move(conf);
+  b.crt = std::move(crt);
+  b.arch_legacy.clear();
+}
+
 bool is_supported_script_trigger(const std::string& trigger) {
   return trigger == "manual" || trigger == "sources.preprocess" || trigger == "sources.postprocess" ||
          trigger == "headers.preprocess" || trigger == "headers.postprocess" || trigger == "assets.preprocess" ||
@@ -88,6 +132,23 @@ std::string xml_escape_text(const std::string& s) {
     }
   }
   return o;
+}
+
+void write_gz_binary_layout_attrs(std::ostream& out, const GzBinaryLayout& b) {
+  if (!b.os.empty())
+    out << " os=\"" << xml_escape_text(b.os) << "\"";
+  if (!b.cpu.empty())
+    out << " cpu=\"" << xml_escape_text(b.cpu) << "\"";
+  if (!b.build_system.empty())
+    out << " build_system=\"" << xml_escape_text(b.build_system) << "\"";
+  if (!b.toolchain.empty())
+    out << " toolchain=\"" << xml_escape_text(b.toolchain) << "\"";
+  if (!b.link.empty())
+    out << " link=\"" << xml_escape_text(b.link) << "\"";
+  if (!b.config.empty())
+    out << " config=\"" << xml_escape_text(b.config) << "\"";
+  if (!b.crt.empty())
+    out << " crt=\"" << xml_escape_text(b.crt) << "\"";
 }
 
 bool parse_vars_body(const std::string& body,
@@ -396,7 +457,10 @@ void parse_all_prebuilt_void_tags(const std::string& raw, TargetDesc& out) {
     pb.import_lib = trim_copy(pb.import_lib);
     pb.location = trim_copy(pb.location);
     pb.dll = trim_copy(pb.dll);
-    if (!pb.import_lib.empty() || !pb.location.empty() || !pb.dll.empty())
+    parse_gz_binary_layout_attrs(head, pb.layout);
+    normalize_gz_binary_layout_in_place(pb.layout);
+    maybe_enrich_layout_from_composed_install_leaf(pb.layout);
+    if (!pb.import_lib.empty() || !pb.location.empty() || !pb.dll.empty() || !pb.layout.empty())
       out.prebuilt = std::move(pb);
     scan = gt + 1;
   }
@@ -429,6 +493,9 @@ void parse_all_install_void_tags(const std::string& raw, TargetDesc& out) {
       iw.artifact = trim_copy(art);
       attr_string(head, "implib", iw.implib);
       iw.implib = trim_copy(iw.implib);
+      parse_gz_binary_layout_attrs(head, iw.layout);
+      normalize_gz_binary_layout_in_place(iw.layout);
+      maybe_enrich_layout_from_composed_install_leaf(iw.layout);
       const size_t iface_open = raw.find("<interface_include", gt + 1);
       if (iface_open != std::string::npos && iface_open < zone_end) {
         const size_t iface_gt = raw.find('>', iface_open);
@@ -719,6 +786,7 @@ bool write_target_xml(std::ostream& out, const TargetDesc& desc) {
       out << " location=\"" << xml_escape_text(pb.location) << "\"";
     if (!pb.dll.empty())
       out << " dll=\"" << xml_escape_text(pb.dll) << "\"";
+    write_gz_binary_layout_attrs(out, pb.layout);
     out << "/>\n";
   }
   if (desc.installed_wrap.has_value()) {
@@ -726,6 +794,7 @@ bool write_target_xml(std::ostream& out, const TargetDesc& desc) {
     out << "  <install artifact=\"" << xml_escape_text(iw.artifact) << "\"";
     if (!iw.implib.empty())
       out << " implib=\"" << xml_escape_text(iw.implib) << "\"";
+    write_gz_binary_layout_attrs(out, iw.layout);
     out << "/>\n";
     if (!iw.interface_include.empty())
       out << "  <interface_include dir=\"" << xml_escape_text(iw.interface_include) << "\"/>\n";

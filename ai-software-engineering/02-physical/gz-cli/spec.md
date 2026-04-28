@@ -31,10 +31,10 @@
 
 ## 硬约束（与实现对齐）
 
-- **`build`**：必须提供 **`--build-dir-name`**；构建目录下必须存在 **`gz_cache.txt`**。默认在 **install 成功之后** 读取 **`gz_redist_manifest.json`**（由 **`configure`** 写入）并在 **`<install>/gz-redist/`** 下生成 **`package.xml` / `*/target.xml`**；可用 **`--no-emit-redistribution-xml`** 或 **`GZ_EMIT_REDIST_XML`** 为假值关闭（详见 **`doc/zh/package-target-xml-spec.md` §8**）。
+- **`build`**：必须提供 **`--build-dir-name`**；构建目录下必须存在 **`gz_cache.txt`**。默认在 **install 成功之后** 读取 **`gz_redist_manifest.json`**（**`schema` 3** 为**分字段**布局，**无** `install_dir_leaf`；**`schema` 1/2** 为旧式）并在 **`<install>/gz-redist/`** 下生成 **`package.xml` / `*/target.xml`**；**`<prebuilt …/>` / `<install …/>` 不**要 **`install_dir_leaf=…`**，只写 **§3.1.1** 的 **`os` / `cpu` / `build_system` / `toolchain` / `link` / `config` / `crt`（安装根目录名见 `arch=` / `compose_arch_tag`，不重复在 XML 属性中）**。**读入**时旧 **`arch` / `install_dir_leaf` 长串** 仍可反拆。可用 **`--no-emit-redistribution-xml`** 或 **`GZ_EMIT_REDIST_XML`** 为假值关闭（详见 **`doc/zh/package-target-xml-spec.md` §8**）。
 - **`run` / `test`**：必须提供 **`--install-dir-name`**；其值为 **安装树根在 `.intermediate/install/` 下的单段目录名**（通常等于缓存中的 **`arch`**）。
 - **`pack`**：至少一次 **`--install-dir-name`**；可重复以打多架构包。
-- **`pack`（当前行为补充）**：仅对给定 **安装树**做 **zip/tar.gz**（或 **CPack**）归档；**不**生成或改写 **`package.xml` / `target.xml`**。若 **`gz-redist/`** 已存在于安装树下（由 **`build --emit-redistribution-xml`** 生成），**`pack`** 会将其一并打进归档。
+- **`pack`（当前行为补充）**：仅对给定 **安装树**做 **zip/tar.gz**（或 **CPack**）归档；**不**生成或改写 **`package.xml` / `target.xml`**。若 **`gz-redist/`** 已存在于安装树下（由 **`gz build` 默认 emit** 等路径生成），**`pack`** 会将其一并打进归档。
 
 ---
 

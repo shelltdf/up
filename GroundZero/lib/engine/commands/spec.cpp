@@ -9,7 +9,7 @@ namespace {
 // English-only: embedded copy of rules aligned with doc/zh/package-target-xml-spec.md for AI/tools without repo .md.
 // Split into named chunks: MSVC ~16kB string literal limit; edit the slice you need.
 constexpr const char* kXmlSpecEnThroughSection3 =
-  R"SPEC(GZ_XML_SPEC_REVISION=23
+  R"SPEC(GZ_XML_SPEC_REVISION=26
 
 # gz — package.xml and target.xml (machine-oriented summary)
 
@@ -195,6 +195,17 @@ outside the forms above.
 | prebuilt_shared_library | not required | **required** | no | On Windows, dll + import `.lib` must be resolvable. |
 | imported_installed_static_library | not required | no | **required** | `artifact` relative to `CMAKE_INSTALL_PREFIX` (populate prefix by out-of-band install / CI). |
 | imported_installed_shared_library | not required | no | **required** | Windows: need `implib` for the import library. |
+
+### `<prebuilt/>` and `<install/>` (binary layout tags)
+
+- Optional **layout** attributes (no **`install_dir_leaf=…`**; the install root directory name is implied by **`gz_cache.txt`**
+  **`arch=`** and **`compose_arch_tag`**, not duplicated here): **`os`**, **`cpu`**, **`build_system`**, **`toolchain`**, **`link`**
+  (`static` | `dynamic`), **`config`** (`debug` | `release`), **`crt`** (e.g. `dynamic_md`) — see **`compose_arch_tag`** and
+  **`try_decompose_compose_arch_tag`** in `GroundZero/lib/infra/platform/paths.cpp`. **`gz build`**-emitted **`<prebuilt/>` /
+  `<install/>`** and **schema 3** **`gz_redist_manifest.json`** set these (no **`install_dir_leaf`** key in JSON).
+- **Read compatibility:** legacy **`arch="…"`** or old **`install_dir_leaf="…"`** on a void tag: used only in-memory to run
+  **`try_decompose_compose_arch_tag`**, then split fields are set and the monolithic string is **not** re-emitted.
+- **`<install …/>` for `imported_installed_*`**: same **layout** attributes; optional **`<interface_include dir="…"/>`** after it, unchanged.
 
 ### Sources
 - Repeat: `<file>relative/path.cpp</file>` — path is **relative to the directory that contains this target.xml**.
@@ -400,7 +411,8 @@ optional `when`), `<assets>` (same `from` / `to` / preprocess / postprocess patt
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <target name="sdk_stub" type="prebuilt_static_library">
-  <prebuilt import_lib="lib/third_party.lib"/>
+  <prebuilt import_lib="lib/third_party.lib" os="windows" cpu="x86_64" build_system="cmake" toolchain="msvc" link="static"
+    config="release" crt="dynamic_md"/>
 </target>
 ```
 
@@ -409,7 +421,8 @@ optional `when`), `<assets>` (same `from` / `to` / preprocess / postprocess patt
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <target name="from_cmake" type="imported_installed_static_library">
-  <install artifact="lib/foo.lib"/>
+  <install artifact="lib/foo.lib" os="windows" cpu="x86_64" build_system="cmake" toolchain="msvc" link="static" config="release"
+    crt="dynamic_md"/>
   <interface_include dir="include"/>
 </target>
 ```
@@ -434,7 +447,15 @@ optional `when`), `<assets>` (same `from` / `to` / preprocess / postprocess patt
 
 - **`gz pack`** only **archives** the install root(s) selected by `--install-dir-name` (under `.intermediate/install/<arch>/`, including `bin/`, `lib/`, `include/`, etc.). It **does not** generate new `package.xml` / `target.xml` and does not rewrite source targets.
 
-- **Redistribution XML (default on)**: after a successful **`gz build`**, the engine reads **`.intermediate/build/<leaf>/gz_redist_manifest.json`** (written by **`gz configure`**) and, if it lists targets, writes **`<install>/gz-redist/package.xml`** plus one **`<install>/gz-redist/<emit-name>/target.xml`** per entry. Skip with **`--no-emit-redistribution-xml`** or **`GZ_EMIT_REDIST_XML=0`** / **`false`** / **`off`** / **`no`**. Library-like targets are emitted as **`prebuilt_*`** with **`<prebuilt …/>`** paths rebased relative to each `target.xml` directory; **`imported_installed_*`** stay as **`<install …/>`** with paths **relative to `CMAKE_INSTALL_PREFIX`** (the install root). **`executable`** targets are omitted from the manifest (MVP). Code: **`redist_emit.cpp`**, **`configure.cpp`** (manifest), **`build.cpp`**.
+- **Redistribution XML (default on)**: after a successful **`gz build`**, the engine reads **`.intermediate/build/<leaf>/gz_redist_manifest.json`**
+  (written by **`gz configure`**, **schema 3** with split **layout** fields, no **`install_dir_leaf`** key) and, if it lists
+  **targets**, writes **`<install>/gz-redist/package.xml`** plus one **`<install>/gz-redist/<emit-name>/target.xml`** per entry. Skip
+  with **`--no-emit-redistribution-xml`** or **`GZ_EMIT_REDIST_XML=0`** / **`false`** / **`off`** / **`no`**. Library-like targets
+  are emitted as **`prebuilt_*`** with **`<prebuilt …/>`** paths rebased relative to each `target.xml` directory, and the **layout**
+  attributes (see above) copied from the manifest. **`imported_installed_*`** stay as **`<install …/>`**. **Schemas 1–2** (legacy) are
+  still read: schema 1 has **`arch`**; schema 2 may have **`install_dir_leaf`**; **split** fields are filled when
+  **`try_decompose_compose_arch_tag`** matches. **`executable`** targets are omitted from the manifest (MVP). Code:
+  **`redist_emit.cpp`**, **`configure.cpp`** (manifest), **`build.cpp`**.
 
 - **`gz pack`** will include **`gz-redist/`** automatically when it exists under the packaged install tree.
 

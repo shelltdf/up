@@ -1,5 +1,7 @@
 #pragma once
 
+#include "simple_xml.hpp"
+
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -30,10 +32,10 @@ struct GzRedistManifestTarget {
 };
 
 struct GzRedistManifest {
-  int schema_version = 1;
+  int schema_version = 3;
   std::string package_name;
   std::string package_version;
-  std::string arch;
+  GzBinaryLayout layout;
   std::vector<GzRedistManifestDep> package_dependencies;
   std::vector<GzRedistManifestTarget> targets;
 };

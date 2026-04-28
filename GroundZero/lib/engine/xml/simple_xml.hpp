@@ -9,6 +9,23 @@
 
 namespace gz {
 
+/** Optional metadata: which `gz` install tree / host ABI the prebuilt or installed layout matches. */
+struct GzBinaryLayout {
+  std::string os;
+  std::string cpu;
+  std::string build_system;
+  std::string toolchain;
+  std::string link;  // "static" | "dynamic" (from GZ_TARGET_DYNAMIC_LIBRARY)
+  std::string config;  // "debug" | "release"
+  std::string crt;  // e.g. "dynamic_md"; often empty on non-Windows
+  /** Legacy read: deprecated monolithic `arch="..."` (or old `install_dir_leaf="..."`); used only to run `try_decompose_compose_arch_tag`, then cleared when possible. */
+  std::string arch_legacy;
+  bool empty() const {
+    return os.empty() && cpu.empty() && build_system.empty() && toolchain.empty() && link.empty() && config.empty() &&
+           crt.empty() && arch_legacy.empty();
+  }
+};
+
 // Compiler macro definitions (package.xml / target.xml `<defines>`; CMake: target_compile_definitions; Ninja: -D /D).
 struct DefineEntry {
   std::string name;
@@ -75,6 +92,7 @@ struct TargetDesc {
     // SHARED: primary binary (.dll / .so / .dylib). Optional if import_lib alone is enough (STATIC).
     std::string location;
     std::string dll;
+    GzBinaryLayout layout;
   };
 
   // Artifact paths relative to CMAKE_INSTALL_PREFIX (populate by out-of-band install / CI).
@@ -82,6 +100,7 @@ struct TargetDesc {
     std::string artifact;           // e.g. lib/foo.lib — relative to CMAKE_INSTALL_PREFIX
     std::string interface_include;  // e.g. include — optional, INTERFACE include dir under prefix
     std::string implib;             // Windows shared: import .lib (relative to prefix)
+    GzBinaryLayout layout;
   };
 
   std::string name;

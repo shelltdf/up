@@ -26,4 +26,14 @@ std::string compose_arch_tag(const std::string& system,
                              const std::string& config_mode,
                              const std::string& crt_mode = "");
 
+/** If `leaf` was produced by `compose_arch_tag`, fills the split parts and returns true; else returns false. */
+bool try_decompose_compose_arch_tag(const std::string& leaf,
+                                    std::string& out_os,
+                                    std::string& out_cpu,
+                                    std::string& out_build_system,
+                                    std::string& out_toolchain,
+                                    std::string& out_link,
+                                    std::string& out_config,
+                                    std::string& out_crt);
+
 }  // namespace gz

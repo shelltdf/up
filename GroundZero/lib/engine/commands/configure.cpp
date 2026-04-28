@@ -366,7 +366,7 @@ void try_write_gz_redist_manifest_json(const std::filesystem::path& manifest_pat
                                        const PackageDesc& primary_pkg,
                                        const std::vector<LoadedTarget>& build_targets,
                                        const ConfigureGraphModel& graph_model,
-                                       const std::string& arch) {
+                                       const GzBinaryLayout& binary_layout) {
   if (build_targets.size() != graph_model.targets.size())
     return;
   std::map<std::string, std::string> orig_emit;
@@ -398,10 +398,10 @@ void try_write_gz_redist_manifest_json(const std::filesystem::path& manifest_pat
     return;
   }
   GzRedistManifest m;
-  m.schema_version = 1;
+  m.schema_version = 3;
   m.package_name = primary_pkg.name;
   m.package_version = primary_pkg.version.empty() ? "0.0.0" : primary_pkg.version;
-  m.arch = arch;
+  m.layout = binary_layout;
   for (const auto& d : primary_pkg.dependencies)
     m.package_dependencies.push_back({d.first, d.second});
 
@@ -1850,8 +1850,16 @@ int run_configure(const ConfigureRequest& req) {
   write_gz_cache(cache_path, cwd, arch, primary_pkg.name, generated_file, roots_cached, cache_opts);
   write_packages_md(cache_path.parent_path() / "packages.md", loaded_packages, roots_cached, all_targets,
                     primary_pkg.name, graph_model, build_targets, cache_opts);
+  GzBinaryLayout redist_layout;
+  redist_layout.os = system;
+  redist_layout.cpu = cpu;
+  redist_layout.build_system = build_system;
+  redist_layout.toolchain = toolchain;
+  redist_layout.link = link_mode;
+  redist_layout.config = config_mode;
+  redist_layout.crt = crt_mode;
   try_write_gz_redist_manifest_json(cache_path.parent_path() / "gz_redist_manifest.json", primary_pkg, build_targets,
-                                     graph_model, arch);
+                                    graph_model, redist_layout);
   if (equals_ci(build_system, "ninja")) {
     cli_verbose_phase("configure", "done_ninja");
     return 0;

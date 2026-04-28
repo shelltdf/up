@@ -238,7 +238,10 @@ bool file_exists_under(const std::filesystem::path& install_root, const std::str
 bool write_gz_redist_manifest_json(const std::filesystem::path& path, const GzRedistManifest& m, std::string& error) {
   std::ostringstream o;
   o << "{\"schema\":" << m.schema_version << ",\"package\":\"" << json_escape_string(m.package_name) << "\",\"version\":\""
-    << json_escape_string(m.package_version) << "\",\"arch\":\"" << json_escape_string(m.arch) << "\",\"package_dependencies\":[";
+    << json_escape_string(m.package_version) << "\",\"os\":\"" << json_escape_string(m.layout.os) << "\",\"cpu\":\""
+    << json_escape_string(m.layout.cpu) << "\",\"build_system\":\"" << json_escape_string(m.layout.build_system) << "\",\"toolchain\":\""
+    << json_escape_string(m.layout.toolchain) << "\",\"link\":\"" << json_escape_string(m.layout.link) << "\",\"config\":\""
+    << json_escape_string(m.layout.config) << "\",\"crt\":\"" << json_escape_string(m.layout.crt) << "\",\"package_dependencies\":[";
   for (size_t i = 0; i < m.package_dependencies.size(); ++i) {
     if (i)
       o << ',';
@@ -285,8 +288,8 @@ bool read_gz_redist_manifest_json(const std::filesystem::path& path, GzRedistMan
   std::ostringstream buf;
   buf << in.rdbuf();
   const std::string raw = buf.str();
-  if (!extract_json_int(raw, "schema", m.schema_version) || m.schema_version != 1) {
-    error = "manifest schema must be 1";
+  if (!extract_json_int(raw, "schema", m.schema_version) || m.schema_version < 1 || m.schema_version > 3) {
+    error = "manifest schema must be 1, 2, or 3";
     return false;
   }
   if (!extract_json_string(raw, "package", m.package_name) || m.package_name.empty()) {
@@ -294,7 +297,37 @@ bool read_gz_redist_manifest_json(const std::filesystem::path& path, GzRedistMan
     return false;
   }
   extract_json_string(raw, "version", m.package_version);
-  extract_json_string(raw, "arch", m.arch);
+  auto decompose_to_layout = [](const std::string& composed, GzBinaryLayout& lay) {
+    std::string os, cpu, bs, tc, link, conf, crt;
+    if (try_decompose_compose_arch_tag(composed, os, cpu, bs, tc, link, conf, crt)) {
+      lay.os = std::move(os);
+      lay.cpu = std::move(cpu);
+      lay.build_system = std::move(bs);
+      lay.toolchain = std::move(tc);
+      lay.link = std::move(link);
+      lay.config = std::move(conf);
+      lay.crt = std::move(crt);
+    }
+  };
+
+  if (m.schema_version == 1) {
+    std::string composed;
+    extract_json_string(raw, "arch", composed);
+    decompose_to_layout(composed, m.layout);
+  } else {
+    extract_json_string(raw, "os", m.layout.os);
+    extract_json_string(raw, "cpu", m.layout.cpu);
+    extract_json_string(raw, "build_system", m.layout.build_system);
+    extract_json_string(raw, "toolchain", m.layout.toolchain);
+    extract_json_string(raw, "link", m.layout.link);
+    extract_json_string(raw, "config", m.layout.config);
+    extract_json_string(raw, "crt", m.layout.crt);
+    if (m.layout.os.empty()) {
+      std::string idl;
+      if (extract_json_string(raw, "install_dir_leaf", idl) && !idl.empty())
+        decompose_to_layout(idl, m.layout);
+    }
+  }
   m.package_dependencies.clear();
   if (!parse_deps_array(raw, m.package_dependencies)) {
     error = "manifest package_dependencies parse error";
@@ -378,12 +411,14 @@ int emit_gz_redistribution_xml(const std::filesystem::path& install_root, const 
       iw.artifact = t.install_rel_artifact;
       iw.implib = t.install_rel_implib;
       iw.interface_include = t.installed_iface_include;
+      iw.layout = m.layout;
       tdsc.installed_wrap = std::move(iw);
     } else {
       TargetDesc::PrebuiltDesc pb;
       pb.import_lib = rebase_install_rel_to_target_dir(install_root, td, t.install_rel_import_lib);
       pb.location = rebase_install_rel_to_target_dir(install_root, td, t.install_rel_location);
       pb.dll = rebase_install_rel_to_target_dir(install_root, td, t.install_rel_dll);
+      pb.layout = m.layout;
       tdsc.prebuilt = std::move(pb);
     }
     if (!write_target_xml(td / "target.xml", tdsc, werr)) {
