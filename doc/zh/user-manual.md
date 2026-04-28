@@ -1,15 +1,23 @@
 ﻿# gz 用户手册（GroundZero）
 
-本手册面向第一次接触 `gz` 的用户，目标是让你从零开始理解并完成一次完整使用（CLI 与 gz-gui 两条路径）。
+本手册面向**第一次接触** `gz` 的用户：建立**心智模型**、说明**与其它文档的分工**、给出 **gz-gui** 简介、**常见问题（FAQ）** 与少量**工作流模板**。  
+**刻意不重复**维护：argv 逐项说明、退出码全表、XML 字段级定义、脚本 `trigger` 全表等——它们由下方「文档分工」中的**专题页**单一维护，本文只给出链接与易错提醒。
 
 > **文档索引**（`doc/zh` / `doc/en` 全部入口表）：[`../README.md`](../README.md)
 
-- **`gz` 命令行参数与工作模式**（逐项说明与范例）：[`cli-reference.md`](cli-reference.md)（英文入口：[`../en/cli-reference.md`](../en/cli-reference.md)）
-- 分步入门（Hello World → 库/宏/条件/第三方/移植）：[`getting-started.md`](getting-started.md)（英文对照页：[`../en/getting-started.md`](../en/getting-started.md)）
-- 产品方向（**纯手写** XML）：[`package-target-xml-spec.md`](package-target-xml-spec.md) 文首（英文：[`../en/package-target-xml-spec.md`](../en/package-target-xml-spec.md)）
-- 设计文档：[`DESIGN.md`](../../DESIGN.md)
-- XML 规范：[`package-target-xml-spec.md`](package-target-xml-spec.md)
-- 示例工程：[`test_projects/README.md`](../../test_projects/README.md)
+### 文档分工（请选对入口）
+
+| 你想查… | 打开 |
+|--------|------|
+| **子命令、每个开关、cwd、中间目录、退出码、PowerShell 范例** | [`cli-reference.md`](cli-reference.md)（[`../en/cli-reference.md`](../en/cli-reference.md)） |
+| **从 Hello World 到库 / 第三方 / 移植** 的分步教程与可复制 XML | [`getting-started.md`](getting-started.md)（[`../en/getting-started.md`](../en/getting-started.md)） |
+| **`package.xml` / `target.xml` 字段**、`when`、合并顺序、`prebuilt` / `install` | [`package-target-xml-spec.md`](package-target-xml-spec.md) + **`gz spec`** |
+| **`gz_cache.txt`、`GZ_*`、内置变量、`arch` 含义** | [`internal-variables.md`](internal-variables.md) |
+| **脚本 `trigger`、派发阶段** | [`script-messages.md`](script-messages.md) |
+| **预处理 / Qt 等脚本实操** | [`script-tutorial.md`](script-tutorial.md) |
+| **仓库命令表、从源码构建** | 根目录 [`README.md`](../../README.md) |
+| **设计与中间目录大图** | [`DESIGN.md`](../../DESIGN.md) |
+| **可跑示例树** | [`test_projects/README.md`](../../test_projects/README.md) |
 
 ---
 
@@ -26,43 +34,17 @@
 | 最简单的外部依赖关系扩展 | 通过设置 `scan dir` 搜索外部包建立依赖关系 | 当前可把外部包目录加入扫描来源来建立包依赖；后续可扩展为 `git clone` 或下载并解压 `zip` 后自动纳入 `scan` 来源。 |
 | 可扩展元编程工具接入 | 支持 `moc` / `uic` / `rc` 等工具模式 | 可将代码生成工具接入包体系，支持输入文件转换、生成产物管理与测试验证。 |
 
-## 0. 10 分钟快速上手
+## 0. 快速入口与构建目录约定
 
-如果你只想尽快跑起来，按下面做即可。
+### 构建目录名（`_build` 仅为示例）
 
-### 步骤 1：构建 `gz.exe`
+各文档中的 **`.\_build\Release\gz.exe`**：目录 **`_build`** 只是 **`cmake -B`** 的**示例名**（也可以是 **`_build_gz`** 等）；**所有命令里的该前缀须与本机实际构建输出目录一致**。亦可用根目录 **`python build.py`** / **`install.py`** 装配宿主工具（见 **`README.md`**）。
 
-在仓库根目录执行：
+### 第一次跑通（不重复粘贴长命令）
 
-```powershell
-cmake -S . -B _build -G "Visual Studio 17 2022" -A x64
-cmake --build _build --config Release
-```
-
-> **构建目录**：**`_build`** 仅为示例；请与你执行 **`cmake -B`** 时使用的目录名一致（例如 **`_build_gz`**）。下一步命令中的 **`.\_build\Release\`** 前缀需同步替换。
-
-### 步骤 2：跑通示例工程
-
-```powershell
-.\_build\Release\gz.exe configure --scan test_projects
-$ARCH = .\_build\Release\gz.exe print-build-dir-name
-.\_build\Release\gz.exe build --build-dir-name default
-.\_build\Release\gz.exe test --install-dir-name $ARCH
-.\_build\Release\gz.exe run --install-dir-name $ARCH hello_demo
-```
-
-**说明：** `build` 必须使用 **`--build-dir-name`**（与 `configure` 使用的叶子名一致，未指定 configure 时一般为 **`default`**）。`run` / `test` / `pack` 必须使用 **`--install-dir-name`**，其值为 **`.intermediate/install/` 下的子目录名**，通常等于 **`gz print-build-dir-name`**（或 `gz_cache.txt` 里的 **`arch=`**），**不要**误用构建叶子名 `default`。
-
-### 步骤 3：检查结果
-
-- 构建与生成目录：`.intermediate/build/<叶子>/`（示例为 **`default/`**）
-- 安装结果目录：`.intermediate/install/<arch>/`（**`<arch>`** 见上一步 `$ARCH`）
-- 如果运行成功，你会看到 `hello_demo` 的输出日志（含 `hello_foo`、`hello_simple_lib`、`rock_stack` 调用）
-
-### 步骤 4：继续深入
-
-- 读概念与细节：从本文 **第 1 节** 开始
-- 查 XML 字段定义：[`package-target-xml-spec.md`](package-target-xml-spec.md)
+1. **构建 `gz` 本体**：根目录 **`README.md`** 或 **`build.py`**。  
+2. **跑 Hello World 或 `test_projects`**：按 **[getting-started.md](getting-started.md)** 从第 1 步做；示例树说明见 **[test_projects/README.md](../../test_projects/README.md)**。  
+3. **易混参数**：**`gz build`** 必须 **`--build-dir-name <叶子>`**；**`gz run` / `test` / `pack`** 必须 **`--install-dir-name <名>`**，其中 **`<名>`** 是 **`.intermediate/install/` 下的子目录名**（通常即 **`gz print-build-dir-name`** 或 **`gz_cache.txt`** 的 **`arch=`**），**不是** 构建叶子 **`default`**。完整说明与范例命令见 **[cli-reference.md](cli-reference.md)** 第 2 节；排错见本文 **§5 FAQ Q3**。
 
 ---
 
@@ -99,159 +81,56 @@ $ARCH = .\_build\Release\gz.exe print-build-dir-name
 
 ---
 
-## 2. 细节逻辑：系统如何工作
+## 2. 细节逻辑：系统如何工作（鸟瞰）
 
-下面是 `gz` 的主流程：
+1. **扫描**：在 **cwd**（或 **`--scan`**）递归查找 **`package.xml`** / **`target.xml`**
+2. **归属**：每个 **`target.xml`** 归到路径上最近的 **`package.xml`**
+3. **校验**：包依赖是否在扫描集内；目标依赖是否解析到库目标
+4. **生成**：在 **`.intermediate/build/<叶子>/`** 写生成物与 **`gz_cache.txt`**（**`<叶子>`** 由 **`configure --build-dir-name`** 决定，常省略为 **`default`**）
+5. **构建与安装**：**`build`** 编译并把产物装进 **`.intermediate/install/<名>/`**（**`<名>`** 多为缓存 **`arch=`**，与 **`<叶子>`** 不必相同）
+6. **后续**：**`run` / `test` / `pack`** 基于安装树工作，CLI 用 **`--install-dir-name`** 指向 **`<名>`**
 
-1. **扫描**：在 `cwd`（或 `--scan` 指定目录）递归查找 `package.xml` 和 `target.xml`
-2. **归属**：每个 `target.xml` 归属到路径上最近的 `package.xml`
-3. **校验**：
-   - 包依赖是否在扫描集中存在
-   - 目标依赖是否能解析到库目标
-4. **生成**：在 **`.intermediate/build/<叶子>/`** 生成构建文件（**`<叶子>`** 由 **`configure --build-dir-name`** 决定，省略时为 **`default`**），并写入 **`gz_cache.txt`**（含 **`arch=`**）
-5. **执行**：`build` 将产物安装到 **`.intermediate/install/<arch>/`**（**`<arch>`** 来自缓存，通常 **不等于** **`<叶子>`**）
-6. **后续**：`run` / `test` / `pack` 基于安装与构建元数据继续工作（CLI 上通过 **`--install-dir-name <arch>`** 指向安装前缀）
+**目录名、合法字符、与 `print-build-dir-name` 的关系**：以 **[cli-reference.md](cli-reference.md)** 第 2 节为准（与 **`gz_cache.txt`** 字段对照见 **[internal-variables.md](internal-variables.md)** §3）。
 
-### 目录流转（相对执行命令时的 cwd）
-
-- `.intermediate/build/<叶子>/`：生成与构建目录（含 `gz_cache.txt`）
-- `.intermediate/install/<arch>/`：安装目录（`bin/`、`include/`）
-- `.intermediate/pack/<arch>/`：打包产物目录
-
-### 关于后端
-
-- **CMake 模式**：生成 `CMakeLists.txt` 再调用 CMake
-- **Ninja 模式**：直接生成 `out/build.ninja`
+**后端**：**CMake**（生成 `CMakeLists.txt` 再调 CMake）或 **Ninja**（生成 `build.ninja` 等）。
 
 ---
 
-## 3. 概念介绍
+## 3. 概念索引（细节见专题文档）
 
-### 3.1 package 与 target
+### 3.1 package / target、类型、依赖、`<headers>`
 
-- **package**：由 `package.xml` 定义，表示一个包（带包级依赖）
-- **target**：由 `target.xml` 定义，表示构建目标
-  - `executable`
-  - `library`（configure 时按 **`GZ_TARGET_DYNAMIC_LIBRARY`** / **`GZ_DYNAMIC_LIBRARY`** 决定静态或动态原生库）
-  - `static_library` / `shared_library`（分别**强制**静态或动态，不受上述全局偏好覆盖）
-  - `asset_bundle`（仅安装资源，无编译单元）
-  - `prebuilt_static_library` / `prebuilt_shared_library`：预置二进制 SDK，配合 `<prebuilt .../>`（路径相对 `target.xml` 目录）。完整示例见 [`test_projects/prebuilt_static_stub/`](../../test_projects/prebuilt_static_stub/README.md)（内含已提交的 MSVC `stub_import.lib`；子库输出目录使用 `lib/import/` 以免被仓库根 `.gitignore` 的 `dist/` 规则误忽略）。
-  - `imported_installed_static_library` / `imported_installed_shared_library`：声明**已安装到本包安装前缀**（`CMAKE_INSTALL_PREFIX`）下的库；**推荐**在包外先 `cmake --install`（或等价安装），再手写 `<install artifact="..."/>`（`artifact` / 可选 `interface_include` 均相对 `CMAKE_INSTALL_PREFIX`）。Windows 下 shared 还需 `implib="..."`。此类目标不能与磁盘预置的 `<prebuilt/>` 混用。
+- **package** / **target** 的角色，**`type`** 全集（`executable`、`library`、`static_library`、`shared_library`、`asset_bundle`、`prebuilt_*`、读入时规范化的旧名等）、**`<dependency>`**（含 **`visibility`**）、**`<headers>`** 的 **`from`/`to`**、**`<prebuilt>` / `<install>`**：一律以 **[package-target-xml-spec.md](package-target-xml-spec.md)**（§3.1、§3.3、§3.6 等）与 **`gz spec`** 为准。  
+- **预置库示例**：[`test_projects/prebuilt_static_stub/README.md`](../../test_projects/prebuilt_static_stub/README.md)。  
+- **原则**：`gz` / `gz-gui` 不对具体第三方库做内置特判；关系与路径均在 XML 中显式声明。
 
-规则约束：`gz` / `gz-gui` 不对任何具体第三方代码库做内置特判；依赖关系、安装产物、头文件目录等信息都必须通过 `package.xml` / `target.xml` 显式声明。
+### 3.2 聚合 CMake 与 `CMAKE_PREFIX_PATH`
 
-### 3.1b `CMAKE_PREFIX_PATH` 合并
+见 **[internal-variables.md](internal-variables.md)** §4.1（与 **`GZ_CMAKE_PREFIX_PATH`** 说明同文档）。
 
-聚合工程会带上 **`CMAKE_PREFIX_PATH`**，由以下部分**去重后**拼接（分号分隔，与 CMake 列表一致）：
+### 3.3 `arch` 与安装目录名
 
-1. 当前 `cwd` 下本配置的安装前缀 **`.intermediate/install/<arch>/`**（始终排在最前，便于优先找到本工作区已安装的包）。
-2. **`--opt GZ_CMAKE_PREFIX_PATH=路径1;路径2`** 中的额外前缀（如第三方 SDK 的 CMake 包根）；相对路径按 **`cwd`** 解析。
-
-此外，当主包声明依赖且依赖包存在 `imported_installed_*` 目标时，`configure` 会尝试把这些已知安装信息映射为常见 `find_package` 缓存变量并传给主包聚合 CMake（例如 `<PKG>_LIBRARY` / `<PKG>_LIBRARY_DEBUG` / `<PKG>_INCLUDE_DIR` 等），以降低仅靠 `CMAKE_PREFIX_PATH` 仍解析不稳的情况。Windows 下会优先选择 `implib` 或 `.lib`，避免把 `.dll` 误传入链接变量。
-
-### 3.2 依赖层次
-
-- **包级依赖**：写在 `package.xml` 的 `<dependency name="..."/>`
-- **目标级依赖**：写在 `target.xml` 的 `<dependency name="..."/>`
-  - 同包引用：`<dependency name="myLib"/>`
-  - 跨包引用：`<dependency name="otherPkg:otherLib"/>`
-  - **可见性（CMake 后端）**：可写 **`visibility="private|public|interface"`**（可选，默认 **`private`**，大小写不敏感），对应 `target_link_libraries` 的 **`PRIVATE` / `PUBLIC` / `INTERFACE`**。**可执行目标**若对某依赖写 **`interface`**，configure 会失败。库目标之间的链式 `target_link_libraries` 当前不生成，多库符号由消费方（例如 exe）自行链接齐全。
-  - **`when`** 目前**不**作用于 `<dependency/>`；哪些标签支持条件、表达式语法以 **`gz spec`** 与 **[package-target-xml-spec.md](package-target-xml-spec.md)** 为准。
-
-### 3.3 `<headers>` 头文件块（from/to）
-
-`<headers>` 里统一使用自闭合条目：
-
-- `<dir from="..." to="..."/>`
-- `<file from="..." to="..."/>`
-- `<glob from="..." to="..."/>`
-
-语义：
-
-- `from`：相对 `target.xml` 所在目录
-- `to`：安装到 `include/` 下的子目录（可省略）
-
-旧写法 `<dir>...</dir>` 已不支持。
-
-### 3.4 arch 标签
-
-`<arch>` 不是单纯 CPU 字符串，而是组合信息（系统、CPU、构建后端、工具链、Debug/Release、CRT 等），用于区分不同构建配置目录。
+**`<arch>`**（缓存 **`arch=`**、**`gz print-build-dir-name`**）是组合标签，**不必**等于构建叶子名： **[internal-variables.md](internal-variables.md)** §3 表项 **`arch`**；命令行语义见 **cli-reference** 第 2 节。
 
 ---
 
-## 4. 主要使用方法
+## 4. 使用方式速览
 
-下面按“先构建工具，再使用工具”展开。
+### 4.1 准备环境与构建宿主工具
 
-### 4.1 准备环境
+- CMake 3.20+、C++17；Windows 推荐 Visual Studio 2022 + MSVC。  
+- **从源码构建 `gz` / `gz-gui`**：根目录 **`README.md`**（手工 CMake），或 **`python build.py`** / **`install.py`** / **`package.py`**。  
+- 历史上曾使用子命令 **`project`** / 选项 **`--project-dir`**，当前版本已删除且无别名。
 
-- CMake 3.20+
-- C++17 编译器
-- Windows 推荐 Visual Studio 2022 + MSVC
+### 4.2 CLI（argv 与范例）
 
-### 4.2 构建 gz（仓库根目录）
+**子命令、每个开关、退出码、`list` 的 `--format`/`--quiet` 组合、典型 PowerShell 片段**：以 **[cli-reference.md](cli-reference.md)**（与 **`gz --help`**）为**唯一事实来源**；**入门教程**中的可复制命令见 **[getting-started.md](getting-started.md)**。
 
-方式 A：手工 CMake
+### 4.3 在单包目录工作
 
-```powershell
-cmake -S . -B _build -G "Visual Studio 17 2022" -A x64
-cmake --build _build --config Release
-```
+若 cwd 已在某包树内且 **`gz` 在 PATH**：依次 **`gz configure`** → **`gz print-build-dir-name`**（得到 **`<名>`**）→ **`gz build --build-dir-name default`**（或与 configure 一致的叶子名）→ **`gz test` / `run --install-dir-name <名> …`**。完整 XML 与目录约定仍以 **getting-started** 为准。
 
-（**`_build`** 仅为示例目录名，含义与替换规则见上文「**0. 10 分钟快速上手**」中的构建目录说明。）
-
-历史上曾使用子命令 **`project`** / 选项 **`--project-dir`**，当前版本已删除且无别名。
-
-方式 B：Python 脚本
-
-```powershell
-python build.py
-python install.py --prefix dist
-python package.py
-```
-
-### 4.3 CLI 快速上手（推荐先跑示例）
-
-在仓库根目录运行：
-
-```powershell
-.\_build\Release\gz.exe configure --scan test_projects
-$ARCH = .\_build\Release\gz.exe print-build-dir-name
-.\_build\Release\gz.exe build --build-dir-name default
-.\_build\Release\gz.exe test --install-dir-name $ARCH
-.\_build\Release\gz.exe run --install-dir-name $ARCH hello_demo
-```
-
-常用命令（与 **`gz --help`** 一致）：
-
-- `gz configure [--build-dir-name <叶子>] [--scan <dir>]... [--opt KEY=VALUE]...`
-- `gz build --build-dir-name <叶子>`
-- `gz run --install-dir-name <名> <target-name>`
-- `gz test --install-dir-name <名> [test-target-name]`
-- `gz pack --install-dir-name <名>...`
-- `gz list [--format tree|json|xml] [--xml <path>] [--json <path>] [--quiet]`
-- `gz spec` / `gz print-build-dir-name`
-
-`list` 参数行为摘要：
-
-- stdout 由 `--format` 决定：`tree`（默认）/`json`/`xml`。
-- `--xml <path>` 与 `--json <path>` 是文件导出，可与任意 stdout 格式并存。
-- `--quiet` 抑制树形文本与导出提示，但不抑制 `--format json|xml` 的主载荷。
-- 某些组合只告警不失败（例如 `--format json + --xml <path>`）。
-
-### 4.4 在单包目录工作
-
-如果你已在某个包目录（例如 `test_projects\rock_stack`）并已将 `gz` 加入 PATH，可直接：
-
-```powershell
-gz configure
-$ARCH = gz print-build-dir-name
-gz build --build-dir-name default
-gz test --install-dir-name $ARCH
-gz run --install-dir-name $ARCH rock_app_one
-```
-
-### 4.5 gz-gui 快速上手
+### 4.4 gz-gui 快速上手
 
 `gz-gui` 是图形壳（Windows：Win32；Linux：GTK3；macOS：Cocoa），核心仍是调用同目录下的 `gz` / `gz.exe`。
 
@@ -267,35 +146,14 @@ gz run --install-dir-name $ARCH rock_app_one
 5. 点击 `Build`
 6. 视需要执行 `Test` / `Run`
 
-说明：GUI 会把设置转成 `--opt` 参数传给 `gz.exe`。
+说明：GUI 会把设置转成 **`--opt`** 传给 **`gz.exe`**（与 CLI 一致）。
 
-### 4.6 常见工作流模板
+### 4.5 常见工作流模板（仅列步骤，字段见 spec / getting-started）
 
-#### 模板 A：新增一个库目标
-
-1. 新建子目录（例如 `myLib/`）
-2. 放入 `target.xml` 与源码
-3. 在需要的可执行目标里声明 `<dependency name="myLib"/>`
-4. 按 §4.3 的约定依次执行 `configure`、`print-build-dir-name`、`build --build-dir-name`、`test`/`run`（`build`/`run`/`test` 的参数为必填）
-
-#### 模板 B：新增跨包依赖
-
-1. 在 `package.xml` 声明包依赖
-2. 在 `target.xml` 用 `otherPkg:otherTarget` 引用
-3. 确保 configure 扫描范围包含两个包
-
-#### 模板 C：调试 `<headers>` 安装布局
-
-1. 用 `from/to` 声明 `dir/file/glob`
-2. `gz configure`，再 `gz build --build-dir-name default`（或与 configure 一致的叶子名）
-3. 检查 `.intermediate/install/<arch>/include/` 是否符合预期（**`<arch>`** 见 `gz print-build-dir-name` 或 `gz_cache.txt`）
-
-#### 模板 D：导入第三方 CMake SDK（手写描述）
-
-1. 在**包外**对上游执行 **`cmake --install`**（或安装官方 SDK），得到确定的 `lib/`、`include/` 等布局。
-2. 在本工作区**手写** **`package.xml`** 与 **`target.xml`**：用 **`imported_installed_*` + `<install …/>`** 或 **`prebuilt_*` + `<prebuilt>`** 描述库与头文件（见 **`getting-started.md`** 第 7～8 步）。
-3. **`gz configure` / `gz build`**（见 §4.3）；在消费方 **`target.xml`** 用 **`<dependency name="pkg:target"/>`** 引用。
-4. 纯库包（无 executable）也支持 configure/build。
+- **模板 A：新增本包库目标** — 新建目标子目录 + **`target.xml`** + 源码 → 在 exe 的 **`target.xml`** 写 **`<dependency name="库名"/>`** → **`configure` → `print-build-dir-name` → `build` → `test`/`run`**（参数规则见 **cli-reference**）。  
+- **模板 B：跨包依赖** — **`package.xml`** 声明包级 **`<dependency/>`** → 目标里 **`otherPkg:otherTarget`** → **`configure --scan`** 覆盖各包根。  
+- **模板 C：头文件安装布局** — **`<headers>`** 的 **`from`/`to`** 见 **package-target-xml-spec** §3.3；装完看 **`.intermediate/install/<名>/include/`**。  
+- **模板 D：第三方 CMake SDK** — 包外安装 → 手写 **`imported_installed_*` + `<install/>`** 或 **`prebuilt_*` + `<prebuilt>`**（**getting-started** 第 7～8 步）→ **`configure` / `build`** → 消费方 **`<dependency name="pkg:target"/>`**。
 
 ---
 
@@ -336,23 +194,7 @@ gz run --install-dir-name $ARCH rock_app_one
 
 ### Q5：`<headers>` 嵌套 `<dir>` 旧写法报错
 
-如果你还在用嵌套目录旧写法：
-
-```xml
-<headers>
-  <dir>../../include/xxx</dir>
-</headers>
-```
-
-请改为 `from/to` 自闭合：
-
-```xml
-<headers>
-  <dir from="../../include/xxx" to="xxx"/>
-</headers>
-```
-
-`file`、`glob` 同理都用 `from/to`。
+旧写法 **`<dir>路径</dir>`** 已不支持；须改为 **`from`/`to` 自闭合**（**`<dir from="..." to="..."/>`** 等）。示例与语义见 **[package-target-xml-spec.md](package-target-xml-spec.md)** §3.3。
 
 ### Q6：为什么单包 configure 过不了，整仓扫描却可以
 
@@ -367,9 +209,10 @@ gz run --install-dir-name $ARCH rock_app_one
 
 ## 附：建议阅读顺序
 
-1. 本文（用户手册）
-2. [`README.md`](../../README.md)（命令总览与仓库入口）
-3. [`package-target-xml-spec.md`](package-target-xml-spec.md)（字段级规范）
-4. [`DESIGN.md`](../../DESIGN.md)（设计背景与路线）
-5. [`test_projects/README.md`](../../test_projects/README.md)（可执行示例）
+1. **本文**（分工表 + 鸟瞰 + FAQ + gz-gui）  
+2. **[getting-started.md](getting-started.md)**（动手跑通）  
+3. **[cli-reference.md](cli-reference.md)**（参数与退出码不再猜）  
+4. **[package-target-xml-spec.md](package-target-xml-spec.md)** / **`gz spec`**（写 XML）  
+5. 需要变量与缓存 → **[internal-variables.md](internal-variables.md)**；脚本 → **script-messages** / **script-tutorial**  
+6. **[README.md](../../README.md)**、**[DESIGN.md](../../DESIGN.md)**、**[test_projects/README.md](../../test_projects/README.md)**
 

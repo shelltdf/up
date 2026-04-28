@@ -237,7 +237,7 @@ bool for_each_balanced_children(const std::string& raw, const char* tag, Fn&& fn
     }
     const size_t close_at = raw.find(close, gt + 1);
     if (close_at == std::string::npos) {
-      error = std::string("unclosed <") + tag + "> (expected ") + close + ")";
+      error = std::string("unclosed <") + tag + "> (expected " + close + ")";
       return false;
     }
     const std::string body = raw.substr(gt + 1, close_at - gt - 1);

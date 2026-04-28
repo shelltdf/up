@@ -1,8 +1,9 @@
 ﻿# 脚本与构建流程范例教程
 
-> **文档索引**（`doc/zh` / `doc/en` 全部入口表）：[`../README.md`](../README.md)
+> **文档索引**（`doc/zh` / `doc/en` 全部入口表）：[`../README.md`](../README.md)  
+> **英文完整版**：[`../en/script-tutorial.md`](../en/script-tutorial.md)
 
-从「最小可运行包」到「条件源文件、自定义变量、复杂预处理/子工程」。**从零按步扩展**见 **`getting-started.md`**。**命令与路径**以仓库 `README.md` / **`user-manual.md`** 为准；**XML 细节**以 **`package-target-xml-spec.md`** 与 **`gz spec`** 为准。
+从「最小可运行包」到「条件源文件、自定义变量、复杂预处理/子工程」。**从零按步扩展**见 **`getting-started.md`**。**命令 argv、退出码与路径**以 **`cli-reference.md`** 与根目录 **`README.md`** 为准；**文档分工与易错 FAQ** 见 **`user-manual.md`**；**XML 细节**以 **`package-target-xml-spec.md`** 与 **`gz spec`** 为准。
 
 ---
 
@@ -240,4 +241,5 @@ XML 里写了 **`command="..."`** 时，该字符串即最终交给后端的命�
 |------|------|
 | `internal-variables.md` | 内置键、`gz_cache` 固定行、`GZ_*` 列表 |
 | `package-target-xml-spec.md` | XML / `when` / `config_files` |
-| `user-manual.md` | 终端用户命令与目录约定 |
+| `cli-reference.md` | argv、退出码、中间目录与范例 |
+| `user-manual.md` | 文档分工、鸟瞰、FAQ、gz-gui |

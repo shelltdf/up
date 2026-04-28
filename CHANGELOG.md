@@ -26,6 +26,9 @@
 - **文档**：新增 **`doc/zh/cli-reference.md`**（`gz` 命令行参数、工作模式、退出码与范例）；**`doc/en/cli-reference.md`** 为入口；**`doc/README.md`**、根 **`README.md`**、**`doc/zh/user-manual.md`**、**`doc/zh/getting-started.md`**、**`ai-software-engineering/03-ops/user-manual.md`**、**`ai-software-engineering/02-physical/gz-cli/README.md`** 增加交叉链接。
 - **文本编码**：仓库内 **C/C++/CMake/文档/配置等** 已统一为 **UTF-8 带 BOM**（便于 Windows/跨工具识别）；**`#!/...` 脚本**（根目录 **`*.py`** 等）保持 **UTF-8 无 BOM**（BOM 会破坏 Unix shebang）。维护脚本：**`tools/normalize_utf8_bom.py`**（跳过 **`.intermediate/`**、**`3rdparty/`**、**`_build*/`**）；**`.editorconfig`** 已区分 **`*.py` / `*.sh`** 与 **`utf-8-bom`** 规则。
 - **文档分工**：**`ai-software-engineering/02-physical/gz-cli/spec.md`** 改为只保留 **物理层**规格与退出码摘要，**argv/子命令详表** 指向 **`doc/zh/cli-reference.md`**；子命令→源码表迁至 **`gz-cli/mapping.md`**。
+- **`doc/zh/user-manual.md` / `doc/en/user-manual.md`**：改为**枢纽**（文档分工表、鸟瞰、FAQ、gz-gui），去掉与 **`cli-reference` / `getting-started` / `package-target-xml-spec`** 重复的长命令与 XML 字段段；**`CMAKE_PREFIX_PATH` 聚合**详述迁至 **`doc/zh/internal-variables.md`** §4.1。根 **`README.md`** 推荐阅读顺序改为 **getting-started → cli-reference → user-manual**；**`package-target-xml-spec.md`** 文首增加分工表；**`getting-started` / `script-tutorial` / `cli-reference` / `03-ops/user-manual`** 等交叉引用已对齐。
+- **`doc/en/*.md`**：明确 **`doc/en/`** 下各篇均为**英文完整正文**（与 **`doc/zh/`** 同名文件一一对应）；**`doc/README.md`**、根 **`README.md`**、**`doc/en/user-manual.md`** 及 **`cli-reference` / `internal-variables` / `script-*` / `getting-started` / `package-target-xml-spec`** 英文页首已标注「全文 + 可选中文镜像」；**`en/user-manual`** 内链接改为优先指向 **`doc/en/`** 同目录专题页。
+- **`doc/en/*.md`**：`cli-reference`、`getting-started`、`package-target-xml-spec`、`internal-variables`、`script-messages`、`script-tutorial` 由入口 stub **改为完整英文版**（与 **`doc/zh/`** 对应文件职责对齐）；**`doc/README.md`**、**`03-ops/developer-manual.md`** 已更新表述。
 
 ## 2026-04-25
 

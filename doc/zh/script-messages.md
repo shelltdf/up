@@ -1,6 +1,7 @@
 ﻿# 脚本消息（trigger）总表：`package.xml` / `target.xml` 与 Lua 绑定
 
-> **文档索引**（`doc/zh` / `doc/en` 全部入口表）：[`../README.md`](../README.md)
+> **文档索引**（`doc/zh` / `doc/en` 全部入口表）：[`../README.md`](../README.md)  
+> **英文完整版**：[`../en/script-messages.md`](../en/script-messages.md)
 
 本文档列出 **`gz configure`** 阶段可识别的 **消息名**（XML 属性 **`trigger="..."`**），以及 **`<var type="script" …>`** 如何与 **`<preprocess>` / `<postprocess>`** 的 **`command`** 协同。实现入口：**`GroundZero/lib/engine/dom/script_execution.cpp`**（解析与解析命令）、**`GroundZero/lib/engine/commands/configure.cpp`**（`apply_script_command` 调用点）、**`GroundZero/lib/engine/xml/simple_xml.cpp`**（`is_supported_script_trigger`）。
 

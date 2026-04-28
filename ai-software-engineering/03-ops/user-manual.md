@@ -15,6 +15,8 @@
 
 ## 一键示例（PowerShell）
 
+完整可复制片段与更多组合见 **`doc/zh/cli-reference.md`** 与 **`doc/zh/getting-started.md`**；运维摘要仅保留最短链：
+
 ```powershell
 .\_build\Release\gz.exe configure --scan test_projects
 $ARCH = .\_build\Release\gz.exe print-build-dir-name
@@ -25,6 +27,7 @@ $ARCH = .\_build\Release\gz.exe print-build-dir-name
 
 ## 延伸阅读
 
-- **`gz` 命令行逐项说明与范例**：`doc/zh/cli-reference.md`（英文入口 `doc/en/cli-reference.md`）。
-- 图文版手册：**正文** `doc/zh/user-manual.md`（中文）、`doc/en/user-manual.md`（英文）；索引 **`doc/README.md`**。
+- **`gz` 命令行逐项说明与范例**：`doc/zh/cli-reference.md` 与 **`doc/en/cli-reference.md`**（均为完整正文，任选语言）。
+- 分步入门与 XML 范例：`doc/zh/getting-started.md`。
+- 图文版手册（分工、FAQ、gz-gui）：`doc/zh/user-manual.md`（中文）、`doc/en/user-manual.md`（英文）；索引 **`doc/README.md`**。
 - 设计背景：`DESIGN.md`。

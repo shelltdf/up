@@ -1,6 +1,6 @@
 ﻿# 入门教程：从 Hello World 到第三方库与移植
 
-本教程按**步骤**扩展一个 `gz` 工程，与仓库内 **`test_projects/`** 示例一致处会给出引用。字段级语义以 **`package-target-xml-spec.md`** 与 **`gz spec`** 为准；命令行以 **`user-manual.md`** 与根目录 **`README.md`**（[`../../README.md`](../../README.md)）为准。**`doc/` 索引导航**：[`../README.md`](../README.md)。英文对照：[`../en/getting-started.md`](../en/getting-started.md)。
+本教程按**步骤**扩展一个 `gz` 工程，与仓库内 **`test_projects/`** 示例一致处会给出引用。字段级语义以 **`package-target-xml-spec.md`** 与 **`gz spec`** 为准；**命令行 argv / 退出码 / 范例** 以 **`cli-reference.md`** 与根目录 **`README.md`**（[`../../README.md`](../../README.md)）为准；**文档分工、易错 FAQ、gz-gui** 见 **`user-manual.md`**。**`doc/` 索引导航**：[`../README.md`](../README.md)。**英文完整版**：[`../en/getting-started.md`](../en/getting-started.md)。
 
 ---
 
@@ -9,7 +9,7 @@
 - **包**：含 **`package.xml`** 的目录为包根；其下每个构建目标独占**一个子目录**，内有 **`target.xml`**。
 - **扫描**：在含 `package.xml` 的树的**上一级**（或任意 cwd + `--scan`）执行 **`gz configure`**。
 - **构建 / 运行**：`gz build` 须带 **`--build-dir-name`**；`gz run` 须带 **`--install-dir-name`**（值为 `.intermediate/install/` 下**架构子目录名**，见 **`script-tutorial.md` §1**）。
-- **`gz` 可执行文件路径**：本教程默认 **`gz` 已在 PATH**。若你按根目录 **`README.md` / `user-manual.md`** 从源码构建并看到形如 **`.\_build\Release\gz.exe`** 的示例，其中的 **`_build`** 仅为 **`cmake -B`** 的示例目录名（亦可是 **`_build_gz`** 等），须与本机实际构建目录一致；详见 **`user-manual.md`**「**0. 10 分钟快速上手**」中的构建目录说明。
+- **`gz` 可执行文件路径**：本教程默认 **`gz` 已在 PATH**。若你按根目录 **`README.md` / `user-manual.md`** 从源码构建并看到形如 **`.\_build\Release\gz.exe`** 的示例，其中的 **`_build`** 仅为 **`cmake -B`** 的示例目录名（亦可是 **`_build_gz`** 等），须与本机实际构建目录一致；详见 **`user-manual.md`**「**0. 快速入口与构建目录约定**」。
 - **产品方向**：**纯手写** **`package.xml` / `target.xml`**（见 **`package-target-xml-spec.md`** 文首）。**`gz reverse` 子命令已移除**。
 - **延伸阅读**：[cli-reference.md](cli-reference.md)（**`gz` 命令行参数与工作模式**）、[internal-variables.md](internal-variables.md)（变量）、[script-messages.md](script-messages.md)（**`trigger` 消息表**与脚本 var）、[script-tutorial.md](script-tutorial.md)（预处理 / Qt）、[package-target-xml-spec.md](package-target-xml-spec.md)（`when` / `config_files` / `<dependency>`）；英文目录见 [`../en/`](../en/）。
 
@@ -218,4 +218,4 @@ hello_pkg/
 - [ ] **`gz run`** 使用正确的 **`--install-dir-name`**（与 **`gz_cache.txt` `arch=`** 一致）。  
 - [ ] 第三方许可证与预置二进制是否允许分发。  
 
-更多命令与目录约定：**`user-manual.md`**。
+更多命令与目录约定：**`cli-reference.md`**；文档分工与 FAQ：**`user-manual.md`**。

@@ -1,9 +1,19 @@
 ﻿# `package.xml` 与 `target.xml` 规范说明
 
 > **文档索引**（`doc/zh` / `doc/en` 全部入口表）：[`../README.md`](../README.md)  
-> 英文入口（摘要/链接）：[`../en/package-target-xml-spec.md`](../en/package-target-xml-spec.md)
+> **English full text**: [`../en/package-target-xml-spec.md`](../en/package-target-xml-spec.md)
 
 本文档描述 **gz（GroundZero）** 当前实现对两种描述文件的**解析约定**与 **configure** 阶段的**语义约束**。实现采用轻量正则扫描（见 `GroundZero/lib/engine/xml/simple_xml.cpp`），**不是**完整 XML 校验器：建议仍写成良构 XML，并遵守下列可识别形态。与 **`gz spec`** 内嵌英文规范不一致时，以 **`gz spec`** 与源码为准；本文件侧重中文说明与仓库内交叉引用。
+
+### 与其它文档的分工
+
+| 需求 | 文档 |
+|------|------|
+| **子命令、argv、退出码、中间目录、`--build-dir-name` / `--install-dir-name`** | [`cli-reference.md`](cli-reference.md) |
+| **从零跟做的步骤与示例 XML** | [`getting-started.md`](getting-started.md) |
+| **文档地图、FAQ、gz-gui、不写 XML 字段时的鸟瞰** | [`user-manual.md`](user-manual.md) |
+| **内置变量、`gz_cache.txt`、`GZ_*`、`CMAKE_PREFIX_PATH` 聚合** | [`internal-variables.md`](internal-variables.md) |
+| **本文**：`package.xml` / `target.xml` **字段、多块合并、`when`、依赖与类型约束** | （当前页）+ **`gz spec`** |
 
 ### 产品方向（推荐工作流）
 

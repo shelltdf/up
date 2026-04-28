@@ -1,7 +1,8 @@
 ﻿# gz 命令行参考（参数与工作模式）
 
 > **文档索引**（`doc/zh` / `doc/en` 全部入口表）：[`../README.md`](../README.md)  
-> **相关**：字段级 XML 语义见 [`package-target-xml-spec.md`](package-target-xml-spec.md) 与 **`gz spec`**；变量与缓存键见 [`internal-variables.md`](internal-variables.md)；易错参数与流程见 [`user-manual.md`](user-manual.md)。**物理层**（硬约束、`gz_dom` 形态、退出码摘要）见 **[`../../ai-software-engineering/02-physical/gz-cli/spec.md`](../../ai-software-engineering/02-physical/gz-cli/spec.md)**；**子命令→源码**见 **`../../ai-software-engineering/02-physical/gz-cli/mapping.md`**。
+> **英文完整版**：[`../en/cli-reference.md`](../en/cli-reference.md)  
+> **相关**：字段级 XML 语义见 [`package-target-xml-spec.md`](package-target-xml-spec.md) 与 **`gz spec`**；变量与缓存键见 [`internal-variables.md`](internal-variables.md)；**文档分工、鸟瞰流程、FAQ、gz-gui** 见 [`user-manual.md`](user-manual.md)。**物理层**（硬约束、`gz_dom` 形态、退出码摘要）见 **[`../../ai-software-engineering/02-physical/gz-cli/spec.md`](../../ai-software-engineering/02-physical/gz-cli/spec.md)**；**子命令→源码**见 **`../../ai-software-engineering/02-physical/gz-cli/mapping.md`**。
 
 本文是 **`gz` argv 的单一事实来源**：按**当前实现**说明 argv 形态、**每个子命令**支持的开关、**工作目录（cwd）**语义、**中间目录布局**与**典型范例**。实现入口：`GroundZero/exe/cli_dispatch.cpp`（子命令分派）、`GroundZero/lib/infra/i18n/lang.cpp`（`gz --help` 文案）。
 
@@ -300,7 +301,7 @@ gz spec > spec-embedded.txt
 
 ## 12. 端到端范例（PowerShell，仓库根）
 
-> **`_build`** 仅为与 **`cmake -B`** 一致的**示例目录名**；若你使用 **`_build_gz`** 等，请替换下面所有 **`.\_build\Release\`** 前缀。详见 [`user-manual.md`](user-manual.md)「**0. 10 分钟快速上手**」。
+> **`_build`** 仅为与 **`cmake -B`** 一致的**示例目录名**；若你使用 **`_build_gz`** 等，请替换下面所有 **`.\_build\Release\`** 前缀。详见 [`user-manual.md`](user-manual.md)「**0. 快速入口与构建目录约定**」。
 
 ```powershell
 cmake -S . -B _build -G "Visual Studio 17 2022" -A x64

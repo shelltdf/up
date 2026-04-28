@@ -125,7 +125,7 @@
 | 阶段 | 内容 |
 |------|------|
 | P0 | CLI 子命令骨架、`.intermediate` 目录约定、`package.xml` / 子目录 `target.xml` 最小解析、configure 生成 CMake、build 调用 cmake、test 调用 ctest。 |
-| P1 | 多包依赖图、完整 **arch** 元组、缓存文件、路径校验与 i18n 文案；工程迁移以**手写** `package.xml` / `target.xml` 为主（见 `doc/zh/getting-started.md`）。 |
+| P1 | 多包依赖图、完整 **arch** 元组、缓存文件、路径校验与 i18n 文案；工程迁移以**手写** `package.xml` / `target.xml` 为主（见 **`doc/zh/getting-started.md`**、**`doc/zh/package-target-xml-spec.md`**；命令与目录见 **`doc/zh/cli-reference.md`**）。 |
 | P2 | Ninja/sln 生成器、元工具链插件、moc/uic 类管线。 |
 | P3 | `gz-gui.exe`、pack 多形态、模板市场/用户模板。 |
 

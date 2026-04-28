@@ -1,6 +1,7 @@
 ﻿# 内部变量与可覆盖键总览
 
-> **文档索引**（`doc/zh` / `doc/en` 全部入口表）：[`../README.md`](../README.md)
+> **文档索引**（`doc/zh` / `doc/en` 全部入口表）：[`../README.md`](../README.md)  
+> **英文完整版**：[`../en/internal-variables.md`](../en/internal-variables.md)
 
 本文汇总 **gz（GroundZero）** 在 **configure / build / 模板替换 / 缓存** 中出现的变量与键名，便于区分：**实现自动写入**、**用户在命令行或 GUI 传入**、**项目在 XML 中声明**。  
 **权威细节**仍以 `gz spec`（内嵌规范）、`package-target-xml-spec.md` 与源码为准；本表侧重检索与分工说明。
@@ -70,6 +71,15 @@
 
 **还可写入**：所有 **`GZ_*`**，以及符合 C 标识符规则的 **自定义键**（用于 XML `<vars>` 默认值覆盖、模板占位等）；禁止使用的保留键以实现校验为准（参见 `gz spec` 内说明）。
 
+### 4.1 CMake 聚合与 CMAKE_PREFIX_PATH
+
+多包根经 `configure` 生成**聚合**顶层 CMake 时，会带上 **`CMAKE_PREFIX_PATH`**，由以下部分**去重后**拼接（分号分隔，与 CMake 列表一致）：
+
+1. 当前 **cwd** 下本配置的安装前缀 **`.intermediate/install/<arch>/`**（始终排在最前，便于优先找到本工作区已安装的包）。
+2. **`--opt GZ_CMAKE_PREFIX_PATH=路径1;路径2`** 中的额外前缀（如第三方 SDK 的 CMake 包根）；相对路径按 **cwd** 解析。
+
+此外，当主包声明依赖且依赖包存在 **`imported_installed_*`** 目标时，`configure` 会尝试把这些已知安装信息映射为常见 **`find_package`** 缓存变量并传给主包聚合 CMake（例如 `<PKG>_LIBRARY` / `<PKG>_LIBRARY_DEBUG` / `<PKG>_INCLUDE_DIR` 等），以降低仅靠 `CMAKE_PREFIX_PATH` 仍解析不稳的情况。Windows 下会优先选择 **`implib`** 或 **`.lib`**，避免把 **`.dll`** 误传入链接变量。
+
 ---
 
 ## 5. 项目 XML 中的「变量」
@@ -121,7 +131,8 @@ GUI 会将上述项转成 **`--opt GZ_*=...`** 片段参与 configure（与命�
 ## 9. 相关文档
 
 - `package-target-xml-spec.md` — XML、`when`、合并顺序
-- `user-manual.md` — `configure` / `build` / `run` 与 `arch`、`--install-dir-name`
+- `cli-reference.md` — argv、退出码、中间目录与范例
+- `user-manual.md` — 文档分工、鸟瞰流程、FAQ、gz-gui
 - `DESIGN.md` — 中间目录与命令总览  
 
 若本表与 **`gz spec`** 或源码不一致，以 **`gz spec` 与源码** 为准，并欢迎提 PR 更新本页。

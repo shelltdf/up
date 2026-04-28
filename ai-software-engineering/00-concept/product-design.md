@@ -22,5 +22,7 @@
 
 ## 相关资产
 
-- 详细工作流与 FAQ：`doc/zh/user-manual.md`（中文）、`doc/en/user-manual.md`（英文）；索引 **`doc/README.md`**。
+- **命令行 argv / 退出码**：`doc/zh/cli-reference.md`。
+- **文档地图、易错 FAQ、gz-gui**：`doc/zh/user-manual.md`（中文）、`doc/en/user-manual.md`（英文）。
+- **分步入门**：`doc/zh/getting-started.md`；**XML 字段**：`doc/zh/package-target-xml-spec.md` 与 **`gz spec`**；索引 **`doc/README.md`**。
 - 设计背景：`DESIGN.md`、`mindmap.mmd`。

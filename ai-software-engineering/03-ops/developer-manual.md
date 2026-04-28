@@ -29,5 +29,5 @@ cmake --build _build --config Release
 ## 文档维护
 
 - 规则驱动四阶段目录：**`ai-software-engineering/`**（本仓库已建立）。
-- 实现侧用户文档：**正文**在 **`doc/zh/`**（中文）；**`doc/en/`** 与 **`doc/zh/`** **同名文件一一对应**：其中 **`doc/en/user-manual.md`** 为完整英文稿，其余 **`doc/en/*.md`** 当前为**入口页**（指向 **`../zh/…`** 正文或 **`gz spec`**）。**索引与全部链出**：**`doc/README.md`**（**不**再在 `doc/` 根目录维护与 `zh/` 同名的跳转 `.md`）。
+- 实现侧用户文档：**`doc/zh/`** 与 **`doc/en/`** 同名文件一一对应，**均为完整正文**（中/英各一份；与 **`gz spec`** 或源码冲突时以 **`gz spec` 与源码** 为准）。**索引**：**`doc/README.md`**（**不**再在 `doc/` 根目录维护与 `zh/` 同名的跳转 `.md`）。
 - 总览：`README.md`、`DESIGN.md`。

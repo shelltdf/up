@@ -1,5 +1,81 @@
-﻿# Script `trigger` message table (entry)
+﻿# Script messages (`trigger`) reference: `package.xml` / `target.xml` and Lua binding
 
-> **Documentation index**: **[../README.md](../README.md)**
+> **Documentation index** (full `doc/zh` / `doc/en` table): [`../README.md`](../README.md)
 
-The maintained `trigger` tables and notes are in Chinese: **[../zh/script-messages.md](../zh/script-messages.md)**.
+This document lists **message names** recognized at **`gz configure`** time (XML attribute **`trigger="..."`**), and how **`<var type="script" …>`** interacts with **`<preprocess>` / `<postprocess>`** **`command`**. **Full English**; optional **Simplified Chinese**: [`../zh/script-messages.md`](../zh/script-messages.md). Implementation: **`GroundZero/lib/engine/dom/script_execution.cpp`** (resolve and command strings), **`GroundZero/lib/engine/commands/configure.cpp`** (`apply_script_command` call sites), **`GroundZero/lib/engine/xml/simple_xml.cpp`** (`is_supported_script_trigger`).
+
+---
+
+## 1. XML shape (same at package and target level)
+
+Inside **`package.xml`** or **`target.xml`**, under **`<vars>...</vars>`**:
+
+```xml
+<var name="MY_HOOK" type="script" script_type="lua" trigger="sources.preprocess" value="echo hooked"/>
+```
+
+| Attribute | Meaning |
+|-----------|---------|
+| **`name`** | Script variable name (readability / dedup); **not** concatenated into command strings. |
+| **`type`** | Must be **`script`**. |
+| **`script_type`** | Optional, default **`lua`**. Today only entries with **`lua`** or **empty** (parsed as `lua`) participate in **`resolve_script_command`**; other types are **skipped**. |
+| **`trigger`** | Message name; see table below. **Case-sensitive**; must match the table string **exactly**. |
+| **`value`** | When selected as the “script fallback command”, the **entire** string is passed to the generated backend as a **shell/cmd** line (see §3). |
+
+**Attachment scope**: script vars in package-level `<vars>` attach to the **Package** node; target-level attach to the **Target** node. When configure resolves a `preprocess`/`postprocess` for a target, `collect_scripts_for_message` walks **from the current target up the parent chain to the package**, collecting script vars with the **same `trigger`** (see **`script_execution.cpp`**). Multiple rows with the same trigger on **one node** are ordered **as in XML**; **target is visited before package**, so **target-level scripts precede package-level** in the list; **`resolve_script_command` takes the first non-empty `value`**, so **target can override package** for the same trigger fallback.
+
+---
+
+## 2. Messages (`trigger`) table
+
+| `trigger` value | Product meaning | Dispatched at **configure** today? | Paired XML |
+|-----------------|-----------------|-------------------------------------|------------|
+| **`sources.preprocess`** | Command to run **before** compiling a source | **Yes** | **`<preprocess command="..."/>`** on **`<file>` / `<glob>`** inside `<sources>` (or inside paired block); if `command` is empty, use script `value` for this message. |
+| **`sources.postprocess`** | Per-source postprocess (backend semantics: see CMake/Ninja docs) | **Yes** | Same for **`<postprocess command="..."/>`**. |
+| **`headers.preprocess`** | Before header path handling for compile/install | **Yes** | **`<headers>`** preprocess on `<dir>` / `<file>` / `<glob>`. |
+| **`headers.postprocess`** | After header entry processing | **Yes** | **`<headers>`** postprocess. |
+| **`assets.preprocess`** | Before asset copy/processing | **Yes** | **`<assets>`** preprocess. |
+| **`assets.postprocess`** | After asset entry processing | **Yes** | **`<assets>`** postprocess. |
+| **`manual`** | Reserved: slot for **manual** trigger from user or GUI | **No** (parsed as valid, but configure does **not** call `apply_script_command(..., "manual", ...)`) | No auto pairing; future CLI/GUI “run package/target script” could use this. |
+
+**Strings not in the table**: at `load_package_xml` / `load_target_xml` time → **configure fails** (error text in `simple_xml.cpp`).
+
+---
+
+## 3. “Lua binding” vs actual behavior today
+
+- **Naming**: history and **`gz spec`** use **`script_type="lua"`**; the repo does **not** yet run a **Lua VM** on `value` statements.
+- **Actual behavior**: for a given `trigger`, if the XML **already has** **`command="..."`**, that string is used **directly**; script **`<var type="script">`** for the same trigger is **not** read.
+- If **`command`** is **missing** or empty, **`resolve_script_command`** walks the §1 inheritance order for **`type="script"`** with matching **`trigger`** and **`script_type`** lua (or default), and takes the **first** **`value`** as the **whole shell command**.
+- So: to bind executable logic today, put **`value` as one or more shell lines** (or **`lua -e '...'`** if `lua` is on PATH), not bare `print(...)` expecting the host to interpret it.
+
+**Backends**: commands end up in rules generated by **`cmake_backend.cpp`** / **`ninja_backend.cpp`** (same as **`script-tutorial.md` §4**).
+
+---
+
+## 4. Relation to `when` and other `<var>`
+
+- **Scalar `<var name="KEY" value="VAL"/>`**: participates in **`when`** and **`@KEY@` / `${KEY}`** substitution (see **`package-target-xml-spec.md` §3.5**).
+- **Script `<var type="script">`**: **not** in the `when` merge map; only used as **command fallback** on **dispatched** trigger paths above.
+- **`when` does not apply** to `<var>` rows themselves (per spec); you cannot hide a whole script var with `when`.
+
+---
+
+## 5. Note: global script var and “every source”
+
+For **`sources.preprocess` / `sources.postprocess`**, configure calls **`apply_script_command`** **once per expanded** `<file>` / `<glob>` source. If a source has **no** **`<preprocess command="..."/>`** in XML (empty command), fallback is the script **`value`** from §1.
+
+So: a **package-** or **target-level** `<vars>` entry with **`trigger="sources.preprocess"`** and non-empty **`value`** applies the **same** fallback to **every** source that has **no** XML preprocess (unless a closer script var wins). For **one** input only, put **`<preprocess command="..."/>`** on that **`<file>`** (explicit command, or empty + target-only script var—check parser rules; **recommended**: always set an explicit `command`). See **`script-tutorial.md` §4**.
+
+---
+
+## 6. Related docs
+
+| Doc | Content |
+|-----|---------|
+| `script-tutorial.md` | preprocess/postprocess, Qt, CMake backend differences |
+| `internal-variables.md` | Scalar vars vs script vars |
+| `package-target-xml-spec.md` | §2.7 script `<var>` index |
+| `gz spec` | Embedded English spec, Script var lines |
+
+If a future version adds real Lua callbacks for **`manual`** or other triggers, or multi-script merge, follow **`gz spec`** and **`script_execution.cpp`** and update this table.
