@@ -9,7 +9,7 @@ namespace {
 // English-only: embedded copy of rules aligned with doc/zh/package-target-xml-spec.md for AI/tools without repo .md.
 // Split into named chunks: MSVC ~16kB string literal limit; edit the slice you need.
 constexpr const char* kXmlSpecEnThroughSection3 =
-  R"SPEC(GZ_XML_SPEC_REVISION=21
+  R"SPEC(GZ_XML_SPEC_REVISION=23
 
 # gz — package.xml and target.xml (machine-oriented summary)
 
@@ -427,6 +427,16 @@ optional `when`), `<assets>` (same `from` / `to` / preprocess / postprocess patt
 | Types | GroundZero/lib/engine/xml/simple_xml.hpp (`PackageDesc`, `TargetDesc`, `ConfigFileEntry`, `DefineEntry`) |
 | Configure validation / graph | GroundZero/lib/engine/commands/configure.cpp |
 | Variable merge + `@` / `${}` + `when` + `#cmakedefine` (config_files) | GroundZero/lib/engine/xml/var_subst.cpp |
+
+---
+
+## 8. Install trees, `gz pack`, and optional redistribution XML (`gz build`)
+
+- **`gz pack`** only **archives** the install root(s) selected by `--install-dir-name` (under `.intermediate/install/<arch>/`, including `bin/`, `lib/`, `include/`, etc.). It **does not** generate new `package.xml` / `target.xml` and does not rewrite source targets.
+
+- **Redistribution XML (default on)**: after a successful **`gz build`**, the engine reads **`.intermediate/build/<leaf>/gz_redist_manifest.json`** (written by **`gz configure`**) and, if it lists targets, writes **`<install>/gz-redist/package.xml`** plus one **`<install>/gz-redist/<emit-name>/target.xml`** per entry. Skip with **`--no-emit-redistribution-xml`** or **`GZ_EMIT_REDIST_XML=0`** / **`false`** / **`off`** / **`no`**. Library-like targets are emitted as **`prebuilt_*`** with **`<prebuilt …/>`** paths rebased relative to each `target.xml` directory; **`imported_installed_*`** stay as **`<install …/>`** with paths **relative to `CMAKE_INSTALL_PREFIX`** (the install root). **`executable`** targets are omitted from the manifest (MVP). Code: **`redist_emit.cpp`**, **`configure.cpp`** (manifest), **`build.cpp`**.
+
+- **`gz pack`** will include **`gz-redist/`** automatically when it exists under the packaged install tree.
 
 End of embedded spec.
 )SPEC";

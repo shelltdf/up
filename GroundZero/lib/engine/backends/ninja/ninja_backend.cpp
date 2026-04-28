@@ -245,6 +245,43 @@ int write_ninja_file(const ConfigureGraphModel& model) {
     nf << "  outdir = " << quote_ninja_path((model.install_root / "bin")) << "\n";
     install_outputs.push_back(dst);
   }
+  const auto install_lib = model.install_root / "lib";
+  for (const auto& t : model.targets) {
+    if (t.type == "asset_bundle")
+      continue;
+    if (t.type == "static_library") {
+#if defined(_WIN32)
+      const auto built = quote_ninja_path(model.out_dir / (t.name + ".lib"));
+      const auto dst = quote_ninja_path(install_lib / (t.name + ".lib"));
+#else
+      const auto built = quote_ninja_path(model.out_dir / ("lib" + t.name + ".a"));
+      const auto dst = quote_ninja_path(install_lib / ("lib" + t.name + ".a"));
+#endif
+      nf << "build " << dst << ": copy " << built << "\n";
+      nf << "  outdir = " << quote_ninja_path(install_lib) << "\n";
+      install_outputs.push_back(dst);
+    } else if (t.type == "shared_library") {
+#if defined(_WIN32)
+      const auto dll_out = quote_ninja_path(model.out_dir / (t.name + ".dll"));
+      const auto dll_dst = quote_ninja_path(install_bin / (t.name + ".dll"));
+      nf << "build " << dll_dst << ": copy " << dll_out << "\n";
+      nf << "  outdir = " << quote_ninja_path(install_bin) << "\n";
+      install_outputs.push_back(dll_dst);
+      const auto impl_src = model.out_dir / (t.name + ".lib");
+      const auto impl_built = quote_ninja_path(impl_src);
+      const auto impl_dst = quote_ninja_path(install_lib / (t.name + ".lib"));
+      nf << "build " << impl_dst << ": copy " << impl_built << "\n";
+      nf << "  outdir = " << quote_ninja_path(install_lib) << "\n";
+      install_outputs.push_back(impl_dst);
+#else
+      const auto built = quote_ninja_path(model.out_dir / ("lib" + t.name + ".so"));
+      const auto dst = quote_ninja_path(install_lib / ("lib" + t.name + ".so"));
+      nf << "build " << dst << ": copy " << built << "\n";
+      nf << "  outdir = " << quote_ninja_path(install_lib) << "\n";
+      install_outputs.push_back(dst);
+#endif
+    }
+  }
   for (const auto& rule : model.install_file_rules) {
     const auto src = quote_ninja_path(std::filesystem::path(rule.src));
     const auto dst = quote_ninja_path(model.install_root / rule.dst / std::filesystem::path(rule.src).filename());

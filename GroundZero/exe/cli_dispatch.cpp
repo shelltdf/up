@@ -146,11 +146,16 @@ int run_gz_cli(int argc, char** argv) {
   if (cmd == "build") {
     std::string leaf;
     bool have = false;
+    bool no_emit_redist = false;
     for (size_t i = 1; i < args.size(); ++i) {
       if (args[i] == "--build-dir-name" && i + 1 < args.size()) {
         leaf = args[i + 1];
         have = true;
         ++i;
+      } else if (args[i] == "--emit-redistribution-xml") {
+        no_emit_redist = false;
+      } else if (args[i] == "--no-emit-redistribution-xml") {
+        no_emit_redist = true;
       }
     }
     if (!have) {
@@ -161,7 +166,7 @@ int run_gz_cli(int argc, char** argv) {
       std::cerr << "build: invalid --build-dir-name\n";
       return 2;
     }
-    return gz::cmd_build(cwd, gz::exe::build_dir_from_leaf(cwd, leaf));
+    return gz::cmd_build(cwd, gz::exe::build_dir_from_leaf(cwd, leaf), no_emit_redist);
   }
   if (cmd == "run") {
     std::string leaf;

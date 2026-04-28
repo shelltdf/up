@@ -260,4 +260,52 @@ std::string arch_from_options(const std::map<std::string, std::string>& opts) {
   return compose_arch_tag(system, cpu, build_system, toolchain, link_mode, config_mode, crt_mode);
 }
 
+bool gz_path_is_same_or_under(const std::filesystem::path& root, const std::filesystem::path& candidate) {
+  std::error_code ec;
+  const std::filesystem::path rc = std::filesystem::weakly_canonical(std::filesystem::absolute(root), ec);
+  const std::filesystem::path cc = std::filesystem::weakly_canonical(std::filesystem::absolute(candidate), ec);
+  if (ec || rc.empty())
+    return false;
+  const std::filesystem::path rel = std::filesystem::relative(cc, rc, ec);
+  if (ec)
+    return false;
+  if (rel.empty() || rel == std::filesystem::path("."))
+    return true;
+  for (const auto& seg : rel) {
+    if (seg == "..")
+      return false;
+  }
+  return true;
+}
+
+void gz_filter_scan_roots_skip_under_intermediate(const std::filesystem::path& cwd,
+                                                  std::vector<std::filesystem::path>& roots,
+                                                  const char* tool_label_for_warnings) {
+  std::error_code ec_anchor;
+  const std::filesystem::path anchor =
+      std::filesystem::weakly_canonical(std::filesystem::absolute(cwd / ".intermediate"), ec_anchor);
+  if (ec_anchor || anchor.empty())
+    return;
+
+  std::vector<std::filesystem::path> kept;
+  kept.reserve(roots.size());
+  for (const auto& r : roots) {
+    std::error_code er;
+    const std::filesystem::path ra = std::filesystem::weakly_canonical(std::filesystem::absolute(r), er);
+    if (er)
+      continue;
+    if (gz_path_is_same_or_under(anchor, ra)) {
+      std::cerr << tool_label_for_warnings << ": warning: skipping --scan root under .intermediate: "
+                << to_posix_path_string(r) << "\n";
+      continue;
+    }
+    kept.push_back(r);
+  }
+  if (kept.empty()) {
+    std::cerr << tool_label_for_warnings << ": warning: all --scan roots were under .intermediate; using cwd only.\n";
+    kept.push_back(cwd);
+  }
+  roots = std::move(kept);
+}
+
 }  // namespace gz

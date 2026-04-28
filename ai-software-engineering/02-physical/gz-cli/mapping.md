@@ -5,7 +5,7 @@
 | 子命令 | 主实现（业务逻辑；argv 解析多在 `cli_dispatch.cpp`） |
 |--------|------|
 | `configure` | `GroundZero/lib/engine/commands/configure.cpp` |
-| `build` | `GroundZero/lib/engine/commands/build.cpp` |
+| `build` | `GroundZero/lib/engine/commands/build.cpp`；二次分发 XML 落盘见 `redist_emit.cpp`（由 `configure` 写 `gz_redist_manifest.json`） |
 | `run` | `GroundZero/lib/engine/commands/run.cpp` |
 | `test` | `GroundZero/lib/engine/commands/test.cpp` |
 | `pack` | `GroundZero/lib/engine/commands/pack.cpp` |

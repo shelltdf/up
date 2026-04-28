@@ -68,6 +68,7 @@
 | `GZ_CMAKE_GENERATOR` | — | 传给 CMake 的 `-G`（可影响工具链标签推断） |
 | `GZ_CMAKE_PREFIX_PATH` | — | `CMAKE_PREFIX_PATH` 类前缀（configure 写入缓存等） |
 | `GZ_BUILD_PARALLEL` | `GZ_BUILD_JOBS` | 并行编译线程数（二者为别名；缺省由 configure 按 CPU 数写入） |
+| `GZ_EMIT_REDIST_XML` | — | 环境变量（非 `gz_cache.txt` 专用）：**不设或设真值**时 **`gz build` 默认**在 install 成功后写 **`gz-redist/`**；设为 **`0` / `false` / `off` / `no`**（大小写不敏感）则**关闭**。也可用 **`gz build --no-emit-redistribution-xml`**。详见 [`package-target-xml-spec.md`](package-target-xml-spec.md) §8。 |
 
 **还可写入**：所有 **`GZ_*`**，以及符合 C 标识符规则的 **自定义键**（用于 XML `<vars>` 默认值覆盖、模板占位等）；禁止使用的保留键以实现校验为准（参见 `gz spec` 内说明）。
 

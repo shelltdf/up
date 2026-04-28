@@ -3,8 +3,20 @@
 #include <filesystem>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace gz {
+
+/** True if `candidate` is the same path as `root` or strictly inside `root` (after weakly_canonical + absolute). */
+bool gz_path_is_same_or_under(const std::filesystem::path& root, const std::filesystem::path& candidate);
+
+/**
+ * Drops any scan root that lies under `cwd/.intermediate` (canonical), with stderr warnings.
+ * If that would empty the list, inserts `cwd` only and warns. Safe to call when `roots` already includes cwd.
+ */
+void gz_filter_scan_roots_skip_under_intermediate(const std::filesystem::path& cwd,
+                                                  std::vector<std::filesystem::path>& roots,
+                                                  const char* tool_label_for_warnings);
 
 /** True for keys allowed in the configure/build options map from `gz_cache.txt` / `--opt` (excludes structural lines). */
 bool gz_mergeable_option_key(const std::string& k);

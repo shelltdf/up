@@ -15,3 +15,18 @@ set(GZ_DEV_COMPONENT gz_dev)
 add_subdirectory(GroundZero/lib)
 add_subdirectory(GroundZero/exe)
 add_subdirectory(GroundZeroGUI)
+
+# Optional smoke: configure + build with redistribution XML (library-only facet of hello_simple_lib).
+enable_testing()
+if(TARGET gz)
+  set(_gz_hello_simple "${CMAKE_SOURCE_DIR}/test_projects/hello_simple_lib")
+  add_test(
+    NAME gz_redist_emit_configure
+    COMMAND "$<TARGET_FILE:gz>" configure --build-dir-name redist_smoke --scan .
+    WORKING_DIRECTORY "${_gz_hello_simple}")
+  add_test(
+    NAME gz_redist_emit_build
+    COMMAND "$<TARGET_FILE:gz>" build --build-dir-name redist_smoke
+    WORKING_DIRECTORY "${_gz_hello_simple}")
+  set_tests_properties(gz_redist_emit_build PROPERTIES DEPENDS gz_redist_emit_configure)
+endif()

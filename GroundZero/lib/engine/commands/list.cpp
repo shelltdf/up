@@ -1,5 +1,6 @@
 ﻿#include "list.hpp"
 
+#include "commands_common.hpp"
 #include "dom_model.hpp"
 #include "path_check.hpp"
 #include "paths.hpp"
@@ -93,6 +94,7 @@ int parse_list_cli_args(const std::filesystem::path& cwd, const std::vector<std:
     if (!has_cwd)
       out.roots.push_back(cwd);
   }
+  gz_filter_scan_roots_skip_under_intermediate(cwd, out.roots, "list");
   return 0;
 }
 

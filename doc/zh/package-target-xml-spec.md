@@ -30,7 +30,7 @@
 | **`target.xml`** | 包内**每个构建目标独占一个子目录**，该目录下**恰好一个** `target.xml` | 声明目标名、类型、源文件、可选的头文件搜索路径、**目标级**依赖（其他 target，通常为库）。 |
 
 - **归属**：`target.xml` 必须位于某一 `package.xml` 所在目录的**子树内**；`configure` 会把 target 归到路径上**最近**的包根下（见 `configure.cpp` 中 `nearest_package_parent`）。
-- **扫描**：`gz configure` 在扫描根（默认 cwd，或 `--scan` 指定目录）下**递归**查找所有 `package.xml` 与 `target.xml`。
+- **扫描**：`gz configure` / **`gz list`** 在扫描根（默认 cwd，或 `--scan` 指定目录）下**递归**查找所有 `package.xml` 与 `target.xml`。递归时**不进入**名为 **`.intermediate`** 的子目录；此外，若 **`--scan`** 指向的路径落在 **`<cwd>/.intermediate/`** 之下（规范化后），该扫描根会被**丢弃**并告警，以免把构建产物里的 **`gz-redist/`** 等误当作源码包。
 
 ### 1.1 同名块可多次出现（合并顺序）
 
@@ -309,8 +309,10 @@
 
 ---
 
-## 8. `gz pack`、安装树与「二次分发用 XML」（产品方向 / 与当前实现对齐）
+## 8. 安装树、**`gz pack`** 与「二次分发用 XML」（职责划分 / 与实现对齐）
 
-- **当前实现（与源码一致）**：**`gz pack`** 只对 **`--install-dir-name`** 所指的 **安装树根**（**`.intermediate/install/<arch>/`**，内含 **`bin/`**、**`lib/`**、**`include/`** 等**已编译/已安装**产物）做 **归档**（PowerShell **`Compress-Archive`** / **`tar`**，或在本机存在 **`cpack`** 且构建目录已生成 **CPack** 配置时走 **CPack**）。**不会**在包内**自动生成**新的 **`package.xml` / `target.xml`**，也**不会**把原先的源码型 **`executable` / `static_library` / `shared_library` / `library`** 描述**改写**为 **`prebuilt_*` + `<prebuilt …/>`**。实现入口：**`GroundZero/lib/engine/commands/pack.cpp`**、**`run_pack_backend`**（**`backend_dispatch.cpp`**）。
+- **`gz pack`（仅归档）**：只对 **`--install-dir-name`** 所指的 **安装树根**（**`.intermediate/install/<arch>/`**，内含 **`bin/`**、**`lib/`**、**`include/`** 等）做 **归档**（PowerShell **`Compress-Archive`** / **`tar`**，或 **CPack** 可用时走 **CPack**）。**`pack` 不生成**新的 **`package.xml` / `target.xml`**，也**不改写**源码型目标。若安装树下已存在 **`gz-redist/`**（见下），会**随安装树一并**被打进归档。实现：**`GroundZero/lib/engine/commands/pack.cpp`**、**`run_pack_backend`**（**`backend_dispatch.cpp`**）。
 
-- **产品方向（二次分发）**：将 **install 结果**作为独立交付单元分发时，消费方若仍用 **`gz configure`** 编排构建，理想流程是：在归档或解压布局旁附带一套 **面向二进制** 的 **`package.xml` / `target.xml`**——其中库以 **`prebuilt_static_library` / `prebuilt_shared_library`** 等声明，用 **`<prebuilt …/>`** 指向包内（或固定前缀下）的 **`.exe` / `.lib` / `.dll` / `.so`** 等路径，**`<sources>` 不再列出编译源码**。本条为**规格愿景**；落地后须与 **`pack`** 或独立发布管线同步实现并回写本节「当前实现」段。
+- **`gz build`（默认生成二次分发 XML）**：在 **编译 + install 成功之后**，默认读取 **`.intermediate/build/<叶子>/gz_redist_manifest.json`**（由 **`gz configure`** 根据当前图写入；若主包无可导出库目标则可能**不创建**该文件）。当 manifest 存在且含 **`targets`** 时，在安装根下写入 **`gz-redist/package.xml`** 及 **`gz-redist/<emit-name>/target.xml`**：将本包内 **静态/动态/解析后的 `library`、磁盘型 `prebuilt_*`、以及 `imported_installed_*`** 描述为下游可 **`gz configure --scan`** 消费的形态（库目标多映射为 **`prebuilt_*` + `<prebuilt …/>`**，路径在 **`target.xml` 内相对各目标目录** 书写；**`imported_installed_*`** 仍用 **`<install …/>`**，路径**相对安装根 / `CMAKE_INSTALL_PREFIX`**）。**`executable`** 与 **`asset_bundle`** 当前**不写入** manifest（MVP）。可用 **`--no-emit-redistribution-xml`** 或 **`GZ_EMIT_REDIST_XML=0` / `false` / `off` / `no`**（大小写不敏感）关闭。实现：**`build.cpp`**、**`redist_emit.cpp`**；清单生成：**`configure.cpp`**（`try_write_gz_redist_manifest_json`）。
+
+- **消费提示**：二次分发包可将 **`gz-redist/`** 与 **`bin/`、`lib/`、`include/`** 置于同一安装前缀下分发；下游将 **`gz-redist` 的父目录** 当作安装前缀、将 **`gz-redist`** 当作**包根**扫描时，应与上述路径约定一致。

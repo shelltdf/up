@@ -7,6 +7,7 @@
 #include "lang.hpp"
 #include "path_check.hpp"
 #include "paths.hpp"
+#include "redist_emit.hpp"
 #include "simple_xml.hpp"
 #include "var_subst.hpp"
 
@@ -91,25 +92,6 @@ bool require_ascii_path(const std::filesystem::path& p) {
   if (path_has_non_ascii(p)) {
     std::cerr << lang::configure_path_non_ascii() << to_posix_path_string(p) << "\n";
     return false;
-  }
-  return true;
-}
-
-// True if candidate is root or strictly inside root (canonical paths).
-bool path_is_under_tree(const std::filesystem::path& root, const std::filesystem::path& candidate) {
-  std::error_code ec;
-  const std::filesystem::path rc = std::filesystem::weakly_canonical(std::filesystem::absolute(root), ec);
-  const std::filesystem::path cc = std::filesystem::weakly_canonical(std::filesystem::absolute(candidate), ec);
-  if (ec || rc.empty())
-    return false;
-  const std::filesystem::path rel = std::filesystem::relative(cc, rc, ec);
-  if (ec)
-    return false;
-  if (rel.empty() || rel == ".")
-    return true;
-  for (const auto& seg : rel) {
-    if (seg == "..")
-      return false;
   }
   return true;
 }
@@ -378,6 +360,133 @@ void emit_target_link_mermaid_diagrams(std::ofstream& f, const std::string& intr
     }
     f << "```\n\n";
   }
+}
+
+void try_write_gz_redist_manifest_json(const std::filesystem::path& manifest_path,
+                                       const PackageDesc& primary_pkg,
+                                       const std::vector<LoadedTarget>& build_targets,
+                                       const ConfigureGraphModel& graph_model,
+                                       const std::string& arch) {
+  if (build_targets.size() != graph_model.targets.size())
+    return;
+  std::map<std::string, std::string> orig_emit;
+  for (size_t k = 0; k < build_targets.size(); ++k) {
+    const LoadedTarget& lt = build_targets[k];
+    if (lt.package_name != primary_pkg.name)
+      continue;
+    if (lt.desc.type == "asset_bundle" || lt.desc.type == "executable")
+      continue;
+    const std::string& ty = lt.desc.type;
+    if (ty == "static_library" || ty == "shared_library" || ty == "library" || ty == "prebuilt_static_library" ||
+        ty == "prebuilt_shared_library" || ty == "imported_installed_static_library" ||
+        ty == "imported_installed_shared_library") {
+      if (ty == "imported_installed_static_library" || ty == "imported_installed_shared_library")
+        orig_emit[lt.desc.name] = lt.desc.name;
+      else if (ty == "prebuilt_static_library" || ty == "prebuilt_shared_library")
+        orig_emit[lt.desc.name] = lt.desc.name;
+      else {
+        if (lt.desc.name.rfind("prebuilt_", 0) == 0)
+          orig_emit[lt.desc.name] = lt.desc.name;
+        else
+          orig_emit[lt.desc.name] = "prebuilt_" + lt.desc.name;
+      }
+    }
+  }
+  if (orig_emit.empty()) {
+    std::error_code ec;
+    std::filesystem::remove(manifest_path, ec);
+    return;
+  }
+  GzRedistManifest m;
+  m.schema_version = 1;
+  m.package_name = primary_pkg.name;
+  m.package_version = primary_pkg.version.empty() ? "0.0.0" : primary_pkg.version;
+  m.arch = arch;
+  for (const auto& d : primary_pkg.dependencies)
+    m.package_dependencies.push_back({d.first, d.second});
+
+  for (size_t k = 0; k < build_targets.size(); ++k) {
+    const LoadedTarget& lt = build_targets[k];
+    if (lt.package_name != primary_pkg.name)
+      continue;
+    const auto it_emit = orig_emit.find(lt.desc.name);
+    if (it_emit == orig_emit.end())
+      continue;
+    const ConfigureTargetModel& tm = graph_model.targets[k];
+    GzRedistManifestTarget mt;
+    mt.original_name = lt.desc.name;
+    mt.emit_name = it_emit->second;
+    mt.emit_subdir = mt.emit_name;
+    mt.emit_type = lt.desc.type;
+    if (lt.desc.type == "library")
+      mt.emit_type = (tm.type == "shared_library") ? "prebuilt_shared_library" : "prebuilt_static_library";
+    else if (lt.desc.type == "static_library")
+      mt.emit_type = "prebuilt_static_library";
+    else if (lt.desc.type == "shared_library")
+      mt.emit_type = "prebuilt_shared_library";
+
+    if (lt.desc.type == "imported_installed_static_library" || lt.desc.type == "imported_installed_shared_library") {
+      if (!lt.desc.installed_wrap.has_value())
+        continue;
+      mt.use_installed_wrap = true;
+      mt.install_rel_artifact = normalize_install_rel_path(lt.desc.installed_wrap->artifact);
+      mt.install_rel_implib = normalize_install_rel_path(lt.desc.installed_wrap->implib);
+      mt.installed_iface_include = normalize_install_rel_path(lt.desc.installed_wrap->interface_include);
+      mt.emit_type = lt.desc.type;
+    } else if (lt.desc.type == "prebuilt_static_library" || lt.desc.type == "prebuilt_shared_library") {
+      if (tm.imported_from_install_prefix) {
+        mt.use_installed_wrap = true;
+        mt.install_rel_artifact = normalize_install_rel_path(tm.install_rel_artifact);
+        mt.install_rel_implib = normalize_install_rel_path(tm.install_rel_implib);
+        mt.installed_iface_include = normalize_install_rel_path(tm.install_rel_interface_include);
+        mt.emit_type = lt.desc.type;
+      } else if (lt.desc.type == "prebuilt_static_library") {
+        const std::string fn = std::filesystem::path(tm.imported_location).filename().string();
+        mt.install_rel_import_lib = fn.empty() ? "" : ("lib/" + fn);
+      } else {
+#if defined(_WIN32)
+        const std::string dll_fn =
+            std::filesystem::path(tm.imported_dll.empty() ? tm.imported_location : tm.imported_dll).filename().string();
+        const std::string lib_fn = std::filesystem::path(tm.imported_implib).filename().string();
+        mt.install_rel_dll = dll_fn.empty() ? "" : ("bin/" + dll_fn);
+        mt.install_rel_import_lib = lib_fn.empty() ? "" : ("lib/" + lib_fn);
+#else
+        const std::string so_fn = std::filesystem::path(tm.imported_location).filename().string();
+        mt.install_rel_location = so_fn.empty() ? "" : ("lib/" + so_fn);
+#endif
+      }
+    } else if (lt.desc.type == "static_library" || lt.desc.type == "shared_library" ||
+               lt.desc.type == "library") {
+#if defined(_WIN32)
+      if (tm.type == "static_library") {
+        mt.install_rel_import_lib = "lib/" + tm.name + ".lib";
+      } else {
+        mt.install_rel_dll = "bin/" + tm.name + ".dll";
+        mt.install_rel_import_lib = "lib/" + tm.name + ".lib";
+      }
+#else
+      if (tm.type == "static_library")
+        mt.install_rel_import_lib = std::string("lib/lib") + tm.name + ".a";
+      else
+        mt.install_rel_location = std::string("lib/lib") + tm.name + ".so";
+#endif
+    }
+
+    for (const auto& dep : lt.desc.dependencies) {
+      const std::string& nm = dep.name;
+      if (nm.find(':') != std::string::npos) {
+        mt.dependency_names.push_back(nm);
+        continue;
+      }
+      const auto it = orig_emit.find(nm);
+      if (it != orig_emit.end())
+        mt.dependency_names.push_back(it->second);
+    }
+    m.targets.push_back(std::move(mt));
+  }
+  std::string werr;
+  if (!write_gz_redist_manifest_json(manifest_path, m, werr))
+    std::cerr << "configure: warning: could not write gz_redist_manifest.json: " << werr << "\n";
 }
 
 void write_packages_md(const std::filesystem::path& out_path,
@@ -815,6 +924,7 @@ int run_configure(const ConfigureRequest& req) {
     if (!has_cwd)
       roots.push_back(cwd);
   }
+  gz_filter_scan_roots_skip_under_intermediate(cwd, roots, "configure");
   cli_verbose_phase("configure", "scan_roots");
 
   if (!require_ascii_path(cwd))
@@ -1275,7 +1385,7 @@ int run_configure(const ConfigureRequest& req) {
         continue;
       if (inc_entry.kind == "dir") {
         const auto inc = (lt.target_dir / inc_entry.from).lexically_normal();
-        if (!install_staging_root.empty() && path_is_under_tree(install_staging_root, inc)) {
+        if (!install_staging_root.empty() && gz_path_is_same_or_under(install_staging_root, inc)) {
           std::cerr << "configure: warning: skipping headers <dir> under .intermediate/install (would nest installs): "
                     << to_posix_path_string(inc) << "\n";
           continue;
@@ -1285,7 +1395,7 @@ int run_configure(const ConfigureRequest& req) {
                              apply_script_command(lt, "headers.postprocess", inc_entry.postprocess_command)});
       } else if (inc_entry.kind == "file") {
         const auto f = (lt.target_dir / inc_entry.from).lexically_normal();
-        if (!install_staging_root.empty() && path_is_under_tree(install_staging_root, f))
+        if (!install_staging_root.empty() && gz_path_is_same_or_under(install_staging_root, f))
           continue;
         install_files.insert({rel_to_cwd(build_root, f), install_dest(inc_entry.to),
                               apply_script_command(lt, "headers.preprocess", inc_entry.preprocess_command),
@@ -1298,7 +1408,7 @@ int run_configure(const ConfigureRequest& req) {
           continue;
         }
         for (const auto& f : files) {
-          if (!install_staging_root.empty() && path_is_under_tree(install_staging_root, f))
+          if (!install_staging_root.empty() && gz_path_is_same_or_under(install_staging_root, f))
             continue;
           install_files.insert({rel_to_cwd(build_root, f), install_dest(inc_entry.to),
                                 apply_script_command(lt, "headers.preprocess", inc_entry.preprocess_command),
@@ -1309,7 +1419,7 @@ int run_configure(const ConfigureRequest& req) {
     for (const auto& ae : lt.desc.assets) {
       if (ae.kind == "dir") {
         const auto d = (lt.target_dir / ae.from).lexically_normal();
-        if (!install_staging_root.empty() && path_is_under_tree(install_staging_root, d)) {
+        if (!install_staging_root.empty() && gz_path_is_same_or_under(install_staging_root, d)) {
           std::cerr << "configure: warning: skipping asset <dir> under .intermediate/install: "
                     << to_posix_path_string(d) << "\n";
           continue;
@@ -1319,7 +1429,7 @@ int run_configure(const ConfigureRequest& req) {
                            apply_script_command(lt, "assets.postprocess", ae.postprocess_command)});
       } else if (ae.kind == "file") {
         const auto f = (lt.target_dir / ae.from).lexically_normal();
-        if (!install_staging_root.empty() && path_is_under_tree(install_staging_root, f))
+        if (!install_staging_root.empty() && gz_path_is_same_or_under(install_staging_root, f))
           continue;
         asset_files.insert({rel_to_cwd(build_root, f), asset_install_dest(ae.to),
                             apply_script_command(lt, "assets.preprocess", ae.preprocess_command),
@@ -1332,7 +1442,7 @@ int run_configure(const ConfigureRequest& req) {
           continue;
         }
         for (const auto& f : files) {
-          if (!install_staging_root.empty() && path_is_under_tree(install_staging_root, f))
+          if (!install_staging_root.empty() && gz_path_is_same_or_under(install_staging_root, f))
             continue;
           asset_files.insert({rel_to_cwd(build_root, f), asset_install_dest(ae.to),
                               apply_script_command(lt, "assets.preprocess", ae.preprocess_command),
@@ -1740,6 +1850,8 @@ int run_configure(const ConfigureRequest& req) {
   write_gz_cache(cache_path, cwd, arch, primary_pkg.name, generated_file, roots_cached, cache_opts);
   write_packages_md(cache_path.parent_path() / "packages.md", loaded_packages, roots_cached, all_targets,
                     primary_pkg.name, graph_model, build_targets, cache_opts);
+  try_write_gz_redist_manifest_json(cache_path.parent_path() / "gz_redist_manifest.json", primary_pkg, build_targets,
+                                     graph_model, arch);
   if (equals_ci(build_system, "ninja")) {
     cli_verbose_phase("configure", "done_ninja");
     return 0;

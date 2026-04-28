@@ -261,6 +261,22 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
     cm << " RUNTIME DESTINATION bin)\n";
   }
 
+  {
+    std::vector<std::string> native_lib_names;
+    for (const auto& t : model.targets) {
+      if (t.imported_prebuilt || t.type == "asset_bundle")
+        continue;
+      if (t.type == "static_library" || t.type == "shared_library")
+        native_lib_names.push_back(t.name);
+    }
+    if (!native_lib_names.empty()) {
+      cm << "install(TARGETS";
+      for (const auto& n : native_lib_names)
+        cm << " " << n;
+      cm << " ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION bin)\n";
+    }
+  }
+
   for (const auto& t : model.targets) {
     if (!t.imported_prebuilt)
       continue;

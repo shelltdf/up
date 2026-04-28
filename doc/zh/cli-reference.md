@@ -25,7 +25,7 @@ gz [--verbose|-v] print-build-dir-name [--build-dir-name <叶子>] [--opt KEY=VA
 gz spec
 gz list [--format tree|json|xml] [--xml <路径>] [--json <路径>] [--quiet] [--scan <目录>]...
 gz configure [--build-dir-name <叶子>] [--scan <目录>]... [--opt KEY=VALUE]...
-gz build --build-dir-name <叶子>
+gz build --build-dir-name <叶子> [--no-emit-redistribution-xml]
 gz run --install-dir-name <名> <可执行目标名>
 gz test --install-dir-name <名> [测试可执行文件名]
 gz pack --install-dir-name <名> [--install-dir-name <名>]...
@@ -77,6 +77,8 @@ gz --help | -h | help
 | **3** | 部分重型步骤失败（如 **`list`** DOM 构建失败以外的写盘失败等，见各命令实现）。 |
 | **4** | **`list`**：导出 XML/JSON 文件或向 stdout 写 DOM 失败。 |
 | **6** | **`list`**：`package.xml` / `target.xml` 路径含 **非 ASCII**。 |
+| **8** | **`build`**：存在 **`gz_redist_manifest.json`** 但**内容无法解析**（JSON 损坏等）。若文件**不存在**则**跳过**二次分发并 **0**（主包无库类目标时 **`configure`** 可能不写该文件）。 |
+| **9** | **`build`**：二次分发 XML **落盘或安装树校验失败**（缺预期二进制等）。 |
 | 其它 | **`run`** 等通过 **`std::system`** 转发子进程时，可能返回子进程退出码（Windows 上大于 255 时可能被压缩为 **1**，见 `test.cpp` 实现）。 |
 
 更细的「物理规格」摘要见 **`ai-software-engineering/02-physical/gz-cli/spec.md`**。
@@ -122,7 +124,7 @@ gz configure [--build-dir-name <叶子>] [--scan <目录>]... [--opt KEY=VALUE].
 | 参数 | 必填 | 说明 |
 |------|------|------|
 | **`--build-dir-name <叶子>`** | 否 | 生成与写入的构建叶子；省略为 **`default`**。非法叶子 → **退出码 2**。 |
-| **`--scan <目录>`** | 否 | 可 **重复**；每个目录加入扫描根列表，与 **cwd** 一起递归查找 `package.xml` / `target.xml`（**跳过**名为 **`.intermediate`** 的子树）。未传任何 **`--scan`** 时，仅按 **cwd** 扫描。 |
+| **`--scan <目录>`** | 否 | 可 **重复**；每个目录加入扫描根列表，与 **cwd** 一起递归查找 `package.xml` / `target.xml`。递归时**不进入**名为 **`.intermediate`** 的子目录；且落在 **`<cwd>/.intermediate/`** 下的 **`--scan`** 根会被**丢弃**并告警。未传任何 **`--scan`** 时，仅按 **cwd** 扫描。 |
 | **`--opt KEY=VALUE`** | 否 | 可重复；亦可 **`--opt=KEY=VALUE`**。用于覆盖 **`GZ_*`** 及项目自定义键（合并规则见 **`internal-variables.md`** / **`gz spec`**）。 |
 
 **路径**：扫描到的 XML 路径必须 **ASCII**（否则 configure 失败）。
@@ -147,15 +149,16 @@ gz configure
 
 ## 6. 子命令：`build`
 
-**用途**：读取 **`.intermediate/build/<叶子>/gz_cache.txt`**，对对应已生成工程执行编译并 **install** 到 **`.intermediate/install/<arch>/`**。
+**用途**：读取 **`.intermediate/build/<叶子>/gz_cache.txt`**，对对应已生成工程执行编译并 **install** 到 **`.intermediate/install/<arch>/`**。默认在 install 成功后生成 **二次分发用** **`gz-redist/package.xml`** 与各 **`gz-redist/<目标>/target.xml`**（见 **[`package-target-xml-spec.md`](package-target-xml-spec.md) §8**）；可用 **`--no-emit-redistribution-xml`** 或环境 **`GZ_EMIT_REDIST_XML`** 为假值关闭。
 
 ```text
-gz build --build-dir-name <叶子>
+gz build --build-dir-name <叶子> [--no-emit-redistribution-xml]
 ```
 
 | 参数 | 必填 | 说明 |
 |------|------|------|
 | **`--build-dir-name <叶子>`** | **是** | 缺少时 stderr 提示 **`missing required`**，**退出码 2**。 |
+| **`--no-emit-redistribution-xml`** | 否 | 关闭默认行为：不在安装根下写 **`gz-redist/`**。环境 **`GZ_EMIT_REDIST_XML=0` / `false` / `off` / `no`** 亦关闭。manifest 缺失且仍尝试 emit 时 → **退出码 8**；落盘校验失败 → **退出码 9**。manifest 存在但 **`targets` 为空** → 打印跳过后 **成功 0**。 |
 
 **范例**
 
@@ -219,7 +222,7 @@ gz test --install-dir-name $ARCH hello_foo_test
 
 **用途**：将一个或多个 **安装树**（**已编译产物**所在目录）打成包（实现上先尝试 **CPack**，失败则回退 **archive**；细节见 `pack.cpp` / `backend_dispatch.cpp`）。输出在 **`.intermediate/pack/<名>/`**。
 
-**说明**：**当前不会**随包**自动生成**新的 **`package.xml` / `target.xml`**，也**不会**把源码型目标改成 **`prebuilt_*` + `<prebuilt>`**；若需把 install 树交给下游用 **`gz configure`** 消费，须**手写**或通过**外部发布脚本**生成描述。产品层面对「打包即附带二进制向 XML」的约定见 **[`package-target-xml-spec.md`](package-target-xml-spec.md) §8**。
+**说明**：**`pack` 本身不生成** **`package.xml` / `target.xml`**。若已通过 **`gz build`**（默认）在安装树下生成 **`gz-redist/`**，**`pack`** 会将其**一并归档**。其它手写或外部脚本生成的描述仍以 **[`package-target-xml-spec.md`](package-target-xml-spec.md) §8** 为准。
 
 ```text
 gz pack --install-dir-name <名> [--install-dir-name <名>]...
@@ -254,7 +257,7 @@ gz list [--format tree|json|xml] [--xml <路径>] [--json <路径>] [--quiet] [-
 | **`--xml <路径>`** | 否 | 将 DOM 写出为 **XML 文件**（根元素 **`<gz_dom>`**）。相对路径相对 **cwd**。成功且非 quiet 时打印一行导出提示。 |
 | **`--json <路径>`** | 否 | 将 DOM 写出为 **JSON 文件**。规则同上。 |
 | **`--quiet`** | 否 | 抑制 **树形文本**与 **导出成功提示行**；**不**抑制 **`--format json|xml`** 时 stdout 上的 JSON/XML 载荷。 |
-| **`--scan <目录>`** | 否 | 可重复；指定额外扫描根。若显式传了 **`--scan`** 且列表中 **未**包含与 **cwd** 等价的根，实现会 **自动把 cwd 追加进扫描根列表**（仍会去重）。 |
+| **`--scan <目录>`** | 否 | 可重复；指定额外扫描根。若显式传了 **`--scan`** 且列表中 **未**包含与 **cwd** 等价的根，实现会 **自动把 cwd 追加进扫描根列表**（仍会去重）。递归规则与 **`configure`** 一致：**不进入** **`.intermediate`**；**`<cwd>/.intermediate/`** 下的 **`--scan`** 根会被丢弃并告警。 |
 
 **警告（不失败）**：
 

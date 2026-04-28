@@ -24,7 +24,7 @@ gz [--verbose|-v] print-build-dir-name [--build-dir-name <leaf>] [--opt KEY=VALU
 gz spec
 gz list [--format tree|json|xml] [--xml <path>] [--json <path>] [--quiet] [--scan <dir>]...
 gz configure [--build-dir-name <leaf>] [--scan <dir>]... [--opt KEY=VALUE]...
-gz build --build-dir-name <leaf>
+gz build --build-dir-name <leaf> [--no-emit-redistribution-xml]
 gz run --install-dir-name <name> <executable-target-name>
 gz test --install-dir-name <name> [test-exe-stem]
 gz pack --install-dir-name <name> [--install-dir-name <name>]...
@@ -76,6 +76,8 @@ Otherwise the subcommand returns **exit code 2** with an **`invalid ...`** style
 | **3** | Some heavy steps failed (e.g. **`list`** non-DOM write failures—see each command). |
 | **4** | **`list`**: failed to export XML/JSON to a file or write DOM to stdout. |
 | **6** | **`list`**: `package.xml` / `target.xml` path contains **non-ASCII**. |
+| **8** | **`build`**: **`gz_redist_manifest.json`** exists but **cannot be parsed** (corrupt JSON, etc.). If the file is **missing**, redistribution is **skipped** with **exit 0** (configure may omit the file when the primary package has no library-like targets). |
+| **9** | **`build`**: redistribution XML **emit failed** (missing expected binaries under the install tree, etc.). |
 | Other | **`run`** etc. may return **child process exit** via `std::system` (on Windows, codes >255 may collapse to **1**—see `test.cpp`). |
 
 Finer “physical spec” summary: **`ai-software-engineering/02-physical/gz-cli/spec.md`**.
@@ -118,7 +120,7 @@ gz configure [--build-dir-name <leaf>] [--scan <dir>]... [--opt KEY=VALUE]...
 | Flag | Required | Meaning |
 |------|------------|---------|
 | **`--build-dir-name <leaf>`** | No | Build leaf for output; default **`default`**. Invalid ⇒ **exit 2**. |
-| **`--scan <dir>`** | No | Repeatable; each dir is a scan root (with **cwd**, recursively find XML; **skips** subtrees named **`.intermediate`**). If no **`--scan`**, only **cwd** is scanned. |
+| **`--scan <dir>`** | No | Repeatable; each dir is a scan root (with **cwd**, recursively find XML). Recursion **never descends** into **`.intermediate`**. Any **`--scan`** root that resolves **under `<cwd>/.intermediate/`** is **dropped** with a warning. If no **`--scan`**, only **cwd** is scanned. |
 | **`--opt KEY=VALUE`** | No | Repeatable; also **`--opt=KEY=VALUE`**. Overrides **`GZ_*`** and project keys (see **`internal-variables.md`** / **`gz spec`**). |
 
 **Paths**: scanned XML paths must be **ASCII-only** (otherwise configure fails).
@@ -138,15 +140,16 @@ gz configure
 
 ## 6. Subcommand: `build`
 
-**Purpose**: read **`.intermediate/build/<leaf>/gz_cache.txt`**, build the generated project, **install** to **`.intermediate/install/<arch>/`**.
+**Purpose**: read **`.intermediate/build/<leaf>/gz_cache.txt`**, build the generated project, **install** to **`.intermediate/install/<arch>/`**. By default, after a successful install, emit **redistribution** **`gz-redist/package.xml`** and per-target **`gz-redist/<name>/target.xml`** (see **[`package-target-xml-spec.md`](package-target-xml-spec.md) §8**). Disable with **`--no-emit-redistribution-xml`** or **`GZ_EMIT_REDIST_XML`** set to a falsy value.
 
 ```text
-gz build --build-dir-name <leaf>
+gz build --build-dir-name <leaf> [--no-emit-redistribution-xml]
 ```
 
 | Flag | Required | Meaning |
 |------|------------|---------|
 | **`--build-dir-name <leaf>`** | **Yes** | Missing ⇒ stderr **`missing required`**, **exit 2**. |
+| **`--no-emit-redistribution-xml`** | No | Skip writing **`gz-redist/`** under the install root. **`GZ_EMIT_REDIST_XML=0` / `false` / `off` / `no`** also disables. Missing manifest while emit is enabled ⇒ **exit 8**; emit/validation failure ⇒ **exit 9**; manifest with **empty `targets`** ⇒ prints a skip message and **exit 0**. |
 
 **Example**
 
@@ -206,7 +209,7 @@ gz test --install-dir-name $ARCH hello_foo_test
 
 **Purpose**: archive one or more **install trees** (already-built outputs). Implementation tries **CPack** first, falls back to **archive** (`pack.cpp` / `backend_dispatch.cpp`). Output under **`.intermediate/pack/<name>/`**.
 
-**Note**: **`pack` does not** auto-generate new **`package.xml` / `target.xml`**, nor rewrite source targets to **`prebuilt_*` + `<prebuilt>`**; for downstream **`gz configure`** on a binary tree you must **hand-write** or use an **external release script**. Product notes: **[`package-target-xml-spec.md`](package-target-xml-spec.md) §8**.
+**Note**: **`pack` itself does not generate** **`package.xml` / `target.xml`**. If **`gz-redist/`** was produced by a normal **`gz build`** (emit is on by default), **`pack`** **includes it** in the archive. Other hand-written or scripted layouts still follow **[`package-target-xml-spec.md`](package-target-xml-spec.md) §8**.
 
 ```text
 gz pack --install-dir-name <name> [--install-dir-name <name>]...
@@ -241,7 +244,7 @@ gz list [--format tree|json|xml] [--xml <path>] [--json <path>] [--quiet] [--sca
 | **`--xml <path>`** | No | Write DOM to an **XML file** (root **`<gz_dom>`**). Relative to **cwd**. On success and without quiet, prints one export hint line. |
 | **`--json <path>`** | No | Write DOM to **JSON**. Same rules. |
 | **`--quiet`** | No | Suppresses **tree text** and **export hint lines**; **does not** suppress stdout JSON/XML when **`--format json|xml`**. |
-| **`--scan <dir>`** | No | Repeatable; extra scan roots. If **`--scan`** is passed and the list does **not** include a root equivalent to **cwd**, the implementation **appends cwd** to the scan set (deduped). |
+| **`--scan <dir>`** | No | Repeatable; extra scan roots. If **`--scan`** is passed and the list does **not** include a root equivalent to **cwd**, the implementation **appends cwd** to the scan set (deduped). Same recursion rules as **`configure`**: skip **`.intermediate`**, drop roots under **`<cwd>/.intermediate/`** with a warning. |
 
 **Warnings (non-fatal)**:
 

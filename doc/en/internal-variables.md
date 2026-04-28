@@ -67,6 +67,7 @@ These keys are read when composing **`arch`**, **build parallelism**, **CMake be
 | `GZ_CMAKE_GENERATOR` | — | CMake `-G` (may affect toolchain tag inference) |
 | `GZ_CMAKE_PREFIX_PATH` | — | `CMAKE_PREFIX_PATH`-style prefix list (configure/cache paths) |
 | `GZ_BUILD_PARALLEL` | `GZ_BUILD_JOBS` | Parallel compile jobs (aliases; default often filled from CPU count at configure) |
+| `GZ_EMIT_REDIST_XML` | — | **Environment variable** (not a dedicated `gz_cache.txt` key): **unset or truthy** keeps the **`gz build` default** (emit **`gz-redist/`** after install). Set to **`0` / `false` / `off` / `no`** (case-insensitive) to **disable**. You can also pass **`gz build --no-emit-redistribution-xml`**. See **[`package-target-xml-spec.md`](package-target-xml-spec.md) §8**. |
 
 You may also store any **`GZ_*`** and any **C identifier** custom keys (for XML `<vars>` overrides, template placeholders, etc.); reserved keys that must not be used are enforced by validation (see **`gz spec`**).
 

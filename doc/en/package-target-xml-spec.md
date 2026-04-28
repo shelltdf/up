@@ -30,7 +30,7 @@ This document describes **gz (GroundZero)**’s current **parsing rules** for th
 | **`target.xml`** | **One subdirectory per build target**, **exactly one** `target.xml` per dir | Declares target name, type, sources, optional header layout, **target-level** dependencies (other targets, usually libraries). |
 
 - **Attachment**: each `target.xml` must sit under some `package.xml` directory tree; `configure` assigns the target to the **nearest** package root (`nearest_package_parent` in `configure.cpp`).
-- **Scan**: `gz configure` **recursively** finds all `package.xml` and `target.xml` under scan roots (default **cwd**, or **`--scan`** directories).
+- **Scan**: **`gz configure`** / **`gz list`** **recursively** find all `package.xml` and `target.xml` under scan roots (default **cwd**, or **`--scan`** directories). Recursion **never descends** into a directory named **`.intermediate`**. In addition, any **`--scan`** root that resolves **under `<cwd>/.intermediate/`** is **dropped** with a warning so generated trees (e.g. **`gz-redist/`**) are not mistaken for source packages.
 
 ### 1.1 Repeated balanced blocks (merge order)
 
@@ -290,8 +290,10 @@ If XSD/JSON Schema is added later, document version and changelog at the top of 
 
 ---
 
-## 8. `gz pack`, install trees, and “redistribution XML” (product vs current code)
+## 8. Install trees, **`gz pack`**, and optional “redistribution XML” (`gz build`)
 
-- **Current implementation**: **`gz pack`** archives the **install root** pointed to by **`--install-dir-name`** (**.intermediate/install/<arch>/`**, with **`bin/`**, **`lib/`**, **`include/`**, etc.—**already built/installed** artifacts). It tries **CPack** when available, else **archive** (PowerShell **`Compress-Archive`**, **`tar`**, etc.). It **does not** auto-generate new **`package.xml` / `target.xml`** inside the package, nor rewrite **`executable` / `library` / …** into **`prebuilt_*` + `<prebuilt>`**. Code: **`pack.cpp`**, **`run_pack_backend`** in **`backend_dispatch.cpp`**.
+- **`gz pack` (archive only)**: archives the **install root** from **`--install-dir-name`** (**.intermediate/install/<arch>/`**, including **`bin/`**, **`lib/`**, **`include/`**, …) via **CPack** when available, else **archive** backends. It **does not** generate or rewrite **`package.xml` / `target.xml`**. If **`gz-redist/`** already exists under that install tree (see below), it is **included** in the archive. Code: **`pack.cpp`**, **`run_pack_backend`** in **`backend_dispatch.cpp`**.
 
-- **Product direction (secondary distribution)**: when shipping an **install tree** for consumers that still use **`gz configure`**, the ideal companion is a **binary-oriented** **`package.xml` / `target.xml`** where libraries are **`prebuilt_*`** with **`<prebuilt>`** paths to **`.exe` / `.lib` / `.dll` / `.so`**, and **`<sources>`** no longer lists compile sources. This paragraph is **vision**; when implemented, update the “current implementation” paragraph and **`pack`** / release tooling together.
+- **`gz build` (redistribution XML on by default)**: after a successful **build + install**, **`gz`** reads **`.intermediate/build/<leaf>/gz_redist_manifest.json`** (written by **`gz configure`** when applicable). When the manifest exists and lists **`targets`**, it writes **`<install>/gz-redist/package.xml`** and **`<install>/gz-redist/<emit-name>/target.xml`**: library-like targets are emitted for downstream **`gz configure --scan`** (mostly **`prebuilt_*` + `<prebuilt>`** with paths **relative to each `target.xml` directory**; **`imported_installed_*`** keep **`<install …/>`** with paths **relative to the install prefix / `CMAKE_INSTALL_PREFIX`**). **`executable`** and **`asset_bundle`** targets are **not** included in the manifest (MVP). Disable with **`--no-emit-redistribution-xml`** or **`GZ_EMIT_REDIST_XML=0` / `false` / `off` / `no`**. Code: **`build.cpp`**, **`redist_emit.cpp`**; manifest authoring: **`configure.cpp`** (`try_write_gz_redist_manifest_json`).
+
+- **Consumption hint**: ship **`gz-redist/`** next to **`bin/`**, **`lib/`**, **`include/`** under one install prefix; when **`gz-redist`** is used as the **package root** for scanning, its parent directory should match the **install prefix** implied by **`<install>`** / **`<prebuilt>`** paths above.
