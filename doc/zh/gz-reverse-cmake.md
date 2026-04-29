@@ -22,7 +22,7 @@
 
 | **不 configure** | 只读磁盘上的 Listfile 文本，无需生成构建树、不解析 `codemodel-v2` JSON。 |
 
-| **写出位置** | 只读扫描 `--source` 下 Listfile；XML 写在 **`<--out>/<包名>/`**，**`--out` 默认与 `--source` 相同（均可为当前目录）** 时，生成物会出现在**源树内**子目录中；要收到树外请**显式**指定 `--out`。 |
+| **写出位置** | 只读扫描 `--source` 下 Listfile；XML 写在 **`<--out>/<包名>/`**。**未写 `--out` 时** 默认定在 **`<--source>/gz_reverse/`**（与 `CMakeLists.txt` 同根）；要其它根再**显式** `--out`。 |
 
 | **可解释子集** | 将每文件整理为 `identifier(实参…)` 命令序列，在部分命令上**仿真** `project` / `set` / `include_directories` / `add_subdirectory` / `add_executable` / `add_library` / `target_*` 等。 |
 
@@ -80,25 +80,25 @@
 gz_reverse_cmake [ --source <path> ] [ --out <path> ] […]
 ```
 
-在含顶层 `CMakeLists.txt` 的目录下，**`--source` 与 `--out` 可全省略**，二者均取**当前工作目录**。
+在含顶层 `CMakeLists.txt` 的目录下可**无参**执行：**`--source` 默认 = 当前工作目录**；**`--out` 默认 = `<--source>/gz_reverse/`**。
 
 | 项 | 说明 |
 |----|------|
-| **`--source`** | 源根，**只读**扫描；**省略 = 当前工作目录**。 |
-| **`--out`** | 输出根；**省略 = 当前工作目录**；实际在 **`<out>/<包名>/`** 写出 XML。 |
-| **与源树重叠** | 显式把 `--out` 指到与 `--source` 同路径或子路径时**可能警告**；**两路径都未在命令行写出**（双默认）时不因重叠反复告警。 |
+| **`--source`** | 源根，**只读**；**省略 = 当前工作目录**。 |
+| **`--out`** | 输出根；**省略 = `<--source>/gz_reverse/`**；实际在 **`<out>/<包名>/`** 写 XML。 |
+| **与源树重叠** | 将 `--out` **显式** 指到与 `--source` **完全相同** 的路径时**可能警告**；**默认**的 `…/gz_reverse` 不警告。 |
 | 其它 | **`--package-name` / `--package-version`**、**`--help`**。 |
 
 **Windows 建议**：`cmd` 对 UTF-8 的显示可能乱码，工具在 Windows 上会为控制台设 UTF-8；**关键错误**会同时给英文一行，保证可读。
 
-**最简**（在 zlib 根内）：
+**最简**（在 zlib 根内，默认可写出到 `…\zlib-1.2.13\gz_reverse\<包名>\`）：
 
 ```text
 cd E:\dev\egg_next\3rdparty\zlib-1.2.13
 gz_reverse_cmake
 ```
 
-**把整包反解结果放到源码树外**时，**显式**例如：
+**指定工作区下其它输出根**时，**显式**例如：
 
 ```text
 gz_reverse_cmake --source E:\dev\egg_next\3rdparty\zlib-1.2.13 --out E:\dev\egg_next\gz_reverse

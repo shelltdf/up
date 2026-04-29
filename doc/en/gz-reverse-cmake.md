@@ -26,7 +26,7 @@
 
 | **Not File API** | No JSON parsing, no `.cmake/api` reads. |
 
-| **Where output goes** | Listfiles are read only under `--source`. XML is written to **`<--out>/<package>/`**. Omitted `--source` and `--out` both default to the **current working directory**; to keep outputs **outside** the source tree, pass an explicit `--out` to another root. |
+| **Where output goes** | Listfiles are read only under `--source`. XML is written to **`<--out>/<package>/`**. If `--out` is omitted, it defaults to **`<--source>/gz_reverse/`**; pass an explicit `--out` for any other root. |
 
 
 
@@ -76,7 +76,7 @@ See **`ai-software-engineering/02-physical/gz-reverse-cmake/spec.md`** and **`..
 
 ## 4. Usage and output layout
 
-With no path flags, you can run the tool in the top `CMakeLists.txt` directory: **both** `--source` and `--out` default to the **current working directory**.
+With no path flags, run in the top `CMakeLists.txt` directory: **`--source`** defaults to the **current working directory**; **`--out`** defaults to **`<--source>/gz_reverse/`**.
 
 ```text
 gz_reverse_cmake [ --source <path> ] [ --out <output root> ] …
@@ -85,20 +85,20 @@ gz_reverse_cmake [ --source <path> ] [ --out <output root> ] …
 | Item | Description |
 |------|-------------|
 | **`--source`** | Source root; read-only. **Omitted = current working directory**. |
-| **`--out`** | Output root. **Omitted = current working directory**; files go under **`<out>/<package>/`**. |
-| **Overlap** | A **warning** may be printed if `--out` is the same as `--source` or a subpath, **when at least one of the two was set explicitly** on the command line; the **all-defaults** case (neither flag) does not raise that warning. |
+| **`--out`** | Output root. **Omitted = `<--source>/gz_reverse/`**; files go under **`<out>/<package>/`**. |
+| **Overlap** | A **warning** may be printed if an **explicit** `--out` is **exactly the same** as `--source` (see tool text). The default colocated `gz_reverse` folder does not trigger it. |
 | **Other** | **`--package-name` / `--package-version`**; **`--help`**. |
 
 **Windows**: the tool sets the console to UTF-8; critical errors are duplicated in **English** for legacy `cmd` code pages.
 
-**Shortest** (from inside the zlib root):
+**Shortest** (from inside the zlib root; default output under `…/zlib-1.2.13/gz_reverse/<package>/`):
 
 ```text
 cd E:\dev\egg_next\3rdparty\zlib-1.2.13
 gz_reverse_cmake
 ```
 
-**Output outside the source tree** (explicit output root):
+**Custom workspace output root**:
 
 ```text
 gz_reverse_cmake --source E:\dev\egg_next\3rdparty\zlib-1.2.13 --out E:\dev\egg_next\gz_reverse

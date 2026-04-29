@@ -37,7 +37,7 @@ struct Options {
   bool help = false;
   // --source 未在命令行出现时使用当前工作目录
   bool source_from_default = false;
-  // --out 未在命令行出现时使用当前工作目录 (生成 <输出根>/<包名>/  )
+  // --out 未在命令行出现: 使用 <source>/gz_reverse/ (与 Listfile 同根、便于按库管理)
   bool out_from_default = false;
 };
 
@@ -47,12 +47,12 @@ static void print_usage() {
       << "\n"
       << "用法:\n"
       << "  gz_reverse_cmake [ --source <path> ] [ --out <path> ] [选项]\n"
-      << "  在含顶层 CMakeLists.txt 的目录下可不带路径: 未写 --source / --out 时二者均为当前工作目录。\n"
+      << "  典型: cd 到含顶层 CMakeLists.txt 的目录后无参执行; --source=当前工作目录, --out=<--source>/gz_reverse/ 。\n"
       << "\n"
       << "参数:\n"
       << "  --source <path>   含顶层 CMakeLists.txt 的源目录; 省略 = 当前工作目录。\n"
-      << "  --out <path>      输出根, 下建 <包名>/… ; 省略 = 当前工作目录 (先 cd 到要扫描的根再跑)。\n"
-      << "                    将 XML 写在源码树外时: 显式传 --out 到空目录(如 ../gz_reverse 或 其它盘符路径)。\n"
+      << "  --out <path>      输出根, 下建 <包名>/… ; 省略 = <--source>/gz_reverse/ (与源码根同树, 子目录名固定为 gz_reverse)。\n"
+      << "                    要写到其它位置请显式传 --out 。\n"
       << "\n"
       << "其它:\n"
       << "  --package-name    包名 (默认: project() 第一个参数, 否则 reversed_project)\n"
@@ -103,29 +103,17 @@ static void xml_escape(std::string &s) {
 
 static std::string path_to_posix(const fs::path &p) { return p.generic_string(); }
 
-/// root 为规范路径时, 若 c 为 root 本身或子路径, 为真 (同盘符下; 不跨设备则 weakly_canonical 可靠)
-static bool is_same_path_or_subpath(const fs::path &root, const fs::path &c) {
-  std::error_code ec;
-  fs::path a = fs::weakly_canonical(root, ec);
-  if (ec) return false;
-  fs::path b = fs::weakly_canonical(c, ec);
-  if (ec) return false;
-  if (a == b) return true;
-  auto a_it = a.begin(), b_it = b.begin();
-  for (; a_it != a.end() && b_it != b.end(); ++a_it, ++b_it) {
-    if (*a_it != *b_it) return false;
-  }
-  return a_it == a.end();
-}
-
-static void warn_out_overlaps_source(const fs::path &source, const fs::path &out_root, bool both_path_args_default) {
-  if (both_path_args_default)
-    return;
-  if (is_same_path_or_subpath(source, out_root)) {
-    std::cerr << "warning: --out matches --source (or is inside it). package.xml will land under the scan tree as <out>/<package>/. "
-                 "Use a separate --out to keep outputs outside the source tree (e.g. a sibling directory).\n"
-                 "警告: 输出根与源目录相同或在源目录内, 生成物将出现在源码树下; 可改用独立的 --out 根目录\n";
-  }
+/// 将 --out 与 --source 设成**同一路径**时提醒 (package 会直接占在根下); 默认可在 <source>/gz_reverse/ 不告警
+static void warn_out_equals_source(const fs::path &source, const fs::path &out_root) {
+  std::error_code ec1, ec2;
+  const fs::path a = fs::weakly_canonical(source, ec1);
+  const fs::path b = fs::weakly_canonical(out_root, ec2);
+  if (ec1 || ec2) return;
+  if (a != b) return;
+  std::cerr
+      << "warning: --out is the same as --source. Package folders will be created as <out>/<name>/ next to top CMakeLists.txt. "
+         "Omit --out to use the default: <source>/gz_reverse/ .\n"
+         "警告: 输出根与源目录相同, 生成物会混在源根; 可省略 --out 以用默认的 <source>/gz_reverse/ 作输出根\n";
 }
 
 static std::string source_path_for_target_xml(const fs::path &tdir, const fs::path &abs_path, const fs::path & /*top*/) {
@@ -174,8 +162,13 @@ static int parse_args(int argc, char **argv, Options *o) {
   o->source_from_default = !have_source;
   o->out_from_default = !have_out;
   if (!have_source) o->source_dir = fs::current_path();
-  if (!have_out) o->out_dir = fs::current_path();
-  o->source_dir = fs::weakly_canonical(fs::absolute(o->source_dir));
+  {
+    std::error_code ec;
+    const fs::path abs_src = fs::absolute(o->source_dir);
+    const fs::path can_src = fs::weakly_canonical(abs_src, ec);
+    o->source_dir = ec ? abs_src : can_src;
+  }
+  if (!have_out) o->out_dir = o->source_dir / "gz_reverse";
   o->out_dir = fs::absolute(o->out_dir);
   {
     std::error_code ec;
@@ -202,13 +195,13 @@ int main(int argc, char **argv) {
     print_usage();
     return 0;
   }
-  if (opt.source_from_default && opt.out_from_default) {
-    std::cerr << "注: 未指定 --source / --out, 源目录与输出根均用当前工作目录: " << path_to_posix(opt.out_dir) << "\n";
-  } else {
-    if (opt.source_from_default) std::cerr << "注: 未指定 --source, 使用: " << path_to_posix(opt.source_dir) << "\n";
-    if (opt.out_from_default) std::cerr << "注: 未指定 --out, 使用: " << path_to_posix(opt.out_dir) << "\n";
-  }
-  warn_out_overlaps_source(opt.source_dir, opt.out_dir, opt.source_from_default && opt.out_from_default);
+  // 始终打印最终解析结果, 避免只写「未指定 --out」时用户误以为未识别 --source
+  std::cerr << "注: 扫描源目录 (--source) = " << path_to_posix(opt.source_dir);
+  if (opt.source_from_default) std::cerr << "  (未在命令行写 --source, 为当前工作目录)";
+  std::cerr << "\n   输出根目录 (--out)  = " << path_to_posix(opt.out_dir);
+  if (opt.out_from_default) std::cerr << "  (未在命令行写 --out, 默认: <source>/gz_reverse/)";
+  std::cerr << "\n";
+  warn_out_equals_source(opt.source_dir, opt.out_dir);
 
   try {
     fs::path top = opt.source_dir / "CMakeLists.txt";
