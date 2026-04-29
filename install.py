@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """Install runtime/dev components via CMake install COMPONENT (cmake --install).
 
-默认仅安装 COMPONENT gz_runtime 下的两个可执行文件；可选 --with-dev
-额外安装 gz_dev（当前包含 gz.lib）。不会安装、不会触碰 test_projects/
+默认仅安装 COMPONENT gz_runtime 下的三个可执行文件（gz、gz-gui、gz_reverse_cmake）；可选
+--with-dev 额外安装 gz_dev（当前包含 gz.lib）。不会安装、不会触碰 test_projects/
 目录（测试包由 gz 命令在各自 cwd / .intermediate 下处理）。
 """
 
@@ -41,7 +41,7 @@ def main() -> int:
     root = Path(__file__).resolve().parent
     ap = argparse.ArgumentParser(
         description=f"cmake --install for COMPONENT {GZ_RUNTIME_COMPONENT!r} (optional {GZ_DEV_COMPONENT!r})",
-        epilog="说明：默认只安装 gz / gz-gui；加 --with-dev 时额外安装 gz.lib；与 test_projects 中的示例包无关。",
+        epilog="说明：默认安装 gz、gz-gui、gz_reverse_cmake；加 --with-dev 时额外安装 gz.lib；与 test_projects 中的示例包无关。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument("--build-dir", type=Path, default=root / "_build", help="Same CMake build dir as build.py")

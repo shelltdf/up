@@ -9,9 +9,22 @@ cmake --build _build --config Release
 
 `-B` 也可选用 **`_build_gz`** 等任意根目录名；仓库 **`.gitignore`** 已忽略 **`/_build*/`** 与 **`_build/`**，避免将 CMake 生成树误提交。
 
+### `gz_reverse_cmake`（根工程内子目录）
+
+- **常规**：与 **`gz` / `gz-gui` 同一次根 CMake 配置**（上节命令），`build.py` 会显式构建三者；**`install.py` 默认的 `gz_runtime`** 在 **`bin/`** 中同时安装 **`gz_reverse_cmake`**（与主程序同发，**选项 B**）。
+
+- **单独调试子目录**（仅维护该工具时，可选）：
+
+```powershell
+cmake -S gz_reverse_cmake -B gz_reverse_cmake/build -G Ninja
+cmake --build gz_reverse_cmake/build
+```
+
+实现为**纯 C++** 解析 `CMakeLists.txt` 子集，**不**拉取第三方库。工程说明见 **`ai-software-engineering/02-physical/gz-reverse-cmake/`**。
+
 ## 安装与打包
 
-- `python install.py --prefix dist`：仅安装 **`gz_runtime`** 分量（`gz` + `gz-gui`）。
+- `python install.py --prefix dist`：安装 **`gz_runtime`** 分量，包含 **`bin/`** 下 **`gz`**、**`gz-gui`** 与 **`gz_reverse_cmake`**；加 **`--with-dev`** 时额外装 **`gz_dev`**（`gz.lib` 等）。
 - `python package.py`：依赖 `install.py` 产物打 zip / tar.gz。
 
 ## 仓库脚本边界

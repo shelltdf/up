@@ -37,11 +37,11 @@ python package.py
 python package.py --with-dev
 ```
 
-**`package.py`**：将 **`gz`** 与 **`gz-gui`** 打进 **`dist/`** 下的归档（Windows 默认 **`.zip`**，其它系统默认 **`.tar.gz`**）。脚本会先执行 `install.py`（其内部会先执行 `build.py`）；`-o` 指定输出文件；`--format zip|tgz` 强制格式；`--with-dev` 可把 **`gz.lib`** 一并打包。归档内含 **`bin/`**（可选 `lib/`）与简短 **`README_PACKAGE.txt`**。
+**`package.py`**：将 **`gz_runtime`** 分量中的可执行文件（**`gz`**、**`gz-gui`**、**`gz_reverse_cmake`**）打进 **`dist/`** 下的归档（Windows 默认 **`.zip`**，其它系统默认 **`.tar.gz`**）。脚本会先执行 `install.py`（其内部会先执行 `build.py`）；`-o` 指定输出文件；`--format zip|tgz` 强制格式；`--with-dev` 可把 **`gz.lib`** 一并打包。归档内含 **`bin/`**（可选 `lib/`）与简短 **`README_PACKAGE.txt`**。
 
-`build.py` 在 Windows 上默认使用 **Visual Studio 17 2022**（x64）；可通过环境变量 **`GZ_CMAKE_GENERATOR`** 或参数 **`--generator`** 覆盖。脚本**只编译** CMake 目标 **`gz`** 与 **`gz-gui`**（`gz` 由 `GroundZero/exe/` 入口 + `GroundZero/lib/` 静态库组成，不构建工程中其它可能新增的目标）。
+`build.py` 在 Windows 上默认使用 **Visual Studio 17 2022**（x64）；可通过环境变量 **`GZ_CMAKE_GENERATOR`** 或参数 **`--generator`** 覆盖。脚本**只编译** CMake 目标 **`gz`**、**`gz-gui`** 与 **`gz_reverse_cmake`**（`gz` 由 `GroundZero/exe/` 入口 + `GroundZero/lib/` 静态库组成，不构建 `test_projects/` 等示例包源码）。
 
-`install.py` 默认通过 **`cmake --install --component gz_runtime`** 安装 **`gz`** 与 **`gz-gui`** 到 **`dist/`**（例如 `dist/bin/gz.exe`、`dist/bin/gz-gui.exe`；与 CMake 的 `COMPONENT` 名一致，见 `CMakeLists.txt`）。若加 **`--with-dev`**，会额外安装 **`gz_dev`** 组件（当前为 `dist/lib/gz.lib`）。
+`install.py` 默认通过 **`cmake --install --component gz_runtime`** 安装上述三个可执行文件到 **`dist/bin/`**（与 CMake 的 `COMPONENT` 名一致，见 `CMakeLists.txt`）。若加 **`--with-dev`**，会额外安装 **`gz_dev`** 组件（当前为 `dist/lib/gz.lib`）。
 
 上述两脚本**只作用于仓库根 CMake 工程**（默认 `_build` / `dist`），**不会编译或安装 `test_projects/` 里的内容**；那些示例包仍须用已安装的 **`gz.exe`** 自行执行 `configure` / `build` / `test` 等（见 [test_projects/README.md](test_projects/README.md)）。
 

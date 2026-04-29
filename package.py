@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Pack gz.exe/gz-gui.exe (+ optional gz.lib) into an archive.
+"""Pack gz + gz-gui + gz_reverse_cmake (+ optional gz.lib) into an archive.
 
 默认只打包宿主工具，与 test_projects/ 无关。
 约定：package.py 会先执行 install.py；install.py 会先执行 build.py。
@@ -35,18 +35,20 @@ def _run_install_py(root: Path, build_dir: Path, config: str, prefix: Path, with
     return subprocess.call(cmd, cwd=str(root))
 
 
-def _find_installed_gz_pair(prefix: Path) -> tuple[Path, Path]:
-    """Return (gz, gz-gui) paths under install prefix/bin."""
+def _find_installed_gz_runtime(prefix: Path) -> tuple[Path, Path, Path]:
+    """Return (gz, gz-gui, gz_reverse_cmake) paths under install prefix/bin."""
     bin_dir = prefix / "bin"
     if sys.platform == "win32":
         gz_cli = bin_dir / "gz.exe"
         gui = bin_dir / "gz-gui.exe"
+        rev = bin_dir / "gz_reverse_cmake.exe"
     else:
         gz_cli = bin_dir / "gz"
         gui = bin_dir / "gz-gui"
-    if gz_cli.is_file() and gui.is_file():
-        return gz_cli, gui
-    raise FileNotFoundError(f"找不到已安装文件: {gz_cli} / {gui}")
+        rev = bin_dir / "gz_reverse_cmake"
+    if gz_cli.is_file() and gui.is_file() and rev.is_file():
+        return gz_cli, gui, rev
+    raise FileNotFoundError(f"找不到已安装文件: {gz_cli} / {gui} / {rev}")
 
 
 def _default_archive_path(root: Path, fmt: str, config: str) -> Path:
@@ -63,6 +65,7 @@ def _readme_bytes(with_dev: bool) -> bytes:
         "Contents:\n"
         "  bin/gz (or gz.exe)\n"
         "  bin/gz-gui (or gz-gui.exe)\n"
+        "  bin/gz_reverse_cmake (or gz_reverse_cmake.exe)\n"
         + ("  lib/gz.lib\n" if with_dev else "")
         + "\n"
         "Keep both binaries in the same directory.\n"
@@ -71,23 +74,25 @@ def _readme_bytes(with_dev: bool) -> bytes:
     return text.encode("utf-8")
 
 
-def _write_zip(out: Path, gz_cli: Path, gui: Path, dev_lib: Path | None) -> None:
+def _write_zip(out: Path, gz_cli: Path, gui: Path, rev: Path, dev_lib: Path | None) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     readme = _readme_bytes(dev_lib is not None)
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.write(gz_cli, f"bin/{gz_cli.name}")
         zf.write(gui, f"bin/{gui.name}")
+        zf.write(rev, f"bin/{rev.name}")
         if dev_lib is not None:
             zf.write(dev_lib, f"lib/{dev_lib.name}")
         zf.writestr("README_PACKAGE.txt", readme)
 
 
-def _write_tar_gz(out: Path, gz_cli: Path, gui: Path, dev_lib: Path | None) -> None:
+def _write_tar_gz(out: Path, gz_cli: Path, gui: Path, rev: Path, dev_lib: Path | None) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     readme = _readme_bytes(dev_lib is not None)
     with tarfile.open(out, "w:gz") as tf:
         tf.add(gz_cli, arcname=f"bin/{gz_cli.name}")
         tf.add(gui, arcname=f"bin/{gui.name}")
+        tf.add(rev, arcname=f"bin/{rev.name}")
         if dev_lib is not None:
             tf.add(dev_lib, arcname=f"lib/{dev_lib.name}")
         ti = tarfile.TarInfo(name="README_PACKAGE.txt")
@@ -98,7 +103,7 @@ def _write_tar_gz(out: Path, gz_cli: Path, gui: Path, dev_lib: Path | None) -> N
 def main() -> int:
     root = Path(__file__).resolve().parent
     ap = argparse.ArgumentParser(
-        description="Zip/tar.gz gz + gz-gui for distribution",
+        description="Zip/tar.gz gz + gz-gui + gz_reverse_cmake for distribution",
         epilog="示例: python package.py   或   python package.py -o dist/my.zip",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -139,7 +144,7 @@ def main() -> int:
 
 
     try:
-        gz_cli, gui = _find_installed_gz_pair(prefix)
+        gz_cli, gui, rev = _find_installed_gz_runtime(prefix)
     except FileNotFoundError as e:
         print("error:", e, file=sys.stderr)
         return 2
@@ -155,9 +160,9 @@ def main() -> int:
         out = (root / out).resolve()
 
     if fmt == "zip":
-        _write_zip(out, gz_cli, gui, dev_lib)
+        _write_zip(out, gz_cli, gui, rev, dev_lib)
     else:
-        _write_tar_gz(out, gz_cli, gui, dev_lib)
+        _write_tar_gz(out, gz_cli, gui, rev, dev_lib)
 
     print("wrote", out)
     return 0
