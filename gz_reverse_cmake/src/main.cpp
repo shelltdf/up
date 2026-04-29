@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <system_error>
@@ -57,7 +58,7 @@ static void print_usage() {
       << "参数:\n"
       << "  --source <path>   含顶层 CMakeLists.txt 的源目录; 省略 = 当前工作目录。\n"
       << "  --out <path>      输出根, 下建 <包名>/… ; 省略 = <--source>/gz_reverse/ (与源码根同树, 子目录名固定为 gz_reverse)。\n"
-      << "                    要写到其它位置请显式传 --out 。\n"
+      << "                    要写到其它位置请显式传 --out 。包级/目标级 in=、from= 以**本工具写出的**各 xml 所在目录为起算(同 gz configure)。\n"
       << "\n"
       << "其它:\n"
       << "  --package-name    包名 (默认: project() 第一个参数, 否则 reversed_project)\n"
@@ -250,8 +251,37 @@ static bool is_strict_subpath(const fs::path &root, const fs::path &p) {
   return true;
 }
 
-/// 把 CMake 推断的 **.intermediate/build/&lt;叶&gt;/** 下源路径改写成 GZ 的
-/// **.intermediate/generated/&lt;arch 段&gt;/&lt;包&gt;/( _package 或 &lt;目标名&gt; )/…**（与 `gz configure` 的 `compose_arch_tag` + `arch=` 一致；反解用 `gz_cache.txt` 或 build 叶名 — 见 `infer_gz_generated_arch_segment`）。
+/// 包级 `in=`: 与 `gz configure` 的 `pkg_root / in` 一致, `pkg_root` = **package.xml 的父目录**.
+/// `config_in_base` = 该父目录(本工具默认: `--out` 下本包输出目录, 与生成出的 package.xml 同目录。目标级 `in` 同理相对各 target 目录)
+/// 模板 `in_abs` 须在 `--source` 下; 相对 `config_in_base` 的 `in` 可含 `..`.
+static std::optional<std::string> package_config_in_for_package_xml(const fs::path &source_root, const fs::path &config_in_base,
+                                                                       const fs::path &in_abs) {
+  std::error_code es, ec, er, echk;
+  const fs::path sr = fs::weakly_canonical(source_root, es);
+  const fs::path b = fs::weakly_canonical(config_in_base, ec);
+  const fs::path f = fs::weakly_canonical(in_abs, er);
+  if (es || ec || er) {
+    std::cerr << "警告: 无法规范化路径, 跳过 config_files in: " << path_to_posix(in_abs) << "\n";
+    return std::nullopt;
+  }
+  if (!is_strict_subpath(sr, f)) {
+    std::cerr << "警告: config 模板不在 --source 目录下, 不写入 package.xml(请手改 in): " << path_to_posix(f) << " (源根=" << path_to_posix(sr)
+                << ")\n";
+    return std::nullopt;
+  }
+  // config_in_base 常为本工具输出目录, 勿求其在 --source 下 (如 --out 在其它根).
+  const fs::path rel = fs::relative(f, b, echk);
+  if (echk) {
+    std::cerr << "警告: 无法将模板路径相对 package 目录(请手改 in): f=" << path_to_posix(f) << " 基=" << path_to_posix(b) << "\n";
+    return std::nullopt;
+  }
+  return path_to_posix(rel);
+}
+
+/// `<sources>`: `configure_file` 等仍映射到 `generated/…`；对落在 **GZ 估计的 build 根** 下的路径, 不再
+/// 假写到 `generated/<包>/<目标>/…` (gz 不跑对方 add_custom_command). 反解将写 **与 build 根相对路径同形** 的
+/// `--source` 下路径(如 `lib/foo.c`), 相对 `target.xml` 目录; **不会**再写成穿越到 `.intermediate/build/…`
+/// 的相对路径(该处文件常由上游首次 configure 才生成, 在反解时尚不存在).
 static std::string source_path_for_gz_remap(const fs::path &tdir, const fs::path &sp, const fs::path &source_root, const std::string &gen_arch,
                                             const std::string &pkg_name, const std::string &tname, const TargetModel &tm,
                                             const std::vector<ConfigFilePathPair> &package_cf) {
@@ -271,15 +301,18 @@ static std::string source_path_for_gz_remap(const fs::path &tdir, const fs::path
     return source_path_for_target_xml(tdir, g, source_root);
   }
 
-  const fs::path top_parent = source_root;  // 顶层 Listfile 所在 = --source
+  const fs::path top_parent = source_root;
   const fs::path broot = infer_gz_default_cmake_binary_root(top_parent);
   std::error_code ec2;
   const fs::path brc = fs::weakly_canonical(broot, ec2);
   if (ec2 || !is_strict_subpath(brc, wc)) return source_path_for_target_xml(tdir, sp, source_root);
-  const fs::path rel = fs::relative(wc, brc, ec2);
-  if (ec2) return source_path_for_target_xml(tdir, sp, source_root);
-  const fs::path g = gbase / pkg_name / tname / rel;
-  return source_path_for_target_xml(tdir, g, source_root);
+  {
+    const fs::path rel = fs::relative(wc, brc, ec2);
+    if (ec2) return source_path_for_target_xml(tdir, sp, source_root);
+    const fs::path try_src = (source_root / rel).lexically_normal();
+    // 相对 tdir 一律按「源树根 + rel」写(若缺文件, 需维护者自备或先跑上游 cmake 把生成物抄回 rel)
+    return source_path_for_target_xml(tdir, try_src, source_root);
+  }
 }
 
 static bool string_has_cmake_deref(const std::string &s) { return s.find("${") != std::string::npos; }
@@ -454,6 +487,10 @@ int main(int argc, char **argv) {
 
     fs::path pkg_root = opt.out_dir / pkg_name;
     fs::create_directories(pkg_root);
+    std::error_code ec_pbase;
+    fs::path package_config_in_base = fs::weakly_canonical(pkg_root, ec_pbase);
+    if (ec_pbase) package_config_in_base = pkg_root;
+    std::cerr << "   包级 in= 相对 (gz: package.xml 父目录) = " << path_to_posix(package_config_in_base) << "  (= <out>/<包名>)\n";
     {
       std::ofstream f(pkg_root / "package.xml", std::ios::binary);
       f << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<package name=\"" << pkg_name << "\" version=\"" << opt.package_version
@@ -461,7 +498,10 @@ int main(int argc, char **argv) {
       if (!ir.package_config_files.empty()) {
         std::vector<std::pair<std::string, std::string>> pkg_cf_rows;
         for (const auto &cf : ir.package_config_files) {
-          std::string rel_in = source_path_for_target_xml(pkg_root, cf.in_abs, opt.source_dir);
+          const std::optional<std::string> rel_opt =
+              package_config_in_for_package_xml(opt.source_dir, package_config_in_base, cf.in_abs);
+          if (!rel_opt.has_value()) continue;
+          std::string rel_in = *rel_opt;
           if (string_has_cmake_deref(rel_in)) {
             std::cerr << "注: 跳过含未展开 ${...} 的 package config_files in (请手补): " << rel_in << "\n";
             continue;

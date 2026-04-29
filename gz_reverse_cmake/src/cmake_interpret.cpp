@@ -107,7 +107,7 @@ static int block_step(const std::string &n) {
 }
 
 /// 目标/可执行**源列表**中跳过对象文件与明显链接产物：真实 CMake 常将 **add_custom_command** 生成的 `.obj`（如
-/// Windows `rc` → `zlib1rc.obj`）与库列在一起，而 **GroundZero 扁平 add_library 无法**表达该先后关系，且
+/// Windows `rc` → `*.obj`）与库列在一起，而 **GroundZero 扁平 add_library 无法**表达该先后关系，且
 /// 首次 **cmake** 时该路径尚不存在 → 不可写入 `target.xml` 的 `<sources>`.
 static bool skip_as_flat_source_path(const fs::path &p) {
   std::string e = p.extension().string();
@@ -535,6 +535,23 @@ static bool parse_configure_file_command(const CmakeCommand &c, const std::unord
   if (in_str.empty() || out_str.empty()) return false;
   fs::path pin(in_str);
   if (pin.is_relative()) pin = this_dir / pin;
+  {
+    // 子目录写 `configure_file(模板, …)` 时相对 this_dir, 而模板在**更上层** (如 根 的 `cmake-config.h.in`
+    // 被误写成 `examples/…`, `cmake/…`)。`pin` 非文件时沿父级链: 多段相对路径时按**最后一档文件名**向上找 (与
+    // 单 `xxx.in` 的整串查找 共用思路)。
+    std::error_code ec_reg;
+    if (!fs::is_regular_file(pin, ec_reg)) {
+      const fs::path fname = pin.has_filename() ? pin.filename() : fs::path(in_str);
+      for (fs::path p = this_dir; true; p = p.parent_path()) {
+        fs::path alt = in_str.find_first_of("/\\") == std::string::npos ? p / in_str : p / fname;
+        if (fs::is_regular_file(alt, ec_reg)) {
+          pin = alt;
+          break;
+        }
+        if (p == p.parent_path() || p == p.root_path() || p.empty()) break;
+      }
+    }
+  }
   fs::path pout(out_str);
   if (pout.is_relative()) pout = this_dir / pout;
   std::error_code ec;

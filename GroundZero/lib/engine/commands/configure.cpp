@@ -1801,9 +1801,9 @@ int run_configure(const ConfigureRequest& req) {
                                    return a.first == b.first && a.second == b.second;
                                  }),
                      tm.links.end());
-      // GZ_TARGET_DYNAMIC_LIBRARY=OFF: explicit or implicit deps on shared_library (e.g. "zlib")
-      // must link the static pair target "zlibstatic" if present, else MSVC LNK1181
-      // (Release\zlib.lib from exe project vs import lib output path) and static intent mismatch.
+      // GZ_TARGET_DYNAMIC_LIBRARY=OFF: explicit or implicit deps on a shared_library target
+      // must use the in-package static_pair target (base name + "static" suffix) when present, else
+      // MSVC LNK1181 and static link intent can mismatch the shared import lib.
       if (link_mode == "static" && !tm.links.empty()) {
         auto is_pkg_target_shared = [&pkg_targets](const std::string& n) {
           for (const auto& pl : pkg_targets)
