@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -41,6 +42,8 @@ struct Options {
   bool source_from_default = false;
   // --out 未在命令行出现: 使用 <source>/gz_reverse/ (与 Listfile 同根、便于按库管理)
   bool out_from_default = false;
+  /// 解析时在与 stderr 同屏刷新一行进度 (含不确定总长度的条与当前 Listfile 路径)
+  bool show_progress = true;
 };
 
 static void print_usage() {
@@ -59,6 +62,7 @@ static void print_usage() {
       << "其它:\n"
       << "  --package-name    包名 (默认: project() 第一个参数, 否则 reversed_project)\n"
       << "  --package-version 版本 (默认 0.1.0)\n"
+      << "  --no-progress     关闭解析时的单行进度 (默认开启: 在 stderr 显示当前 Listfile 与滑块式进度条)\n"
       << "\n"
       << "说明: 不调用 cmake。将 Listfile 解析为命令流(语句级浅层 AST)后做静态子集重解释:\n"
       << "      project, set, include_directories, add_subdirectory, add_executable,\n"
@@ -108,6 +112,79 @@ static void xml_escape(std::string &s) {
 }
 
 static std::string path_to_posix(const fs::path &p) { return p.generic_string(); }
+
+/// 单行 \r 进度条的有效宽度(超过终端列宽会换行, 随后 \r 只回到最后一行, 会堆多行/粘成一长串)
+static int stderr_status_line_width() {
+#if defined(_WIN32)
+  CONSOLE_SCREEN_BUFFER_INFO info{};
+  const HANDLE h = GetStdHandle(STD_ERROR_HANDLE);
+  if (h != nullptr && h != INVALID_HANDLE_VALUE && GetConsoleScreenBufferInfo(h, &info)) {
+    const int w = static_cast<int>(info.srWindow.Right) - static_cast<int>(info.srWindow.Left) + 1;
+    if (w >= 20 && w <= 1024) return w;
+  }
+  return 80;
+#else
+  if (const char *c = std::getenv("COLUMNS")) {
+    const int w = std::atoi(c);
+    if (w >= 20 && w <= 1024) return w;
+  }
+  return 80;
+#endif
+}
+
+/// 在 stderr 同一行刷新: 旋转符 + 条(确定 n/m 时按比例, 否则滑块) + 文件序号 + 路径 + 可选 `| 阶段` + 可选 `cur/total`
+static void print_listfile_status(std::size_t n, const fs::path &listfile, const char *phase, std::size_t cur, std::size_t total) {
+  constexpr int bar_w = 20;
+  std::string bar(static_cast<std::size_t>(bar_w), '-');
+  static const char *const kSpin = "|/-\\";
+  const char c = kSpin[n % 4u];
+  if (total > 0 && cur > 0) {
+    const int filled = static_cast<int>(std::min<std::size_t>(static_cast<std::size_t>(bar_w), (cur * static_cast<std::size_t>(bar_w) + total / 2) / total));
+    for (int i = 0; i < bar_w; ++i) bar[static_cast<std::size_t>(i)] = (i < filled) ? '#' : '-';
+  } else {
+    const int seg = 5;
+    const int pos = static_cast<int>((n - 1) % (bar_w - seg + 1));
+    for (int i = 0; i < bar_w; ++i) {
+      if (i >= pos && i < pos + seg) bar[static_cast<std::size_t>(i)] = '#';
+    }
+  }
+  std::string p = path_to_posix(listfile);
+  const std::size_t kMax = (phase && phase[0]) ? 32u : 44u;
+  if (p.size() > kMax) p = "…" + p.substr(p.size() - (kMax - 3u));
+  std::string ns = std::to_string(n);
+  while (ns.size() < 3u) ns = " " + ns;
+  std::string line;
+  line.reserve(128u);
+  line += c;
+  line += " [";
+  line += bar;
+  line += "] ";
+  line += ns;
+  line += "  ";
+  line += p;
+  if (phase && phase[0]) {
+    line += "  | ";
+    line += phase;
+    if (total > 0) {
+      line += " ";
+      line += std::to_string(cur);
+      line += "/";
+      line += std::to_string(total);
+    }
+  }
+  int kWidth = stderr_status_line_width();
+  if (kWidth < 40) kWidth = 40;
+  if (kWidth > 200) kWidth = 200;
+  if (line.size() > static_cast<std::size_t>(kWidth)) {
+    if (kWidth > 3) {
+      line.resize(static_cast<std::size_t>(kWidth - 3u));
+      line += "…";
+    } else
+      line.resize(static_cast<std::size_t>(kWidth));
+  }
+  if (line.size() < static_cast<std::size_t>(kWidth)) line.append(static_cast<std::size_t>(kWidth) - line.size(), ' ');
+  std::cerr << "\r" << line << std::flush;
+}
 
 /// 将 --out 与 --source 设成**同一路径**时提醒 (package 会直接占在根下); 默认可在 <source>/gz_reverse/ 不告警
 static void warn_out_equals_source(const fs::path &source, const fs::path &out_root) {
@@ -280,6 +357,10 @@ static int parse_args(int argc, char **argv, Options *o) {
       o->package_version = argv[++i];
       continue;
     }
+    if (a == "--no-progress") {
+      o->show_progress = false;
+      continue;
+    }
     std::cerr << "error: unknown argument: " << a << " (use --help)\n";
     return 2;
   }
@@ -344,7 +425,15 @@ int main(int argc, char **argv) {
       fapi_path = fs::path(opt.file_api_json);
       fapi = &fapi_path;
     }
-    InterpretResult ir = interpret_cmake_tree(opt.source_dir, top, fapi);
+    ListfileProgress lprog;
+    if (opt.show_progress) {
+      lprog.on = [](std::size_t n, const fs::path &p) { print_listfile_status(n, p, nullptr, 0, 0); };
+      lprog.on_intra = [](std::size_t n, const fs::path &p, const char *ph, std::size_t c, std::size_t t) {
+        print_listfile_status(n, p, ph, c, t);
+      };
+    }
+    InterpretResult ir = interpret_cmake_tree(opt.source_dir, top, fapi, opt.show_progress ? &lprog : nullptr);
+    if (opt.show_progress) std::cerr << "\n";
     std::string pkg_name = opt.package_name;
     if (pkg_name.empty()) pkg_name = ir.project_name;
     if (pkg_name.empty()) pkg_name = "reversed_project";
@@ -519,6 +608,7 @@ int main(int argc, char **argv) {
     }
     return 0;
   } catch (const std::exception &e) {
+    if (opt.show_progress) std::cerr << "\n";
     std::cerr << "异常: " << e.what() << "\n";
     return 1;
   }

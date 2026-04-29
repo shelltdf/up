@@ -140,8 +140,9 @@ static void inject_gz_cmake_path_vars(const fs::path &this_dir, const fs::path &
 }
 
 static void include_inline_for_listfile(std::vector<CmakeCommand> *cmds, const fs::path &default_listfile, InterpretResult *res,
-                                        std::unordered_set<std::string> *include_seen) {
+                                        std::unordered_set<std::string> *include_seen, ListfileProgress *lp) {
   for (int round = 0; round < 32; ++round) {
+    if (lp) lp->emit_intra(default_listfile, "include内联", static_cast<std::size_t>(round) + 1, 32);
     std::vector<CmakeCommand> out;
     bool changed = false;
     int blk = 0;
@@ -165,7 +166,25 @@ static void include_inline_for_listfile(std::vector<CmakeCommand> *cmds, const f
           }
           include_seen->insert(ckey);
           const std::string t = read_file_bin(inc);
-          CmakeParseResult pr2 = parse_cmake_listfile_text(t, inc.string());
+          CmakeParseProgress inc_cb;
+          const CmakeParseProgress *inc_p = nullptr;
+          if (lp) {
+            inc_cb = [lp, inc](std::size_t pos, std::size_t tot, std::size_t, std::size_t line, const char *sub) {
+              std::string ph = "内联/解析(字节)";
+              if (line > 0) {
+                ph += " 行";
+                ph += std::to_string(line);
+              }
+              if (sub && sub[0]) {
+                ph += " [";
+                ph += sub;
+                ph += ']';
+              }
+              lp->emit_intra(inc, ph.c_str(), pos, tot);
+            };
+            inc_p = &inc_cb;
+          }
+          CmakeParseResult pr2 = parse_cmake_listfile_text(t, inc.string(), inc_p);
           if (res) {
             res->parse_diagnostics.insert(res->parse_diagnostics.end(), pr2.parse_notes.begin(), pr2.parse_notes.end());
           }
@@ -243,8 +262,10 @@ static void remove_macro_function_defs(std::vector<CmakeCommand> *cmds, std::uno
   }
 }
 
-static void expand_macro_repeatedly(std::vector<CmakeCommand> *cmds, const std::unordered_map<std::string, MacroOrFnBody> &defs) {
+static void expand_macro_repeatedly(std::vector<CmakeCommand> *cmds, const std::unordered_map<std::string, MacroOrFnBody> &defs,
+                                    ListfileProgress *lp, const fs::path &for_listfile) {
   for (int round = 0; round < 32; ++round) {
+    if (lp) lp->emit_intra(for_listfile, "宏展开", static_cast<std::size_t>(round) + 1, 32);
     bool chg = false;
     for (std::size_t i = 0; i < cmds->size(); i++) {
       std::string n = (*cmds)[i].name;
@@ -350,12 +371,17 @@ static bool eval_if_tokens(const std::vector<std::string> &e, const std::unorder
 }
 
 static std::vector<CmakeCommand> filter_if_flat(std::vector<CmakeCommand> cmds, std::unordered_map<std::string, std::string> *m0,
-                                                const fs::path &this_dir, const fs::path &top_source, const fs::path &top_binary) {
+                                                const fs::path &this_dir, const fs::path &top_source, const fs::path &top_binary,
+                                                ListfileProgress *lp, const fs::path &for_listfile) {
   inject_gz_cmake_path_vars(this_dir, top_source, top_binary, m0);
   std::vector<IfFState> st;
   std::vector<CmakeCommand> out;
   int fnblk = 0;
-  for (CmakeCommand &c : cmds) {
+  const std::size_t nin = cmds.size();
+  const std::size_t stf = (nin > 20000) ? 2000u : (nin > 5000) ? 1000u : 500u;
+  for (std::size_t k = 0; k < nin; ++k) {
+    if (lp && (k % stf == 0 || k + 1 == nin)) lp->emit_intra(for_listfile, "if压平", k + 1, nin);
+    CmakeCommand &c = cmds[k];
     std::string n = c.name;
     to_lower(&n);
     if (n != "if" && n != "else" && n != "elseif" && n != "endif") fnblk += block_step(n);
@@ -521,7 +547,7 @@ static void process_listfile(const fs::path &listfile, const std::vector<fs::pat
                              std::unordered_map<std::string, std::string> *vars,
                              std::unordered_map<std::string, TargetModel> *targets, InterpretResult *res,
                              const fs::path &top_source, const fs::path &top_binary,
-                             std::unordered_set<std::string> *subdir_visited) {
+                             std::unordered_set<std::string> *subdir_visited, ListfileProgress *listfile_progress) {
   {
     std::error_code ec0;
     const fs::path abs = fs::absolute(listfile, ec0);
@@ -534,26 +560,50 @@ static void process_listfile(const fs::path &listfile, const std::vector<fs::pat
       subdir_visited->insert(listkey);
     }
   }
+  if (listfile_progress) listfile_progress->emit(listfile);
 
+  if (listfile_progress) listfile_progress->emit_intra(listfile, "读入", 0, 0);
   const std::string text = read_file_bin(listfile);
-  CmakeParseResult pr = parse_cmake_listfile_text(text, listfile.string());
+  CmakeParseProgress parse_cb;
+  const CmakeParseProgress *parse_p = nullptr;
+  if (listfile_progress) {
+    parse_cb = [listfile_progress, listfile](std::size_t pos, std::size_t tot, std::size_t, std::size_t line, const char *sub) {
+      std::string ph = "词法/解析(字节)";
+      if (line > 0) {
+        ph += " 行";
+        ph += std::to_string(line);
+      }
+      if (sub && sub[0]) {
+        ph += " [";
+        ph += sub;
+        ph += ']';
+      }
+      listfile_progress->emit_intra(listfile, ph.c_str(), pos, tot);
+    };
+    parse_p = &parse_cb;
+  }
+  CmakeParseResult pr = parse_cmake_listfile_text(text, listfile.string(), parse_p);
   if (res) {
     res->parse_diagnostics.insert(res->parse_diagnostics.end(), pr.parse_notes.begin(), pr.parse_notes.end());
   }
   std::vector<CmakeCommand>   work = std::move(pr.commands);
   std::unordered_set<std::string> include_seen;
-  include_inline_for_listfile(&work, listfile, res, &include_seen);
+  include_inline_for_listfile(&work, listfile, res, &include_seen, listfile_progress);
   std::unordered_map<std::string, MacroOrFnBody> defmap;
   remove_macro_function_defs(&work, &defmap);
-  expand_macro_repeatedly(&work, defmap);
+  expand_macro_repeatedly(&work, defmap, listfile_progress, listfile);
   const fs::path this_dir = listfile.parent_path();
-  work = filter_if_flat(std::move(work), vars, this_dir, top_source, top_binary);
+  work = filter_if_flat(std::move(work), vars, this_dir, top_source, top_binary, listfile_progress, listfile);
   const ScopedCmakeDirVars _cmake_builtins(vars, this_dir, top_source, top_binary);
 
   std::vector<fs::path> u;
   {
+    const std::size_t nwk = work.size();
+    const std::size_t stp = (nwk > 5000) ? 512u : (nwk > 500) ? 128u : (nwk > 100) ? 32u : 8u;
     int b0 = 0;
-    for (const auto &c0 : work) {
+    for (std::size_t k = 0; k < nwk; ++k) {
+      if (listfile_progress && (k % stp == 0 || k + 1 == nwk)) listfile_progress->emit_intra(listfile, "预扫", k + 1, nwk);
+      const CmakeCommand &c0 = work[k];
       std::string nn = c0.name;
       to_lower(&nn);
       if (nn != "if" && nn != "else" && nn != "elseif" && nn != "endif")
@@ -575,7 +625,11 @@ static void process_listfile(const fs::path &listfile, const std::vector<fs::pat
 
   int block = 0;
   std::string last_tname;  // 同 Listfile 内最近一次的 add_executable / add_library 目标名, 供 configure_file 归属
-  for (const auto &c : work) {
+  const std::size_t nwm = work.size();
+  const std::size_t stpm = (nwm > 5000) ? 512u : (nwm > 500) ? 128u : (nwm > 100) ? 32u : 8u;
+  for (std::size_t cmd_i = 0; cmd_i < nwm; ++cmd_i) {
+    if (listfile_progress && (cmd_i % stpm == 0 || cmd_i + 1 == nwm)) listfile_progress->emit_intra(listfile, "主扫", cmd_i + 1, nwm);
+    const CmakeCommand &c = work[cmd_i];
     std::string n = c.name;
     to_lower(&n);
     if (n != "if" && n != "else" && n != "elseif" && n != "endif")
@@ -595,7 +649,8 @@ static void process_listfile(const fs::path &listfile, const std::vector<fs::pat
       const std::string sub = expc(c.args[0], *vars);
       if (sub.find("$<") == std::string::npos) {
         fs::path sublist = this_dir / sub / "CMakeLists.txt";
-        if (fs::is_regular_file(sublist)) process_listfile(sublist, base, vars, targets, res, top_source, top_binary, subdir_visited);
+        if (fs::is_regular_file(sublist))
+          process_listfile(sublist, base, vars, targets, res, top_source, top_binary, subdir_visited, listfile_progress);
       }
     }
     if (n == "add_executable" && block == 0 && c.args.size() >= 1) {
@@ -859,7 +914,8 @@ std::string infer_gz_generated_arch_segment(const fs::path &top_cmake_parent_pat
   return leaf;
 }
 
-InterpretResult interpret_cmake_tree(const fs::path &source_root, const fs::path &top_cmake, const fs::path *file_api_json_path) {
+InterpretResult interpret_cmake_tree(const fs::path &source_root, const fs::path &top_cmake, const fs::path *file_api_json_path,
+                                    ListfileProgress *listfile_progress) {
   (void)source_root;
   std::error_code ec;
   const fs::path top_source = fs::weakly_canonical(top_cmake.parent_path(), ec);
@@ -868,7 +924,7 @@ InterpretResult interpret_cmake_tree(const fs::path &source_root, const fs::path
   std::unordered_map<std::string, std::string> vars;
   std::unordered_map<std::string, TargetModel> tmap;
   std::unordered_set<std::string> subdir_visited;
-  process_listfile(top_cmake, {}, &vars, &tmap, &r, top_source, top_binary, &subdir_visited);
+  process_listfile(top_cmake, {}, &vars, &tmap, &r, top_source, top_binary, &subdir_visited, listfile_progress);
   r.targets = std::move(tmap);
   if (r.project_name.empty()) r.project_name = "reversed_project";
   if (file_api_json_path && !file_api_json_path->empty()) {

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<target name="smalllib" type="static_library">
+  <config_files>
+    <file in="../../../config.h.in" to="config.h"/>
+    <file in="../../../templates/version.h.in" to="version.h"/>
+  </config_files>
+  <sources>
+    <file>../../../small.c</file>
+  </sources>
+</target>

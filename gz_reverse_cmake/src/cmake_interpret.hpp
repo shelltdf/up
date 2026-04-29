@@ -6,6 +6,7 @@
 #include "cmake_parse.hpp"
 
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -53,6 +54,24 @@ std::filesystem::path infer_gz_default_cmake_binary_root(const std::filesystem::
 /// 与 `gz configure` 的 `generated` 子路径对齐：先读 `build/…/gz_cache.txt` 的 `arch=`，否则用 **build 叶**目录名，再否则 **`default`**。
 std::string infer_gz_generated_arch_segment(const std::filesystem::path &top_cmake_parent_path);
 
+/// 解析每个 **新** `CMakeLists.txt` 时调用 (add_subdirectory 展开, 同一路径不重复), 第一个参数为自 1 起的累计序号
+struct ListfileProgress {
+  std::function<void(std::size_t one_based, const std::filesystem::path &listfile)> on;
+  /// 同一 `CMakeLists.txt` 内阶段/条命令进展: `cur/total` 在 `total==0` 时表示**不定长** (仅看 `phase`)
+  std::function<void(std::size_t one_based, const std::filesystem::path &listfile, const char *phase, std::size_t cur, std::size_t total)>
+      on_intra;
+  std::size_t count{0};
+  void emit(const std::filesystem::path &listfile) {
+    if (!on) return;
+    on(++count, listfile);
+  }
+  void emit_intra(const std::filesystem::path &listfile, const char *phase, std::size_t cur, std::size_t total) {
+    if (!on_intra) return;
+    on_intra(count, listfile, phase, cur, total);
+  }
+};
+
 /// 若 `file_api_json_path` 非空, L7: 从该**用户预置** JSON 中尽力提取 target 名(不运行 cmake).
+/// `listfile_progress` 非空时: `on` 每 **新** `CMakeLists.txt` 一次; `on_intra` 在同文件内 (读/解析、include/宏 轮次、if 压平、预扫/主扫 命令序等) 见实现
 InterpretResult interpret_cmake_tree(const std::filesystem::path &source_root, const std::filesystem::path &top_cmake_lists,
-                                    const std::filesystem::path *file_api_json_path = nullptr);
+                                     const std::filesystem::path *file_api_json_path = nullptr, ListfileProgress *listfile_progress = nullptr);

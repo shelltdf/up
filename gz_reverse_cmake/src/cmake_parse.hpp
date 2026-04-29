@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -45,6 +46,12 @@ struct CmakeParseResult {
 /// 从**内存**内容解析(不含 file_path, line 有)
 std::vector<CmakeCommand> parse_cmake_script(std::string_view text);
 
+/// 解析中节流回调: 已扫**字节**位置、总长、已产出的**命令**条数；`line` 为 1-based 行号(尽力); `subphase` 为当前在干什么(可空)
+using CmakeParseProgress =
+    std::function<void(std::size_t byte_pos, std::size_t total_bytes, std::size_t command_count, std::size_t line, const char *subphase)>;
+
 /// L1: 与 `parse_cmake_script` 相同, 但为每条命令设置 `file_path` 为 `for_path` 的 portable 字符串
-CmakeParseResult parse_cmake_listfile_text(std::string_view text, const std::string &file_path);
+/// `progress` 非空 时, 在解析大 Listfile 过程中**节流**调用（起/中/终）, 便于 UI 不长时间无刷新
+CmakeParseResult parse_cmake_listfile_text(std::string_view text, const std::string &file_path,
+                                         const CmakeParseProgress *progress = nullptr);
 

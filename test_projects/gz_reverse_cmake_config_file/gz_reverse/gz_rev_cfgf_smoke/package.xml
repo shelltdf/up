@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package name="gz_rev_cfgf_smoke" version="0.1.0">
+  <config_files>
+    <file in="../../templates/pkg_meta.h.in" to="pkg_meta.h"/>
+  </config_files>
+</package>
