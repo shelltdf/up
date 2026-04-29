@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Install/uninstall gz and gz-gui with simple switches.
+"""Install/uninstall gz 运行时同目录制品：gz、gz-gui、gz_reverse_cmake、gz_gui.png。
 
--i: install binaries to platform target directory
--u: uninstall binaries from platform target directory
+-i: 从 dist/bin 复制到本机目标目录（Windows 为 Python 所在目录，其它为 ~/.local/bin）
+-u: 从该目录删除上述文件
 """
 
 from __future__ import annotations
@@ -27,10 +27,11 @@ def _install_target_dir() -> Path:
     return Path.home() / ".local" / "bin"
 
 
-def _binary_names() -> tuple[str, str]:
+def _runtime_artifact_names() -> tuple[str, ...]:
+    """与 cmake --install COMPONENT gz_runtime 装到 prefix/bin 下的制品一致。"""
     if sys.platform == "win32":
-        return ("gz.exe", "gz-gui.exe")
-    return ("gz", "gz-gui")
+        return ("gz.exe", "gz-gui.exe", "gz_reverse_cmake.exe", "gz_gui.png")
+    return ("gz", "gz-gui", "gz_reverse_cmake", "gz_gui.png")
 
 
 def _copy_executable(src: Path, dst: Path) -> None:
@@ -38,6 +39,14 @@ def _copy_executable(src: Path, dst: Path) -> None:
     if sys.platform != "win32":
         mode = dst.stat().st_mode
         dst.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def _copy_runtime_artifact(src: Path, dst: Path) -> None:
+    """可执行文件设执行位；资源文件（如 png）仅 copy2。"""
+    if src.suffix.lower() == ".png":
+        shutil.copy2(src, dst)
+        return
+    _copy_executable(src, dst)
 
 
 def _run_install_py(root: Path, build_dir: Path, config: str) -> int:
@@ -63,27 +72,28 @@ def do_install(root: Path, build_dir: Path, config: str) -> int:
     src_bin = root / "dist" / "bin"
     target_dir = _install_target_dir()
     target_dir.mkdir(parents=True, exist_ok=True)
-    gz_name, gui_name = _binary_names()
-    built_cli = src_bin / gz_name
-    built_gui = src_bin / gui_name
-    if not built_cli.is_file() or not built_gui.is_file():
-        print(f"error: missing built binaries: {built_cli} / {built_gui}", file=sys.stderr)
+    names = _runtime_artifact_names()
+    missing: list[Path] = []
+    for name in names:
+        p = src_bin / name
+        if not p.is_file():
+            missing.append(p)
+    if missing:
+        print("error: missing dist/bin artifacts: " + ", ".join(str(p) for p in missing), file=sys.stderr)
         return 2
 
-    dst_gz = target_dir / gz_name
-    dst_gui = target_dir / gui_name
-    print(f"+ copy {built_cli} -> {dst_gz}", flush=True)
-    _copy_executable(built_cli, dst_gz)
-    print(f"+ copy {built_gui} -> {dst_gui}", flush=True)
-    _copy_executable(built_gui, dst_gui)
+    for name in names:
+        built = src_bin / name
+        dst = target_dir / name
+        print(f"+ copy {built} -> {dst}", flush=True)
+        _copy_runtime_artifact(built, dst)
     print(f"installed to {target_dir}")
     return 0
 
 
 def do_uninstall() -> int:
     target_dir = _install_target_dir()
-    gz_name, gui_name = _binary_names()
-    targets = [target_dir / gz_name, target_dir / gui_name]
+    targets = [target_dir / n for n in _runtime_artifact_names()]
     for p in targets:
         if p.exists():
             print(f"+ remove {p}", flush=True)
@@ -96,7 +106,7 @@ def do_uninstall() -> int:
 
 def main() -> int:
     root = Path(__file__).resolve().parent
-    ap = argparse.ArgumentParser(description="Install/uninstall gz and gz-gui.")
+    ap = argparse.ArgumentParser(description="Install/uninstall gz, gz-gui, gz_reverse_cmake, gz_gui.png.")
     group = ap.add_mutually_exclusive_group(required=True)
     group.add_argument("-i", action="store_true", help="Install binaries")
     group.add_argument("-u", action="store_true", help="Uninstall binaries")

@@ -24,7 +24,8 @@ cmake --build gz_reverse_cmake/build
 
 ## 安装与打包
 
-- `python install.py --prefix dist`：安装 **`gz_runtime`** 分量，包含 **`bin/`** 下 **`gz`**、**`gz-gui`** 与 **`gz_reverse_cmake`**；加 **`--with-dev`** 时额外装 **`gz_dev`**（`gz.lib` 等）。
+- `python install.py --prefix dist`：安装 **`gz_runtime`** 分量，包含 **`bin/`** 下 **`gz`**、**`gz-gui`**、**`gz_reverse_cmake`** 与 **`gz_gui.png`**；加 **`--with-dev`** 时额外装 **`gz_dev`**（`gz.lib` 等）。
+- `python setup.py -i`：先调用 **`install.py`** 到 **`dist/`**，再把 **`bin/`** 中上述 **`gz_runtime`** 四者复制到本机可执行物目录（Windows 为 `python.exe` 同目录，其它为 **`~/.local/bin`**）；**`setup.py -u`** 会删除同名的这四个文件（若存在）。
 - `python package.py`：依赖 `install.py` 产物打 zip / tar.gz。
 
 ## 仓库脚本边界

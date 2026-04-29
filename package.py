@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Pack gz + gz-gui + gz_reverse_cmake (+ optional gz.lib) into an archive.
+"""Pack gz + gz-gui + gz_reverse_cmake + bin/gz_gui.png (+ optional gz.lib) into an archive.
 
+``gz_runtime`` 安装时 ``gz_gui.png`` 与可执行文件同入 ``bin/``；本脚本与 install 布局一致，若存在则一并打包。
 默认只打包宿主工具，与 test_projects/ 无关。
 约定：package.py 会先执行 install.py；install.py 会先执行 build.py。
 """
@@ -35,8 +36,11 @@ def _run_install_py(root: Path, build_dir: Path, config: str, prefix: Path, with
     return subprocess.call(cmd, cwd=str(root))
 
 
-def _find_installed_gz_runtime(prefix: Path) -> tuple[Path, Path, Path]:
-    """Return (gz, gz-gui, gz_reverse_cmake) paths under install prefix/bin."""
+def _find_installed_gz_runtime(prefix: Path) -> tuple[Path, Path, Path, Path | None]:
+    """Return (gz, gz-gui, gz_reverse_cmake, gz_gui_png|None) under install prefix/bin.
+
+    ``gz_gui.png`` 与 ``gz-gui`` 同 COMPONENT 装到 ``bin/``；若存在则一并打包，供 GUI 图标与分发目录一致。
+    """
     bin_dir = prefix / "bin"
     if sys.platform == "win32":
         gz_cli = bin_dir / "gz.exe"
@@ -47,7 +51,9 @@ def _find_installed_gz_runtime(prefix: Path) -> tuple[Path, Path, Path]:
         gui = bin_dir / "gz-gui"
         rev = bin_dir / "gz_reverse_cmake"
     if gz_cli.is_file() and gui.is_file() and rev.is_file():
-        return gz_cli, gui, rev
+        png = bin_dir / "gz_gui.png"
+        gui_png = png if png.is_file() else None
+        return gz_cli, gui, rev, gui_png
     raise FileNotFoundError(f"找不到已安装文件: {gz_cli} / {gui} / {rev}")
 
 
@@ -60,39 +66,48 @@ def _default_archive_path(root: Path, fmt: str, config: str) -> Path:
     return (root / "dist" / f"{base}{ext}").resolve()
 
 
-def _readme_bytes(with_dev: bool) -> bytes:
+def _readme_bytes(with_dev: bool, with_gui_png: bool) -> bytes:
     text = (
         "Contents:\n"
         "  bin/gz (or gz.exe)\n"
         "  bin/gz-gui (or gz-gui.exe)\n"
         "  bin/gz_reverse_cmake (or gz_reverse_cmake.exe)\n"
+        + ("  bin/gz_gui.png (icon for gz-gui; keep next to gz-gui)\n" if with_gui_png else "")
         + ("  lib/gz.lib\n" if with_dev else "")
         + "\n"
-        "Keep both binaries in the same directory.\n"
+        "Keep these files in the same bin/ directory.\n"
         "gz-gui runs gz from the same folder.\n"
     )
     return text.encode("utf-8")
 
 
-def _write_zip(out: Path, gz_cli: Path, gui: Path, rev: Path, dev_lib: Path | None) -> None:
+def _write_zip(
+    out: Path, gz_cli: Path, gui: Path, rev: Path, dev_lib: Path | None, gui_png: Path | None
+) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
-    readme = _readme_bytes(dev_lib is not None)
+    readme = _readme_bytes(dev_lib is not None, gui_png is not None)
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.write(gz_cli, f"bin/{gz_cli.name}")
         zf.write(gui, f"bin/{gui.name}")
         zf.write(rev, f"bin/{rev.name}")
+        if gui_png is not None:
+            zf.write(gui_png, f"bin/{gui_png.name}")
         if dev_lib is not None:
             zf.write(dev_lib, f"lib/{dev_lib.name}")
         zf.writestr("README_PACKAGE.txt", readme)
 
 
-def _write_tar_gz(out: Path, gz_cli: Path, gui: Path, rev: Path, dev_lib: Path | None) -> None:
+def _write_tar_gz(
+    out: Path, gz_cli: Path, gui: Path, rev: Path, dev_lib: Path | None, gui_png: Path | None
+) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
-    readme = _readme_bytes(dev_lib is not None)
+    readme = _readme_bytes(dev_lib is not None, gui_png is not None)
     with tarfile.open(out, "w:gz") as tf:
         tf.add(gz_cli, arcname=f"bin/{gz_cli.name}")
         tf.add(gui, arcname=f"bin/{gui.name}")
         tf.add(rev, arcname=f"bin/{rev.name}")
+        if gui_png is not None:
+            tf.add(gui_png, arcname=f"bin/{gui_png.name}")
         if dev_lib is not None:
             tf.add(dev_lib, arcname=f"lib/{dev_lib.name}")
         ti = tarfile.TarInfo(name="README_PACKAGE.txt")
@@ -144,10 +159,12 @@ def main() -> int:
 
 
     try:
-        gz_cli, gui, rev = _find_installed_gz_runtime(prefix)
+        gz_cli, gui, rev, gui_png = _find_installed_gz_runtime(prefix)
     except FileNotFoundError as e:
         print("error:", e, file=sys.stderr)
         return 2
+    if gui_png is None:
+        print("warning: bin/gz_gui.png not found; archive will omit icon file (re-run install if missing)", file=sys.stderr)
 
     fmt = args.format
     if fmt == "auto":
@@ -160,9 +177,9 @@ def main() -> int:
         out = (root / out).resolve()
 
     if fmt == "zip":
-        _write_zip(out, gz_cli, gui, rev, dev_lib)
+        _write_zip(out, gz_cli, gui, rev, dev_lib, gui_png)
     else:
-        _write_tar_gz(out, gz_cli, gui, rev, dev_lib)
+        _write_tar_gz(out, gz_cli, gui, rev, dev_lib, gui_png)
 
     print("wrote", out)
     return 0
