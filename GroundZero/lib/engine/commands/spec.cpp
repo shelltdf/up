@@ -121,7 +121,7 @@ target
 | **User / project defaults** | `package.xml` and `target.xml` **`<vars>`** | Scalar `<var name="K" value="V"/>` (and optional empty value). Merged in layers (below). **Script** vars are a separate sub-syntax (`type="script"`, §4) and **not** in the `when` scalar map. |
 | **User overrides at configure** | `gz configure --opt KEY=value` and `gz_cache.txt` | Same key namespace as `GZ_*` and extra C identifiers; **wins** over XML defaults for the same name (see layers). **Reserved** keys: `cwd`, `arch`, `package`, `generated_file`, `scan_roots`, `gz.cache.version` (and similar metadata) — not used as free-form opt keys. |
 | **Compile macros** | `package.xml` / `target.xml` **`<defines>`** | C identifiers; applied in package-then-target order (target can add/override for compile flags). |
-| **Config file templates** | `package.xml` / `target.xml` **`<config_files>`** | `in` / `to` files; `to` under `.intermediate/generated/...` — see §5/§6. **Placeholder rule:** in template text only, missing `@NAME@` / `${NAME}` get **empty** entries added to the map so placeholders strip (see §3.3). |
+| **Config file templates** | `package.xml` / `target.xml` **`<config_files>`** | `in` / `to` files; `to` under **`.intermediate/generated/<arch 段>/...`** (same `arch` as `gz_cache.txt` / `compose_arch_tag`) — see §5/§6. **Placeholder rule:** in template text only, missing `@NAME@` / `${NAME}` get **empty** entries added to the map so placeholders strip (see §3.3). |
 
 ### 3.2. Merge order (later overrides earlier)
 
@@ -226,11 +226,11 @@ line. Put **real shell** (or `lua -e '...'` if on PATH) in `value` if you need e
 
 ### `<config_files>` (package)
 - `<file in="rel" to="out"/>` both required. `in` relative to **package root** (parent of `package.xml`). `out` under
-  **`.intermediate/generated/<package>/_package/`**; reserved name **`_package`**. Avoid naming a **compile** target
+  **`.intermediate/generated/<arch 段>/<package>/_package/`** ( `<arch 段>` = this configure's `compose_arch_tag` / `gz_cache.txt` `arch=`; distinguishes multi-config builds ); reserved name **`_package`**. Avoid naming a **compile** target
   **`_package`** in the same package (clashes with the reserved output dir). Substitution map: builtins + package
   **`<vars>`** + **all** this package's `target.xml` **`<vars>`** in **build target order** (later wins on duplicate) +
   workspace. **`GZ_TARGET_NAME` empty** unless a target var sets it when used in package config map. Output written
-  **once per configure**; appended to **every** native compile target as extra source; include path **`.intermediate/generated/<package>/_package/`**
+  **once per configure**; appended to **every** native compile target as extra source; include path **`.intermediate/generated/<arch 段>/<package>/_package/`**
   added to all when any package `config_files` exist.
 
 ---
@@ -265,7 +265,7 @@ Unknown `type` = configure error (`unknown target type`).
   target block merges like package. Script vars: §4.
 
 ### `<config_files>` (target)
-- `in` relative to `target.xml` directory; `to` under **`.intermediate/generated/<package>/<target>/`**, no `..`, not absolute.
+- `in` relative to `target.xml` directory; `to` under **`.intermediate/generated/<arch 段>/<package>/<target>/`**, no `..`, not absolute.
   Merged var map: full target stack per §3.2; `#cmakedefine` after `@` substitution; 64 pass limit. Generated dir added to **include
   paths** for that target. **Backends (CMake and Ninja)**: no CMake `configure_file()` emission — generated file is a normal source. For full upstream
   `configure_file`, run outside `gz` and check in the file.

@@ -32,7 +32,7 @@ struct DefineEntry {
   std::string value;  // optional; empty => define name only (#ifdef NAME)
 };
 
-/** Template processed at `gz configure` into `.intermediate/generated/` (package or target subtree; see docs). */
+/** Template processed at `gz configure` into `.intermediate/generated/<arch 段>/` (package or target subtree; `arch` matches cache; see docs). */
 struct ConfigFileEntry {
   std::string in;  // relative to package.xml parent (package) or target.xml directory (target)
   std::string to;  // relative under generated/<package>/_package/ (package) or generated/<package>/<target>/ (target)

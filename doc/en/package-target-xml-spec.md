@@ -201,9 +201,9 @@ Where:
 
 - Same block shape as target (may repeat, §1.1): **`<file in="rel" to="rel"/>`** (both required).
 - **`in`**: relative to **`package.xml`** directory (package root).
-- **`to`**: relative to **`.intermediate/generated/<package>/_package/`** (reserved **`_package`**—avoid a compile target directory with the same name in the same package).
+- **`to`**: relative to **`.intermediate/generated/<arch-tag>/<package>/_package/`** (`<arch-tag>` matches **`arch=` in `gz_cache.txt`** / **`compose_arch_tag`** for this configure; reserved **`_package`**—avoid a compile target directory with the same name in the same package).
 - **`@NAME@` / `${NAME}`**: built-ins + package `<vars>` + **all `target.xml` `<vars>` in this package** (in configure target collection order; **later** `<var>` / **later** target wins on duplicate keys) + **`--opt` / `gz_cache.txt`**. Built-in **`GZ_TARGET_NAME`** is **empty** in package templates unless a target `<var>` sets it.
-- **When**: `configure` generates once per package with entries; outputs are added to **every** native compile target’s sources and **`generated/<package>/_package/`** is added to those targets’ **compile include paths** (after **`library`** resolution).
+- **When**: `configure` generates once per package with entries; outputs are added to **every** native compile target’s sources and **`generated/<arch-tag>/<package>/_package/`** is added to those targets’ **compile include paths** (after **`library`** resolution).
 
 ### 2.7 Script-shaped `<var type="script">` (messages / trigger)
 
@@ -253,8 +253,8 @@ When **false** (and `when` is implemented for that tag): skip that **`<sources>`
 
 #### `<config_files>` (minimal `configure_file`-like subset)
 
-- **Target-level** (`target.xml`): **`<config_files>…</config_files>`** (may repeat) with **`<file in="template.rel" to="out.rel"/>`** (both required). `in` relative to **`target.xml`** dir; `to` relative to **`.intermediate/generated/<package>/<target>/`**, safe relative path (no `..`, not absolute). **`@NAME@`** uses **full §3.5 stack**. Generated file is added to **that target’s** sources and **`generated/<package>/<target>/`** to its **compile includes**.
-- **Package-level** (`package.xml`): same shape (may repeat); `in` relative to **package root**; `to` relative to **`.intermediate/generated/<package>/_package/`** (reserved **`_package`**). **`@NAME@` / `${NAME}`** use **package `<vars>` + all targets’ `<vars>`** (stack rules above) + workspace; **`GZ_TARGET_NAME`** default empty. Outputs go to **all** native compile targets’ sources and **`generated/<package>/_package/`** on their include paths.
+- **Target-level** (`target.xml`): **`<config_files>…</config_files>`** (may repeat) with **`<file in="template.rel" to="out.rel"/>`** (both required). `in` relative to **`target.xml`** dir; `to` relative to **`.intermediate/generated/<arch-tag>/<package>/<target>/`**, safe relative path (no `..`, not absolute). **`@NAME@`** uses **full §3.5 stack**. Generated file is added to **that target’s** sources and **`generated/<arch-tag>/<package>/<target>/`** to its **compile includes**.
+- **Package-level** (`package.xml`): same shape (may repeat); `in` relative to **package root**; `to` relative to **`.intermediate/generated/<arch-tag>/<package>/_package/`** (reserved **`_package`**). **`@NAME@` / `${NAME}`** use **package `<vars>` + all targets’ `<vars>`** (stack rules above) + workspace; **`GZ_TARGET_NAME`** default empty. Outputs go to **all** native compile targets’ sources and **`generated/<arch-tag>/<package>/_package/`** on their include paths.
 - **`${NAME}`** (CMake `configure_file` style): same merged map; **`${` … `}`** may have inner whitespace. **Placeholder harvest**: names in template not in map are added **empty**, then alternating `@` / `${}` passes (bounded rounds), then **`#cmakedefine`**. No **`$<…>`**.
 - **`#cmakedefine` / `#cmakedefine01`**: after placeholder expansion, CMake-like **subset** (`apply_cmakedefine_directives` in `var_subst.cpp`): false if missing/empty/`0`/`false`/`off`/`no`; `#cmakedefine01` ⇒ `#define NAME 0|1`; etc. For zlib-style **`zconf.h.in`**; **not** full CMake codegen.
 

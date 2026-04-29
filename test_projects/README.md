@@ -18,6 +18,7 @@
 | [smoke_minimal_exe/](smoke_minimal_exe/) | **最小包冒烟**：仅可执行目标。 |
 | [hello_library_type/](hello_library_type/) | **`type="library"`**：随 **`GZ_TARGET_DYNAMIC_LIBRARY`** 在 configure 时解析为静/动库；可执行目标依赖默认自动链接。 |
 | [prebuilt_static_stub/](prebuilt_static_stub/) | 演示 **`prebuilt_static_library`** + **`<prebuilt import_lib="..."/>`**：链入预编译的 `stub_import.lib`（Windows MSVC x64 已提交 `lib/import/`；可再用 `lib/CMakeLists.txt` 重生）。 |
+| [gz_reverse_cmake_config_smoke/](gz_reverse_cmake_config_smoke/) | 仅含 **`CMakeLists.txt` + 桩文件**：给 **`gz_reverse_cmake`** 回归 `configure_file` → `<config_files>`（包级与目标级各一条），**不**走 `gz configure`。 |
 | third-party CMake SDK（外部目录） | **推荐**：包外 `cmake --install` 后 **vendor** 进本包，**手写** `prebuilt_*` + `<prebuilt>`（或 **`GZ_CMAKE_PREFIX_PATH`**；见 [`doc/zh/getting-started.md`](../doc/zh/getting-started.md)）。 |
 
 ### 包依赖关系

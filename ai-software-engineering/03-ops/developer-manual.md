@@ -20,7 +20,7 @@ cmake -S gz_reverse_cmake -B gz_reverse_cmake/build -G Ninja
 cmake --build gz_reverse_cmake/build
 ```
 
-实现为**纯 C++** 解析 `CMakeLists.txt` 子集，**不**拉取第三方库。工程说明见 **`ai-software-engineering/02-physical/gz-reverse-cmake/`**。
+实现为**纯 C++** 解析 `CMakeLists.txt` 子集，**不**拉取第三方库；**不**在工具内执行本机 `cmake`；可选 **`--file-api <path>`** 读入用户预置的 `codemodel` 类 JSON 作 target 名对照（L7，见 `spec.md`）。工程说明见 **`ai-software-engineering/02-physical/gz-reverse-cmake/`**。
 
 ## 安装与打包
 

@@ -32,6 +32,32 @@ unsigned parallel_jobs_for_build(const std::map<std::string, std::string>& opts)
 
 namespace {
 
+/// 从 target 的源列表中去掉 **编译产物**（.obj / .o），它们不是 CMake/GZ 的合法「编译输入」；应使用 .c、.rc 等。误列常见于逆向或 glob。
+static void drop_compiled_artifacts_from_target_sources(ConfigureTargetModel& tm, const std::string& target_name) {
+  std::vector<std::string> paths;
+  std::vector<ConfigureTargetModel::SourceRule> rules;
+  paths.reserve(tm.source_paths.size());
+  rules.reserve(tm.source_rules.size());
+  for (size_t i = 0; i < tm.source_paths.size(); ++i) {
+    const std::filesystem::path p(tm.source_paths[i]);
+    std::string ext = p.extension().string();
+    for (char& c : ext)
+      c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+    if (ext == ".obj" || ext == ".o") {
+      std::cerr << "configure: warning: dropping object file from <sources> (not a compile input; add .c/.cpp/.rc instead) for target "
+                << target_name << ": " << tm.source_paths[i] << "\n";
+      continue;
+    }
+    paths.push_back(tm.source_paths[i]);
+    if (i < tm.source_rules.size())
+      rules.push_back(tm.source_rules[i]);
+    else
+      rules.push_back({tm.source_paths[i], "", ""});
+  }
+  tm.source_paths = std::move(paths);
+  tm.source_rules = std::move(rules);
+}
+
 void collect_desc_files(const std::filesystem::path& root, std::vector<std::filesystem::path>& packages,
                         std::vector<std::filesystem::path>& targets) {
   if (!std::filesystem::exists(root))
@@ -333,6 +359,19 @@ void try_write_gz_redist_manifest_json(const std::filesystem::path& manifest_pat
                                        const GzBinaryLayout& binary_layout) {
   if (build_targets.size() != graph_model.targets.size())
     return;
+  // Static link (GZ_TARGET_DYNAMIC_LIBRARY=OFF): do not list native shared_library in redist manifest
+  // when the same package also has static_library or library—those deliverables are the static .lib, not
+  // DLL+import; emit would look for lib/<name>.lib and bin/<name>.dll and fail if the shared target is
+  // not part of the intended install.
+  bool primary_has_static_compiled_or_library = false;
+  for (const auto& lt0 : build_targets) {
+    if (lt0.package_name != primary_pkg.name)
+      continue;
+    if (lt0.desc.type == "static_library" || lt0.desc.type == "library")
+      primary_has_static_compiled_or_library = true;
+  }
+  const bool static_link = equals_ci(binary_layout.link, "static");
+
   std::map<std::string, std::string> orig_emit;
   for (size_t k = 0; k < build_targets.size(); ++k) {
     const LoadedTarget& lt = build_targets[k];
@@ -341,6 +380,8 @@ void try_write_gz_redist_manifest_json(const std::filesystem::path& manifest_pat
     if (lt.desc.type == "asset_bundle" || lt.desc.type == "executable")
       continue;
     const std::string& ty = lt.desc.type;
+    if (static_link && ty == "shared_library" && primary_has_static_compiled_or_library)
+      continue;
     if (ty == "static_library" || ty == "shared_library" || ty == "library" || ty == "prebuilt_static_library" ||
         ty == "prebuilt_shared_library") {
       if (ty == "prebuilt_static_library" || ty == "prebuilt_shared_library")
@@ -1467,7 +1508,8 @@ int run_configure(const ConfigureRequest& req) {
       const std::filesystem::path pkg_root = dir_it->second;
       const auto src_vars = merged_vars_for_package_config_files(lt.package_name);
       const std::filesystem::path gen_pkg_root =
-          std::filesystem::absolute(cwd / ".intermediate" / "generated" / lt.package_name / "_package");
+          std::filesystem::absolute(cwd / ".intermediate" / "generated" / std::filesystem::u8path(arch) / lt.package_name
+                                    / "_package");
       std::vector<std::string>& out_list = package_config_generated_abs[lt.package_name];
       for (const auto& cf : pd_it->second.config_files) {
         const std::filesystem::path rel_out(cf.to);
@@ -1578,8 +1620,8 @@ int run_configure(const ConfigureRequest& req) {
       }
     } else {
       const auto src_vars = merged_vars_for_target(lt);
-      const std::filesystem::path gen_root =
-          std::filesystem::absolute(cwd / ".intermediate" / "generated" / lt.package_name / lt.desc.name);
+      const std::filesystem::path gen_root = std::filesystem::absolute(
+          cwd / ".intermediate" / "generated" / std::filesystem::u8path(arch) / lt.package_name / lt.desc.name);
       const auto pkg_cfg_it = package_config_generated_abs.find(lt.package_name);
       if (pkg_cfg_it != package_config_generated_abs.end()) {
         for (const std::string& abs_out : pkg_cfg_it->second) {
@@ -1658,6 +1700,7 @@ int run_configure(const ConfigureRequest& req) {
           tm.source_rules.push_back({std::filesystem::absolute(src).generic_string(), "", ""});
         }
       }
+      drop_compiled_artifacts_from_target_sources(tm, lt.desc.name);
       if (tm.source_paths.empty() && !asset_only) {
         std::cerr << "configure: target \"" << lt.desc.name
                   << "\" has no resolved source files (check <sources> / globs in "
@@ -1692,13 +1735,13 @@ int run_configure(const ConfigureRequest& req) {
     if ((lt.desc.type == "executable" || lt.desc.type == "static_library" || lt.desc.type == "shared_library" ||
          lt.desc.type == "library")) {
       if (!lt.desc.config_files.empty()) {
-        const std::filesystem::path gen_inc =
-            std::filesystem::absolute(cwd / ".intermediate" / "generated" / lt.package_name / lt.desc.name);
+        const std::filesystem::path gen_inc = std::filesystem::absolute(
+            cwd / ".intermediate" / "generated" / std::filesystem::u8path(arch) / lt.package_name / lt.desc.name);
         inc_dirs.insert(gen_inc.generic_string());
       }
       if (pkg_has_config_files) {
-        const std::filesystem::path gen_pkg_inc =
-            std::filesystem::absolute(cwd / ".intermediate" / "generated" / lt.package_name / "_package");
+        const std::filesystem::path gen_pkg_inc = std::filesystem::absolute(
+            cwd / ".intermediate" / "generated" / std::filesystem::u8path(arch) / lt.package_name / "_package");
         inc_dirs.insert(gen_pkg_inc.generic_string());
       }
     }
@@ -1756,6 +1799,40 @@ int run_configure(const ConfigureRequest& req) {
                                    return a.first == b.first && a.second == b.second;
                                  }),
                      tm.links.end());
+      // GZ_TARGET_DYNAMIC_LIBRARY=OFF: explicit or implicit deps on shared_library (e.g. "zlib")
+      // must link the static pair target "zlibstatic" if present, else MSVC LNK1181
+      // (Release\zlib.lib from exe project vs import lib output path) and static intent mismatch.
+      if (link_mode == "static" && !tm.links.empty()) {
+        auto is_pkg_target_shared = [&pkg_targets](const std::string& n) {
+          for (const auto& pl : pkg_targets)
+            if (pl.desc.name == n && pl.desc.type == "shared_library")
+              return true;
+          return false;
+        };
+        auto has_static_pair = [&pkg_targets](const std::string& base) {
+          const std::string s = base + "static";
+          for (const auto& pl : pkg_targets)
+            if (pl.desc.name == s && pl.desc.type == "static_library")
+              return true;
+          return false;
+        };
+        for (auto& pr : tm.links) {
+          if (is_pkg_target_shared(pr.first) && has_static_pair(pr.first))
+            pr.first += "static";
+        }
+        std::sort(tm.links.begin(), tm.links.end(), [](const std::pair<std::string, std::string>& a,
+                                                      const std::pair<std::string, std::string>& b) {
+          if (a.first != b.first)
+            return a.first < b.first;
+          return a.second < b.second;
+        });
+        tm.links.erase(std::unique(tm.links.begin(), tm.links.end(),
+                                   [](const std::pair<std::string, std::string>& a,
+                                      const std::pair<std::string, std::string>& b) {
+                                     return a.first == b.first && a.second == b.second;
+                                   }),
+                       tm.links.end());
+      }
     }
     graph_model.targets.push_back(std::move(tm));
   }

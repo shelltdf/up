@@ -8,6 +8,8 @@ add_executable(gz_reverse_cmake
   src/main.cpp
   src/cmake_parse.cpp
   src/cmake_interpret.cpp
+  src/cmake_genex.cpp
+  src/file_api_ingest.cpp
 )
 
 if(MSVC)

@@ -3,9 +3,14 @@
 #include "paths.hpp"
 #include "simple_xml.hpp"
 
+#include <array>
 #include <cctype>
+#include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
+#include <string>
+#include <vector>
 
 namespace gz {
 
@@ -227,6 +232,62 @@ bool file_exists_under(const std::filesystem::path& install_root, const std::str
   return std::filesystem::is_regular_file(install_root / std::filesystem::path(install_rel), ec);
 }
 
+/**
+ * Manifest records flat `lib/foo.lib` (from configure) but MSVC install can place per-config
+ * (e.g. `lib/Release/foo.lib`) or a single subdir. `layout.os` may be empty on older manifests,
+ * so do not require "windows" to run fallbacks.
+ */
+std::optional<std::string> try_resolve_import_lib_path(const std::filesystem::path& install_root,
+                                                        const std::string& rel,
+                                                        const GzBinaryLayout& layout) {
+  if (rel.empty())
+    return rel;
+  if (file_exists_under(install_root, rel))
+    return rel;
+  if (rel.rfind("lib/", 0) != 0 || rel.size() < 5)
+    return std::nullopt;
+  const std::string tail = rel.substr(4);
+  if (tail.find('/') != std::string::npos)
+    return std::nullopt;
+  const std::array<const char*, 4> k_dirs = {{"Release", "Debug", "MinSizeRel", "RelWithDebInfo"}};
+  for (const char* d : k_dirs) {
+    const std::string try_rel = std::string("lib/") + d + "/" + tail;
+    if (file_exists_under(install_root, try_rel))
+      return try_rel;
+  }
+  if (!layout.config.empty()) {
+    std::string w;
+    w.reserve(layout.config.size());
+    bool up = true;
+    for (unsigned char c : layout.config) {
+      if (c == '_' || c == '-' || c == ' ') {
+        up = true;
+        continue;
+      }
+      w.push_back(up ? static_cast<char>(std::toupper(c)) : static_cast<char>(std::tolower(c)));
+      up = false;
+    }
+    if (!w.empty() && w != "Release" && w != "Debug" && w != "MinSizeRel" && w != "RelWithDebInfo") {
+      const std::string try_rel = std::string("lib/") + w + "/" + tail;
+      if (file_exists_under(install_root, try_rel))
+        return try_rel;
+    }
+  }
+  std::error_code ec;
+  const std::filesystem::path lib_dir = install_root / "lib";
+  if (!std::filesystem::is_directory(lib_dir, ec))
+    return std::nullopt;
+  for (std::filesystem::directory_iterator it(lib_dir), end; it != end; ++it) {
+    std::error_code dsec;
+    if (!it->is_directory(dsec) || dsec)
+      continue;
+    const std::string try_rel = std::string("lib/") + it->path().filename().string() + "/" + tail;
+    if (file_exists_under(install_root, try_rel))
+      return try_rel;
+  }
+  return std::nullopt;
+}
+
 }  // namespace
 
 bool write_gz_redist_manifest_json(const std::filesystem::path& path, const GzRedistManifest& m, std::string& error) {
@@ -339,11 +400,21 @@ int emit_gz_redistribution_xml(const std::filesystem::path& install_root, const 
     return 4;
   }
 
-  for (const auto& t : m.targets) {
-    if (!t.install_rel_import_lib.empty() && !file_exists_under(install_root, t.install_rel_import_lib)) {
-      error = "missing prebuilt import_lib: " + t.install_rel_import_lib;
+  std::vector<std::string> res_import;
+  res_import.resize(m.targets.size());
+  for (size_t i = 0; i < m.targets.size(); ++i) {
+    const auto& t = m.targets[i];
+    if (!t.install_rel_import_lib.empty()) {
+      if (const auto r = try_resolve_import_lib_path(install_root, t.install_rel_import_lib, m.layout)) {
+        res_import[i] = *r;
+        continue;
+      }
+      error = "missing prebuilt import_lib: " + t.install_rel_import_lib + " (install_root=" +
+              to_posix_path_string(install_root) + ")";
       return 6;
     }
+  }
+  for (const auto& t : m.targets) {
     if (!t.install_rel_location.empty() && !file_exists_under(install_root, t.install_rel_location)) {
       error = "missing prebuilt location: " + t.install_rel_location;
       return 6;
@@ -365,7 +436,8 @@ int emit_gz_redistribution_xml(const std::filesystem::path& install_root, const 
     return 7;
   }
 
-  for (const auto& t : m.targets) {
+  for (size_t ti = 0; ti < m.targets.size(); ++ti) {
+    const auto& t = m.targets[ti];
     const std::filesystem::path td = redist_root / t.emit_subdir;
     std::filesystem::create_directories(td, ec);
     if (ec) {
@@ -382,8 +454,9 @@ int emit_gz_redistribution_xml(const std::filesystem::path& install_root, const 
       tdsc.dependencies.push_back(std::move(de));
     }
     {
+      const std::string& imp_rel = t.install_rel_import_lib.empty() ? t.install_rel_import_lib : res_import[ti];
       TargetDesc::PrebuiltDesc pb;
-      pb.import_lib = rebase_install_rel_to_target_dir(install_root, td, t.install_rel_import_lib);
+      pb.import_lib = rebase_install_rel_to_target_dir(install_root, td, imp_rel);
       pb.location = rebase_install_rel_to_target_dir(install_root, td, t.install_rel_location);
       pb.dll = rebase_install_rel_to_target_dir(install_root, td, t.install_rel_dll);
       pb.layout = m.layout;

@@ -1,7 +1,13 @@
 #include "cmake_interpret.hpp"
 
+#include "cmake_genex.hpp"
+#include "file_api_ingest.hpp"
+
 #include <cctype>
 #include <fstream>
+#include <optional>
+#include <sstream>
+#include <unordered_set>
 
 namespace fs = std::filesystem;
 
@@ -37,6 +43,7 @@ static void expand_vars(std::string *s, const std::unordered_map<std::string, st
 
 static std::string expc(std::string t, const std::unordered_map<std::string, std::string> &vars) {
   expand_vars(&t, vars);
+  gz_cm::apply_genex_best_effort(&t);
   return t;
 }
 
@@ -69,7 +76,7 @@ static void handle_set(const CmakeCommand &c, std::unordered_map<std::string, st
   std::string jn;
   for (std::size_t v = 0; v < vals.size(); ++v) {
     if (v) jn += ';';
-    jn += vals[v];
+    jn += expc(vals[v], *vars);
   }
   (*vars)[n] = jn;
 }
@@ -79,6 +86,342 @@ static int block_step(const std::string &n) {
   if (n == "endfunction" || n == "endmacro" || n == "endforeach" || n == "endwhile") return -1;
   return 0;
 }
+
+/// 目标/可执行**源列表**中跳过对象文件与明显链接产物：真实 CMake 常将 **add_custom_command** 生成的 `.obj`（如
+/// Windows `rc` → `zlib1rc.obj`）与库列在一起，而 **GroundZero 扁平 add_library 无法**表达该先后关系，且
+/// 首次 **cmake** 时该路径尚不存在 → 不可写入 `target.xml` 的 `<sources>`.
+static bool skip_as_flat_source_path(const fs::path &p) {
+  std::string e = p.extension().string();
+  for (char &c : e) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  if (e == ".obj" || e == ".o" || e == ".iobj") return true;
+  return false;
+}
+
+// --- L1–L4/L5: include + macro(与 function 同作宏展开) + L3: if 压平 ---
+
+struct MacroOrFnBody {
+  std::vector<std::string> param_names;
+  std::vector<CmakeCommand> body;
+};
+
+static void inject_gz_cmake_path_vars(const fs::path &this_dir, const fs::path &top_source, const fs::path &top_binary,
+                                     std::unordered_map<std::string, std::string> *m) {
+  std::error_code ec;
+  const fs::path ts = fs::weakly_canonical(top_source, ec);
+  const fs::path tb = fs::weakly_canonical(top_binary, ec);
+  const fs::path td = fs::weakly_canonical(this_dir, ec);
+  (*m)["CMAKE_SOURCE_DIR"] = ts.generic_string();
+  (*m)["CMAKE_BINARY_DIR"] = tb.generic_string();
+  (*m)["CMAKE_CURRENT_SOURCE_DIR"] = td.generic_string();
+  (*m)["CMAKE_CURRENT_LIST_DIR"] = td.generic_string();
+  fs::path rel = fs::relative(td, ts, ec);
+  if (ec) rel = fs::path(".");
+  if (rel.empty()) rel = fs::path(".");
+  (*m)["CMAKE_CURRENT_BINARY_DIR"] = fs::weakly_canonical(tb / rel, ec).generic_string();
+}
+
+static void include_inline_for_listfile(std::vector<CmakeCommand> *cmds, const fs::path &default_listfile, InterpretResult *res,
+                                        std::unordered_set<std::string> *include_seen) {
+  for (int round = 0; round < 32; ++round) {
+    std::vector<CmakeCommand> out;
+    bool changed = false;
+    int blk = 0;
+    for (CmakeCommand &c : *cmds) {
+      std::string n = c.name;
+      to_lower(&n);
+      const fs::path list_ref = c.file_path.empty() ? default_listfile : fs::path(c.file_path);
+      if (n == "include" && blk == 0 && !c.args.empty()) {
+        const fs::path inc = list_ref.parent_path() / c.args[0];
+        std::error_code ec;
+        if (fs::is_regular_file(inc, ec)) {
+          std::error_code ec3;
+          const fs::path inc_abs = fs::absolute(inc, ec3);
+          const std::string ckey = fs::weakly_canonical(inc_abs, ec3).generic_string();
+          if (include_seen->count(ckey)) {
+            if (res) res->parse_diagnostics.push_back("include: 跳过环或重复: " + ckey);
+            out.push_back(std::move(c));
+            blk += block_step(n);
+            if (blk < 0) blk = 0;
+            continue;
+          }
+          include_seen->insert(ckey);
+          const std::string t = read_file_bin(inc);
+          CmakeParseResult pr2 = parse_cmake_listfile_text(t, inc.string());
+          if (res) {
+            res->parse_diagnostics.insert(res->parse_diagnostics.end(), pr2.parse_notes.begin(), pr2.parse_notes.end());
+          }
+          for (CmakeCommand &c2 : pr2.commands) out.push_back(std::move(c2));
+          changed = true;
+          continue;
+        }
+      }
+      out.push_back(std::move(c));
+      blk += block_step(n);
+      if (blk < 0) blk = 0;
+    }
+    *cmds = std::move(out);
+    if (!changed) break;
+  }
+}
+
+static CmakeCommand substitute_params(const CmakeCommand &c, const std::unordered_map<std::string, std::string> &pmap) {
+  CmakeCommand o = c;
+  for (auto &a : o.args) {
+    for (int r = 0; r < 8; ++r) {
+      bool chg = false;
+      for (const auto &kv : pmap) {
+        const std::string rkey = "${" + kv.first + "}";
+        std::size_t pos = 0;
+        while ((pos = a.find(rkey, pos)) != std::string::npos) {
+          a.replace(pos, rkey.size(), kv.second);
+          chg = true;
+        }
+      }
+      if (!chg) break;
+    }
+  }
+  return o;
+}
+
+static void remove_macro_function_defs(std::vector<CmakeCommand> *cmds, std::unordered_map<std::string, MacroOrFnBody> *macros) {
+  for (std::size_t i = 0; i < cmds->size();) {
+    std::string n = (*cmds)[i].name;
+    to_lower(&n);
+    int b = 0;
+    for (std::size_t k = 0; k < i; k++) {
+      std::string o = (*cmds)[k].name;
+      to_lower(&o);
+      b += block_step(o);
+    }
+    if (b > 0) {
+      i++;
+      continue;
+    }
+    if ((n == "macro" || n == "function") && (*cmds)[i].args.size() >= 1) {
+      const std::string &mname = (*cmds)[i].args[0];
+      std::vector<std::string> pnames;
+      for (std::size_t j = 1; j < (*cmds)[i].args.size(); j++) pnames.push_back((*cmds)[i].args[j]);
+      int d = 1;
+      std::size_t j = i + 1;
+      for (; j < cmds->size() && d > 0; j++) {
+        std::string n2 = (*cmds)[j].name;
+        to_lower(&n2);
+        if (n2 == "macro" || n2 == "function") d++;
+        else if ((n2 == "endmacro" && n == "macro") || (n2 == "endfunction" && n == "function")) d--;
+      }
+      if (d != 0) {
+        i++;
+        continue;
+      }
+      MacroOrFnBody mb;
+      mb.param_names = std::move(pnames);
+      for (std::size_t k = i + 1; k + 1 < j; k++) mb.body.push_back((*cmds)[k]);
+      (*macros)[mname] = std::move(mb);
+      cmds->erase(cmds->begin() + (long)i, cmds->begin() + (long)j);
+      continue;
+    }
+    i++;
+  }
+}
+
+static void expand_macro_repeatedly(std::vector<CmakeCommand> *cmds, const std::unordered_map<std::string, MacroOrFnBody> &defs) {
+  for (int round = 0; round < 32; ++round) {
+    bool chg = false;
+    for (std::size_t i = 0; i < cmds->size(); i++) {
+      std::string n = (*cmds)[i].name;
+      to_lower(&n);
+      const auto it = defs.find(n);
+      if (it == defs.end()) continue;
+      const MacroOrFnBody &def = it->second;
+      const std::vector<std::string> cargs = (*cmds)[i].args;
+      std::unordered_map<std::string, std::string> pmap;
+      for (std::size_t a = 0; a < def.param_names.size(); a++) {
+        if (a < cargs.size()) pmap[def.param_names[a]] = cargs[a];
+        else
+          pmap[def.param_names[a]] = "";
+      }
+      std::string argn;
+      for (std::size_t a = 0; a < cargs.size(); a++) {
+        if (a) argn += ';';
+        argn += cargs[a];
+      }
+      pmap["ARGC"] = std::to_string(cargs.size());
+      pmap["ARGN"] = argn;
+      cmds->erase(cmds->begin() + (long)i);
+      for (int bi = (int)def.body.size() - 1; bi >= 0; --bi) {
+        CmakeCommand nc = substitute_params(def.body[(std::size_t)bi], pmap);
+        cmds->insert(cmds->begin() + (long)i, std::move(nc));
+      }
+      chg = true;
+      break;
+    }
+    if (!chg) break;
+  }
+}
+
+struct IfFState {
+  bool any = false;
+  bool act = false;
+};
+
+static void if_stack_if(std::vector<IfFState> *st, bool v) { st->push_back({v != false, v != false}); }
+static void if_stack_elseif(std::vector<IfFState> *st, bool v) {
+  IfFState &t = st->back();
+  if (t.any) t.act = false;
+  else {
+    t.act = v;
+    t.any = v;
+  }
+}
+static void if_stack_else(std::vector<IfFState> *st) {
+  IfFState &t = st->back();
+  t.act = !t.any;
+  t.any = true;
+}
+static void if_stack_endif(std::vector<IfFState> *st) {
+  if (!st->empty()) st->pop_back();
+}
+
+static bool if_stack_emitting(const std::vector<IfFState> &st) {
+  for (const IfFState &f : st)
+    if (!f.act) return false;
+  return true;
+}
+
+static std::string ev_if_token(const std::string &e0, const std::unordered_map<std::string, std::string> &m) { return expc(e0, m); }
+
+static bool if_eval_one_l(std::string l) {
+  to_lower(&l);
+  if (l == "0" || l == "false" || l == "off" || l == "no" || l == "n" || l == "ignore" || l.empty()) return false;
+  if (l == "1" || l == "on" || l == "true" || l == "y" || l == "yes") return true;
+  return !l.empty();
+}
+
+static bool eval_if_tokens(const std::vector<std::string> &e, const std::unordered_map<std::string, std::string> &m) {
+  if (e.empty()) return false;
+  if (e[0] == "NOT" && e.size() >= 2) {
+    return !eval_if_tokens(std::vector<std::string>(e.begin() + 1, e.end()), m);
+  }
+  if (e[0] == "STREQUAL" && e.size() >= 3) {
+    return ev_if_token(e[1], m) == ev_if_token(e[2], m);
+  }
+  if (e[0] == "DEFINED" && e.size() >= 2) {
+    const std::string k = ev_if_token(e[1], m);
+    return m.find(k) != m.end();
+  }
+  if (e[0] == "EXISTS" && e.size() >= 2) {
+    const fs::path p(expc(e[1], m));
+    std::error_code ec;
+    return fs::exists(p, ec);
+  }
+  if (e[0] == "AND" && e.size() >= 2) {
+    bool a = true;
+    for (std::size_t i = 1; i < e.size() && a; i++) a = a && if_eval_one_l(ev_if_token(e[i], m));
+    return a;
+  }
+  if (e[0] == "OR" && e.size() >= 2) {
+    bool a = false;
+    for (std::size_t i = 1; i < e.size(); i++) a = a || if_eval_one_l(ev_if_token(e[i], m));
+    return a;
+  }
+  if (e.size() == 1) return if_eval_one_l(ev_if_token(e[0], m));
+  for (const auto &a : e)
+    if (if_eval_one_l(ev_if_token(a, m))) return true;
+  return false;
+}
+
+static std::vector<CmakeCommand> filter_if_flat(std::vector<CmakeCommand> cmds, std::unordered_map<std::string, std::string> *m0,
+                                                const fs::path &this_dir, const fs::path &top_source, const fs::path &top_binary) {
+  inject_gz_cmake_path_vars(this_dir, top_source, top_binary, m0);
+  std::vector<IfFState> st;
+  std::vector<CmakeCommand> out;
+  int fnblk = 0;
+  for (CmakeCommand &c : cmds) {
+    std::string n = c.name;
+    to_lower(&n);
+    if (n != "if" && n != "else" && n != "elseif" && n != "endif") fnblk += block_step(n);
+    if (fnblk < 0) fnblk = 0;
+    if (n == "if") {
+      if_stack_if(&st, eval_if_tokens(c.args, *m0));
+      continue;
+    }
+    if (n == "elseif") {
+      if (!st.empty()) if_stack_elseif(&st, eval_if_tokens(c.args, *m0));
+      continue;
+    }
+    if (n == "else") {
+      if (!st.empty()) if_stack_else(&st);
+      continue;
+    }
+    if (n == "endif") {
+      if (!st.empty()) if_stack_endif(&st);
+      continue;
+    }
+    if (!if_stack_emitting(st)) continue;
+    if (n == "set") {
+      if (fnblk == 0) handle_set(c, m0);
+      continue;
+    }
+    if (n == "unset" && c.args.size() >= 1 && fnblk == 0) m0->erase(expc(c.args[0], *m0));
+    out.push_back(std::move(c));
+  }
+  return out;
+}
+
+static std::string path_to_cmake_string(const fs::path &p) {
+  std::error_code ec;
+  const fs::path c = fs::weakly_canonical(p, ec);
+  return c.generic_string();
+}
+
+// 在单次 process_listfile 中注入 CMake 内置目录变量, 并在离开 Listfile 时从共享 vars 中恢复, 以配合 add_subdirectory 共享同一 map
+struct ScopedCmakeDirVars {
+  static constexpr const char *kNames[] = {"CMAKE_SOURCE_DIR",   "CMAKE_BINARY_DIR",  "CMAKE_CURRENT_SOURCE_DIR",
+                                           "CMAKE_CURRENT_LIST_DIR", "CMAKE_CURRENT_BINARY_DIR"};
+  std::unordered_map<std::string, std::string> *const vars;
+  std::unordered_map<std::string, std::optional<std::string>> saved;
+
+  ScopedCmakeDirVars(std::unordered_map<std::string, std::string> *v, const fs::path &this_dir, const fs::path &top_source,
+                     const fs::path &top_binary) : vars(v) {
+    for (const char *name : kNames) {
+      const auto it = v->find(name);
+      if (it != v->end())
+        saved[name] = it->second;
+      else
+        saved[name] = std::nullopt;
+    }
+    std::error_code ec;
+    const fs::path ts = fs::weakly_canonical(top_source, ec);
+    const fs::path tb = fs::weakly_canonical(top_binary, ec);
+    const fs::path td = fs::weakly_canonical(this_dir, ec);
+    (*v)["CMAKE_SOURCE_DIR"] = path_to_cmake_string(ts);
+    (*v)["CMAKE_BINARY_DIR"] = path_to_cmake_string(tb);
+    (*v)["CMAKE_CURRENT_SOURCE_DIR"] = path_to_cmake_string(td);
+    (*v)["CMAKE_CURRENT_LIST_DIR"] = (*v)["CMAKE_CURRENT_SOURCE_DIR"];
+    fs::path rel;
+    {
+      const fs::path tsn = ts;
+      const fs::path tdn = td;
+      rel = fs::relative(tdn, tsn, ec);
+    }
+    if (ec) rel = fs::path(".");
+    if (rel.empty()) rel = fs::path(".");
+    fs::path cur_b = (tb / rel).lexically_normal();
+    cur_b = fs::weakly_canonical(cur_b, ec);
+    (*v)["CMAKE_CURRENT_BINARY_DIR"] = path_to_cmake_string(cur_b);
+  }
+
+  ~ScopedCmakeDirVars() {
+    for (const char *name : kNames) {
+      const auto s = saved.find(name);
+      if (s == saved.end()) continue;
+      if (s->second.has_value())
+        (*vars)[name] = *s->second;
+      else
+        vars->erase(name);
+    }
+  }
+};
 
 static void push_glob_path(const std::string &arg, const fs::path &this_dir, const std::unordered_map<std::string, std::string> &vars,
                            std::vector<fs::path> *out) {
@@ -93,18 +436,105 @@ static void push_glob_path(const std::string &arg, const fs::path &this_dir, con
   }
 }
 
-static void process_listfile(
-    const fs::path &listfile, const std::vector<fs::path> &inherited_includes, std::unordered_map<std::string, std::string> *vars,
-    std::unordered_map<std::string, TargetModel> *targets, InterpretResult *res) {
+/// Parse `configure_file(…)` into template + output abs paths. False if skipped (genexpr, empty, etc.).
+static bool parse_configure_file_command(const CmakeCommand &c, const std::unordered_map<std::string, std::string> &vars,
+                                         const fs::path &this_dir, ConfigFilePathPair *out) {
+  if (c.args.size() < 2) return false;
+  std::string in_str, out_str;
+  bool have_in_kw = false, have_out_kw = false;
+  for (std::size_t i = 0; i < c.args.size(); ++i) {
+    std::string low = c.args[i];
+    to_lower(&low);
+    if (low == "input" && i + 1 < c.args.size()) {
+      in_str = c.args[i + 1];
+      have_in_kw = true;
+      ++i;
+      continue;
+    }
+    if (low == "output" && i + 1 < c.args.size()) {
+      out_str = c.args[i + 1];
+      have_out_kw = true;
+      ++i;
+      continue;
+    }
+  }
+  if (!have_in_kw || !have_out_kw) {
+    in_str.clear();
+    out_str.clear();
+    std::vector<std::string> pos;
+    for (std::size_t i = 0; i < c.args.size(); ++i) {
+      std::string low = c.args[i];
+      to_lower(&low);
+      if (low == "input" && i + 1 < c.args.size()) {
+        i++;
+        continue;
+      }
+      if (low == "output" && i + 1 < c.args.size()) {
+        i++;
+        continue;
+      }
+      if (low == "copyonly" || low == "escape_quotes" || low == "@only") continue;
+      if (low == "newline_style" && i + 1 < c.args.size()) {
+        i++;
+        continue;
+      }
+      pos.push_back(c.args[i]);
+    }
+    if (pos.size() < 2) return false;
+    in_str = pos[0];
+    out_str = pos[1];
+  }
+  in_str = expc(in_str, vars);
+  out_str = expc(out_str, vars);
+  if (in_str.find("$<") != std::string::npos || out_str.find("$<") != std::string::npos) return false;
+  if (in_str.empty() || out_str.empty()) return false;
+  fs::path pin(in_str);
+  if (pin.is_relative()) pin = this_dir / pin;
+  fs::path pout(out_str);
+  if (pout.is_relative()) pout = this_dir / pout;
+  std::error_code ec;
+  out->in_abs = fs::weakly_canonical(pin, ec);
+  out->out_abs = fs::weakly_canonical(pout, ec);
+  return true;
+}
+
+static void process_listfile(const fs::path &listfile, const std::vector<fs::path> &inherited_includes,
+                             std::unordered_map<std::string, std::string> *vars,
+                             std::unordered_map<std::string, TargetModel> *targets, InterpretResult *res,
+                             const fs::path &top_source, const fs::path &top_binary,
+                             std::unordered_set<std::string> *subdir_visited) {
+  {
+    std::error_code ec0;
+    const fs::path abs = fs::absolute(listfile, ec0);
+    const std::string listkey = fs::weakly_canonical(abs, ec0).generic_string();
+    if (subdir_visited) {
+      if (subdir_visited->count(listkey)) {
+        if (res) res->parse_diagnostics.push_back("add_subdirectory: 跳过已处理 Listfile(环或重复): " + listkey);
+        return;
+      }
+      subdir_visited->insert(listkey);
+    }
+  }
 
   const std::string text = read_file_bin(listfile);
-  const std::vector<CmakeCommand> cmds = parse_cmake_script(text);
+  CmakeParseResult pr = parse_cmake_listfile_text(text, listfile.string());
+  if (res) {
+    res->parse_diagnostics.insert(res->parse_diagnostics.end(), pr.parse_notes.begin(), pr.parse_notes.end());
+  }
+  std::vector<CmakeCommand>   work = std::move(pr.commands);
+  std::unordered_set<std::string> include_seen;
+  include_inline_for_listfile(&work, listfile, res, &include_seen);
+  std::unordered_map<std::string, MacroOrFnBody> defmap;
+  remove_macro_function_defs(&work, &defmap);
+  expand_macro_repeatedly(&work, defmap);
   const fs::path this_dir = listfile.parent_path();
+  work = filter_if_flat(std::move(work), vars, this_dir, top_source, top_binary);
+  const ScopedCmakeDirVars _cmake_builtins(vars, this_dir, top_source, top_binary);
 
   std::vector<fs::path> u;
   {
     int b0 = 0;
-    for (const auto &c0 : cmds) {
+    for (const auto &c0 : work) {
       std::string nn = c0.name;
       to_lower(&nn);
       if (nn != "if" && nn != "else" && nn != "elseif" && nn != "endif")
@@ -125,14 +555,14 @@ static void process_listfile(
   base.insert(base.end(), u.begin(), u.end());
 
   int block = 0;
-  for (const auto &c : cmds) {
+  std::string last_tname;  // 同 Listfile 内最近一次的 add_executable / add_library 目标名, 供 configure_file 归属
+  for (const auto &c : work) {
     std::string n = c.name;
     to_lower(&n);
     if (n != "if" && n != "else" && n != "elseif" && n != "endif")
       block += block_step(n);
     if (block < 0) block = 0;
 
-    if (n == "set") handle_set(c, vars);
     if (n == "project" && !c.args.empty() && block == 0) {
       if (res->project_name.empty()) {
         std::string p = expc(c.args[0], *vars);
@@ -146,7 +576,7 @@ static void process_listfile(
       const std::string sub = expc(c.args[0], *vars);
       if (sub.find("$<") == std::string::npos) {
         fs::path sublist = this_dir / sub / "CMakeLists.txt";
-        if (fs::is_regular_file(sublist)) process_listfile(sublist, base, vars, targets, res);
+        if (fs::is_regular_file(sublist)) process_listfile(sublist, base, vars, targets, res, top_source, top_binary, subdir_visited);
       }
     }
     if (n == "add_executable" && block == 0 && c.args.size() >= 1) {
@@ -184,6 +614,7 @@ static void process_listfile(
       tm.source_paths_abs = std::move(srcs);
       tm.include_dir_abs = base;
       (*targets)[tname] = std::move(tm);
+      last_tname = tname;
     }
 
     if (n == "add_library" && block == 0 && c.args.size() >= 1) {
@@ -228,6 +659,27 @@ static void process_listfile(
       tm.source_paths_abs = std::move(srcs);
       tm.include_dir_abs = base;
       (*targets)[tname] = std::move(tm);
+      last_tname = tname;
+    }
+
+    if (n == "configure_file" && block == 0 && c.args.size() >= 2) {
+      ConfigFilePathPair cfp;
+      if (parse_configure_file_command(c, *vars, this_dir, &cfp)) {
+        if (!last_tname.empty()) {
+          auto it = targets->find(last_tname);
+          if (it != targets->end()) it->second.config_files.push_back(std::move(cfp));
+          else
+            res->package_config_files.push_back(std::move(cfp));
+        } else
+          res->package_config_files.push_back(std::move(cfp));
+      } else {
+        std::string raw;
+        for (const auto &a : c.args) raw += a;
+        if (raw.find("$<") != std::string::npos) {
+          res->errors.push_back("configure_file: skipped generator expression, " + listfile.filename().string() + " line " +
+                                std::to_string(c.line));
+        }
+      }
     }
 
     if (n == "target_sources" && block == 0 && c.args.size() >= 2) {
@@ -293,13 +745,77 @@ static void process_listfile(
   }
 }
 
-InterpretResult interpret_cmake_tree(const fs::path &source_root, const fs::path &top_cmake) {
+fs::path infer_gz_default_cmake_binary_root(const fs::path &top_cmake_parent_path) {
+  std::error_code ec;
+  const fs::path top_source = fs::weakly_canonical(top_cmake_parent_path, ec);
+  const fs::path broot = top_source / ".intermediate" / "build";
+  const fs::path as_default = broot / "default";
+  if (fs::is_directory(as_default, ec)) {
+    const fs::path c = fs::weakly_canonical(as_default, ec);
+    if (!ec && !c.empty()) return c;
+    return fs::absolute(as_default);
+  }
+  std::vector<fs::path> subs;
+  ec.clear();
+  if (fs::is_directory(broot, ec)) {
+    for (const auto &de : fs::directory_iterator(broot)) {
+      if (de.is_directory()) subs.push_back(de.path());
+    }
+  }
+  const fs::path chosen = (subs.size() == 1) ? subs[0] : as_default;
+  ec.clear();
+  const fs::path c2 = fs::weakly_canonical(chosen, ec);
+  if (!ec && !c2.empty()) return c2;
+  return fs::absolute(chosen);
+}
+
+static std::string read_arch_value_from_gz_cache(const fs::path &cache_path) {
+  std::ifstream f(cache_path, std::ios::binary);
+  if (!f) return {};
+  std::string line;
+  while (std::getline(f, line)) {
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    if (line.size() >= 5u && line.compare(0, 5, "arch=") == 0) return line.substr(5u);
+  }
+  return {};
+}
+
+std::string infer_gz_generated_arch_segment(const fs::path &top_cmake_parent_path) {
+  const fs::path bro = infer_gz_default_cmake_binary_root(top_cmake_parent_path);
+  if (bro.empty()) return "default";
+  const std::string from_cache = read_arch_value_from_gz_cache(bro / "gz_cache.txt");
+  if (!from_cache.empty()) return from_cache;
+  std::string leaf = bro.filename().string();
+  for (char &c : leaf) {
+    if (c == '/' || c == '\\') c = '_';
+  }
+  if (leaf.empty()) return "default";
+  return leaf;
+}
+
+InterpretResult interpret_cmake_tree(const fs::path &source_root, const fs::path &top_cmake, const fs::path *file_api_json_path) {
   (void)source_root;
+  std::error_code ec;
+  const fs::path top_source = fs::weakly_canonical(top_cmake.parent_path(), ec);
+  const fs::path top_binary = infer_gz_default_cmake_binary_root(top_cmake.parent_path());
   InterpretResult r;
   std::unordered_map<std::string, std::string> vars;
   std::unordered_map<std::string, TargetModel> tmap;
-  process_listfile(top_cmake, {}, &vars, &tmap, &r);
+  std::unordered_set<std::string> subdir_visited;
+  process_listfile(top_cmake, {}, &vars, &tmap, &r, top_source, top_binary, &subdir_visited);
   r.targets = std::move(tmap);
   if (r.project_name.empty()) r.project_name = "reversed_project";
+  if (file_api_json_path && !file_api_json_path->empty()) {
+    std::error_code e2;
+    if (fs::is_regular_file(*file_api_json_path, e2)) {
+      const std::string jt = read_file_bin(*file_api_json_path);
+      r.file_api_target_names = ingest_target_names_from_codemodel_json(jt);
+      for (const std::string &n : r.file_api_target_names) {
+        if (r.targets.find(n) == r.targets.end())
+          r.file_api_merge_notes.push_back("L7 file_api: target \"" + n + "\" 未在静态反解中");
+      }
+    } else
+      r.errors.push_back("L7: 无法读取 file_api JSON: " + file_api_json_path->string());
+  }
   return r;
 }

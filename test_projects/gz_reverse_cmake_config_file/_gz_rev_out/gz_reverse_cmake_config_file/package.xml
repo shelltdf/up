@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<package name="gz_reverse_cmake_config_file" version="0.1.0">
+  <config_files>
+    <file in="../../top.in" to="top_generated.h"/>
+  </config_files>
+</package>

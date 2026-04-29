@@ -3,11 +3,17 @@
 #include "commands_common.hpp"
 #include "paths.hpp"
 
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <optional>
+#include <set>
 #include <sstream>
+#include <string>
+#include <system_error>
+#include <vector>
 
 namespace gz {
 
@@ -32,7 +38,6 @@ bool path_starts_with(const std::filesystem::path& prefix_raw, const std::filesy
   return s[pre.size()] == '/';
 }
 
-// Longest filesystem path that is a prefix directory of every source file (for single-tree packages).
 std::optional<std::filesystem::path> infer_common_source_root(const ConfigureGraphModel& model) {
   std::vector<std::filesystem::path> paths;
   for (const auto& t : model.targets) {
@@ -72,6 +77,455 @@ std::string cmake_escape_string_value(const std::string& v) {
       o.push_back(c);
   }
   return o;
+}
+
+std::string normalize_path_slashes_for_cmake(std::string s) {
+  for (char& c : s) {
+    if (c == '\\')
+      c = '/';
+  }
+  while (s.size() >= 3 && s[0] == '/' && std::isalpha(static_cast<unsigned char>(s[1])) && s[2] == ':')
+    s.erase(0, 1);
+  return s;
+}
+
+std::string abs_path_string_for_cmake(const std::filesystem::path& p) {
+  if (p.empty())
+    return {};
+  std::error_code ec;
+  const std::filesystem::path ab = std::filesystem::absolute(p, ec);
+  return normalize_path_slashes_for_cmake(
+      to_posix_path_string((ec || ab.empty()) ? p : ab));
+}
+
+std::string abs_path_string_for_cmake(const std::string& s) {
+  if (s.empty())
+    return s;
+  return abs_path_string_for_cmake(std::filesystem::path(s));
+}
+
+std::string list_path_from_cmake_source(const std::string& src_raw, const std::filesystem::path& build_root) {
+  if (src_raw.empty())
+    return {};
+  std::error_code ec;
+  const std::filesystem::path br = std::filesystem::weakly_canonical(std::filesystem::absolute(build_root), ec);
+  if (ec || br.empty())
+    return abs_path_string_for_cmake(std::filesystem::path(src_raw));
+
+  const std::filesystem::path p(src_raw);
+  if (p.is_relative()) {
+    std::string s = normalize_path_slashes_for_cmake(p.generic_string());
+    while (!s.empty() && s.front() == '/')
+      s.erase(0, 1);
+    return std::string("${CMAKE_SOURCE_DIR}/") + s;
+  }
+
+  const std::filesystem::path abs_p = std::filesystem::absolute(p, ec);
+  if (ec)
+    return abs_path_string_for_cmake(p);
+  std::filesystem::path rel = std::filesystem::relative(abs_p, br, ec);
+  if (!ec && !rel.empty() && !rel.is_absolute()) {
+    std::string rs = rel.generic_string();
+    for (char& c : rs) {
+      if (c == '\\')
+        c = '/';
+    }
+    return std::string("${CMAKE_SOURCE_DIR}/") + rs;
+  }
+  return abs_path_string_for_cmake(abs_p);
+}
+
+std::string list_path_from_cmake_source(const std::filesystem::path& src_raw, const std::filesystem::path& build_root) {
+  if (src_raw.empty())
+    return {};
+  return list_path_from_cmake_source(to_posix_path_string(src_raw), build_root);
+}
+
+std::string prebuilt_target_linker_path_for_lists(const ConfigureTargetModel& t, const std::filesystem::path& build_root) {
+  if (t.type == "prebuilt_static_library")
+    return list_path_from_cmake_source(t.imported_location, build_root);
+  if (t.type == "prebuilt_shared_library") {
+    if (!t.imported_implib.empty())
+      return list_path_from_cmake_source(t.imported_implib, build_root);
+    return list_path_from_cmake_source(t.imported_location, build_root);
+  }
+  return {};
+}
+
+// ---------------------------------------------------------------------------
+// Prebuilt / link index (built once per write_cmake_lists)
+// ---------------------------------------------------------------------------
+struct PrebuiltLinkIndex {
+  std::set<std::string> names;                   // prebuilt target names
+  std::map<std::string, std::string> linker_path;  // name → list path; empty → use $<TARGET_LINKER_FILE:>
+};
+
+PrebuiltLinkIndex make_prebuilt_index(const ConfigureGraphModel& m) {
+  PrebuiltLinkIndex o;
+  for (const auto& t : m.targets) {
+    if (t.type == "prebuilt_static_library" || t.type == "prebuilt_shared_library")
+      o.names.insert(t.name);
+  }
+  for (const auto& t : m.targets) {
+    if (t.type == "prebuilt_static_library" || t.type == "prebuilt_shared_library")
+      o.linker_path[t.name] = prebuilt_target_linker_path_for_lists(t, m.build_root);
+  }
+  return o;
+}
+
+// ---------------------------------------------------------------------------
+// Stages: append fragments to ostream (output dir / install policy lives in 02-physical spec, not in generated comments).
+// ---------------------------------------------------------------------------
+constexpr const char* kInd = "  ";
+
+void append_preamble(std::ostringstream& o, const std::string& package_name) {
+  o << "cmake_minimum_required(VERSION 3.20)\n";
+  o << "project(" << package_name << " LANGUAGES C CXX)\n";
+  o << "set(CMAKE_CXX_STANDARD 17)\n";
+  o << "set(CMAKE_CXX_STANDARD_REQUIRED ON)\n";
+  o << "\n";
+}
+
+void append_prebuilt_imported(
+    std::ostringstream& o,
+    const ConfigureGraphModel& m,
+    const std::optional<std::filesystem::path>& pkg_root) {
+  for (const auto& t : m.targets) {
+    if (!t.imported_prebuilt)
+      continue;
+    const bool sh = (t.type == "prebuilt_shared_library");
+    o << "add_library(" << t.name << " " << (sh ? "SHARED" : "STATIC") << " IMPORTED)\n";
+    if (sh) {
+      o << "if(WIN32)\n";
+      o << kInd << "set_target_properties(" << t.name << " PROPERTIES\n";
+      o << kInd << kInd << "IMPORTED_LOCATION \""
+         << cmake_escape_string_value(list_path_from_cmake_source(t.imported_location, m.build_root)) << "\"\n";
+      if (!t.imported_implib.empty())
+        o << kInd << kInd << "IMPORTED_IMPLIB \""
+           << cmake_escape_string_value(list_path_from_cmake_source(t.imported_implib, m.build_root)) << "\"\n";
+      o << kInd << ")\n";
+      o << "else()\n";
+      o << kInd << "set_target_properties(" << t.name << " PROPERTIES IMPORTED_LOCATION \""
+         << cmake_escape_string_value(list_path_from_cmake_source(t.imported_location, m.build_root)) << "\")\n";
+      o << "endif()\n";
+    } else {
+      o << "set_target_properties(" << t.name << " PROPERTIES IMPORTED_LOCATION \""
+         << cmake_escape_string_value(list_path_from_cmake_source(t.imported_location, m.build_root)) << "\")\n";
+    }
+    if (!t.include_dirs.empty()) {
+      o << "target_include_directories(" << t.name << " INTERFACE\n";
+      for (const auto& inc : t.include_dirs)
+        o << kInd << "\"" << cmake_escape_string_value(list_path_from_cmake_source(inc, m.build_root)) << "\"\n";
+      o << ")\n";
+    }
+    if (pkg_root) {
+      o << "target_include_directories(" << t.name << " INTERFACE\n"
+         << kInd << "\"" << cmake_escape_string_value(list_path_from_cmake_source(*pkg_root, m.build_root))
+         << "\"\n)\n";
+    }
+    o << "\n";
+  }
+  o << "\n";
+}
+
+void append_source_rules_for_target(
+    std::ostringstream& o, const ConfigureTargetModel& t, const ConfigureGraphModel& m, int& command_idx) {
+  for (const auto& s : t.source_rules) {
+    if (!s.preprocess_command.empty()) {
+      const std::string stamp = "pre_stamp_" + std::to_string(command_idx++);
+      o << kInd << "add_custom_command(OUTPUT " << stamp << " COMMAND " << s.preprocess_command
+         << " COMMAND ${CMAKE_COMMAND} -E touch " << stamp << " DEPENDS \""
+         << cmake_escape_string_value(list_path_from_cmake_source(s.path, m.build_root)) << "\")\n";
+      o << kInd << "add_custom_target(pre_target_" << command_idx << " DEPENDS " << stamp << ")\n";
+      o << kInd << "add_dependencies(" << t.name << " pre_target_" << command_idx << ")\n";
+    }
+    if (!s.postprocess_command.empty()) {
+      o << kInd << "add_custom_command(TARGET " << t.name << " POST_BUILD COMMAND " << s.postprocess_command
+         << ")\n";
+    }
+  }
+}
+
+void append_native_libraries(
+    std::ostringstream& o,
+    const ConfigureGraphModel& m,
+    const std::optional<std::filesystem::path>& pkg_root,
+    int& command_idx) {
+  for (const auto& t : m.targets) {
+    if (t.imported_prebuilt || t.type == "asset_bundle")
+      continue;
+    if (!(t.type == "static_library" || t.type == "shared_library"))
+      continue;
+    const char* kind = (t.type == "shared_library") ? "SHARED" : "STATIC";
+    if (t.source_paths.empty()) {
+      o << "add_library(" << t.name << " " << kind << ")\n";
+    } else {
+      o << "add_library(" << t.name << " " << kind << "\n";
+      for (const auto& s : t.source_paths)
+        o << kInd << "\"" << cmake_escape_string_value(list_path_from_cmake_source(s, m.build_root)) << "\"\n";
+      o << ")\n";
+    }
+    if (!t.include_dirs.empty()) {
+      o << "target_include_directories(" << t.name << " PUBLIC\n";
+      for (const auto& inc : t.include_dirs)
+        o << kInd << "\"" << cmake_escape_string_value(list_path_from_cmake_source(inc, m.build_root)) << "\"\n";
+      o << ")\n";
+    }
+    if (pkg_root) {
+      o << "target_include_directories(" << t.name << " PUBLIC\n"
+         << kInd << "\"" << cmake_escape_string_value(list_path_from_cmake_source(*pkg_root, m.build_root))
+         << "\"\n)\n";
+    }
+    if (!t.compile_definitions.empty()) {
+      o << "target_compile_definitions(" << t.name << " PRIVATE\n";
+      for (const auto& d : t.compile_definitions)
+        o << kInd << "\"" << cmake_escape_string_value(d) << "\"\n";
+      o << ")\n";
+    }
+    append_source_rules_for_target(o, t, m, command_idx);
+    o << "\n";
+  }
+}
+
+void append_link_item(
+    std::ostringstream& o, const std::string& n, const PrebuiltLinkIndex& pbi) {
+  if (pbi.names.count(n)) {
+    const auto it = pbi.linker_path.find(n);
+    if (it != pbi.linker_path.end() && !it->second.empty()) {
+      o << " \"" << cmake_escape_string_value(it->second) << "\"";
+      return;
+    }
+    o << " \"$<TARGET_LINKER_FILE:" << n << ">\"";
+    return;
+  }
+  o << " " << n;
+}
+
+void split_links(
+    const ConfigureTargetModel& t,
+    std::vector<std::string>& out_priv,
+    std::vector<std::string>& out_pub,
+    std::vector<std::string>& out_iface) {
+  for (const auto& pr : t.links) {
+    if (pr.second == "public")
+      out_pub.push_back(pr.first);
+    else if (pr.second == "interface")
+      out_iface.push_back(pr.first);
+    else
+      out_priv.push_back(pr.first);
+  }
+}
+
+void append_link_group(
+    std::ostringstream& o, const char* keyword, const std::vector<std::string>& names, const PrebuiltLinkIndex& pbi) {
+  if (names.empty())
+    return;
+  o << kInd << keyword;
+  for (const auto& n : names)
+    append_link_item(o, n, pbi);
+  o << "\n";
+}
+
+void append_executables(
+    std::ostringstream& o,
+    const ConfigureGraphModel& m,
+    const std::optional<std::filesystem::path>& pkg_root,
+    const PrebuiltLinkIndex& pbi) {
+  for (const auto& t : m.targets) {
+    if (t.type != "executable")
+      continue;
+    if (t.source_paths.empty()) {
+      o << "add_executable(" << t.name << ")\n";
+    } else {
+      o << "add_executable(" << t.name << "\n";
+      for (const auto& s : t.source_paths)
+        o << kInd << "\"" << cmake_escape_string_value(list_path_from_cmake_source(s, m.build_root)) << "\"\n";
+      o << ")\n";
+    }
+    if (!t.links.empty()) {
+      std::vector<std::string> priv, pub, iface;
+      split_links(t, priv, pub, iface);
+      o << "target_link_libraries(" << t.name << "\n";
+      append_link_group(o, "PRIVATE", priv, pbi);
+      append_link_group(o, "PUBLIC", pub, pbi);
+      append_link_group(o, "INTERFACE", iface, pbi);
+      o << ")\n";
+      std::set<std::string> dep_unique;
+      for (const auto& pr : t.links)
+        dep_unique.insert(pr.first);
+      if (!dep_unique.empty()) {
+        o << "add_dependencies(" << t.name;
+        for (const auto& n : dep_unique)
+          o << "\n" << kInd << n;
+        o << "\n)\n";
+      }
+    }
+    if (!t.include_dirs.empty()) {
+      o << "target_include_directories(" << t.name << " PRIVATE\n";
+      for (const auto& inc : t.include_dirs)
+        o << kInd << "\"" << cmake_escape_string_value(list_path_from_cmake_source(inc, m.build_root)) << "\"\n";
+      o << ")\n";
+    }
+    if (pkg_root) {
+      o << "target_include_directories(" << t.name << " PRIVATE\n"
+         << kInd << "\"" << cmake_escape_string_value(list_path_from_cmake_source(*pkg_root, m.build_root))
+         << "\"\n)\n";
+    }
+    if (!t.compile_definitions.empty()) {
+      o << "target_compile_definitions(" << t.name << " PRIVATE\n";
+      for (const auto& d : t.compile_definitions)
+        o << kInd << "\"" << cmake_escape_string_value(d) << "\"\n";
+      o << ")\n";
+    }
+    o << "\n";
+  }
+}
+
+void append_test_block(std::ostringstream& o, const ConfigureGraphModel& m) {
+  o << "include(CTest)\n";
+  o << "enable_testing()\n";
+  o << "\n";
+  for (const auto& t : m.targets) {
+    if (t.type == "executable")
+      o << "add_test(\n"
+         << kInd << "NAME " << t.name << "\n"
+         << kInd << "COMMAND " << t.name << "\n"
+         << ")\n";
+  }
+  o << "\n";
+}
+
+void collect_native_lib_names_by_kind(const ConfigureGraphModel& m, std::vector<std::string>& static_out,
+                                      std::vector<std::string>& shared_out) {
+  for (const auto& t : m.targets) {
+    if (t.imported_prebuilt || t.type == "asset_bundle")
+      continue;
+    if (t.type == "static_library")
+      static_out.push_back(t.name);
+    else if (t.type == "shared_library")
+      shared_out.push_back(t.name);
+  }
+}
+
+void append_install(
+    std::ostringstream& o, const ConfigureGraphModel& m, int& command_idx) {
+  if (!m.install_exe_names.empty()) {
+    o << "install(TARGETS\n";
+    for (const auto& exe_name : m.install_exe_names)
+      o << kInd << exe_name << "\n";
+    o << kInd << "RUNTIME DESTINATION bin\n)\n";
+  }
+  o << "\n";
+  {
+    std::vector<std::string> static_names;
+    std::vector<std::string> shared_names;
+    collect_native_lib_names_by_kind(m, static_names, shared_names);
+    if (!static_names.empty()) {
+      o << "install(TARGETS\n";
+      for (const auto& n : static_names)
+        o << kInd << n << "\n";
+      o << kInd << "ARCHIVE DESTINATION lib\n)\n";
+    }
+    o << "\n";
+    if (!shared_names.empty()) {
+      // Windows: DLL is RUNTIME, import .lib is ARCHIVE; LIBRARY does not apply to DLLs (CMake install() docs).
+      // Mixing LIBRARY+ARCHIVE+RUNTIME for the same target has led to .dll install without import .lib.
+      o << "if(WIN32)\n";
+      o << "install(TARGETS\n";
+      for (const auto& n : shared_names)
+        o << kInd << n << "\n";
+      o << kInd << "RUNTIME DESTINATION bin\n" << kInd << "ARCHIVE DESTINATION lib\n)\n";
+      o << "else()\n";
+      o << "install(TARGETS\n";
+      for (const auto& n : shared_names)
+        o << kInd << n << "\n";
+      o << kInd << "LIBRARY DESTINATION lib\n)\n";
+      o << "endif()\n";
+    }
+  }
+  o << "\n";
+  for (const auto& t : m.targets) {
+    if (!t.imported_prebuilt)
+      continue;
+    if (t.type == "prebuilt_shared_library") {
+      o << "if(WIN32)\n";
+      if (!t.imported_dll.empty())
+        o << kInd << "install(FILES \""
+           << cmake_escape_string_value(list_path_from_cmake_source(t.imported_dll, m.build_root))
+           << "\" DESTINATION bin)\n";
+      if (!t.imported_implib.empty())
+        o << kInd << "install(FILES \""
+           << cmake_escape_string_value(list_path_from_cmake_source(t.imported_implib, m.build_root))
+           << "\" DESTINATION lib)\n";
+      o << "else()\n";
+      o << kInd << "install(FILES \""
+         << cmake_escape_string_value(list_path_from_cmake_source(t.imported_location, m.build_root))
+         << "\" DESTINATION lib)\n";
+      o << "endif()\n";
+    } else {
+      o << "install(FILES \""
+         << cmake_escape_string_value(list_path_from_cmake_source(t.imported_location, m.build_root))
+         << "\" DESTINATION lib)\n";
+    }
+  }
+  o << "\n";
+  for (const auto& rule : m.install_dir_rules) {
+    if (!rule.preprocess_command.empty())
+      o << kInd << "add_custom_target(pre_include_dir_" << command_idx++ << " COMMAND " << rule.preprocess_command
+         << ")\n";
+    if (!rule.postprocess_command.empty())
+      o << kInd << "add_custom_target(post_include_dir_" << command_idx++ << " COMMAND " << rule.postprocess_command
+         << ")\n";
+    {
+      std::string sdir = list_path_from_cmake_source(rule.src, m.build_root);
+      if (!sdir.empty() && sdir.back() != '/')
+        sdir += '/';
+      o << kInd << "install(DIRECTORY \"" << cmake_escape_string_value(sdir) << "\" DESTINATION " << rule.dst
+         << " FILES_MATCHING PATTERN \"*.h\" PATTERN \"*.hh\" PATTERN \"*.hpp\" PATTERN \"*.hxx\")\n";
+    }
+  }
+  o << "\n";
+  for (const auto& rule : m.install_file_rules) {
+    if (!rule.preprocess_command.empty())
+      o << kInd << "add_custom_target(pre_include_file_" << command_idx++ << " COMMAND " << rule.preprocess_command
+         << ")\n";
+    if (!rule.postprocess_command.empty())
+      o << kInd << "add_custom_target(post_include_file_" << command_idx++ << " COMMAND " << rule.postprocess_command
+         << ")\n";
+    o << kInd << "install(FILES \""
+      << cmake_escape_string_value(list_path_from_cmake_source(rule.src, m.build_root)) << "\" DESTINATION " << rule.dst
+      << ")\n";
+  }
+  o << "\n";
+  for (const auto& rule : m.asset_dir_rules) {
+    if (!rule.preprocess_command.empty())
+      o << kInd << "add_custom_target(pre_asset_dir_" << command_idx++ << " COMMAND " << rule.preprocess_command
+         << ")\n";
+    if (!rule.postprocess_command.empty())
+      o << kInd << "add_custom_target(post_asset_dir_" << command_idx++ << " COMMAND " << rule.postprocess_command
+         << ")\n";
+    {
+      std::string sdir = list_path_from_cmake_source(rule.src, m.build_root);
+      if (!sdir.empty() && sdir.back() != '/')
+        sdir += '/';
+      o << kInd << "install(DIRECTORY \"" << cmake_escape_string_value(sdir) << "\" DESTINATION " << rule.dst
+         << ")\n";
+    }
+  }
+  o << "\n";
+  for (const auto& rule : m.asset_file_rules) {
+    if (!rule.preprocess_command.empty())
+      o << kInd << "add_custom_target(pre_asset_file_" << command_idx++ << " COMMAND " << rule.preprocess_command
+         << ")\n";
+    if (!rule.postprocess_command.empty())
+      o << kInd << "add_custom_target(post_asset_file_" << command_idx++ << " COMMAND " << rule.postprocess_command
+         << ")\n";
+    o << kInd << "install(FILES \""
+       << cmake_escape_string_value(list_path_from_cmake_source(rule.src, m.build_root)) << "\" DESTINATION "
+       << rule.dst << ")\n";
+  }
+  o << "\n";
+  o << "install(CODE \"message(STATUS \\\"gz: install stage complete\\\")\")\n";
 }
 
 }  // namespace
@@ -120,214 +574,23 @@ std::string build_cmake_configure_command(const ConfigureBackendContext& ctx) {
 int write_cmake_lists(const ConfigureGraphModel& model) {
   std::ostringstream cm;
   int command_idx = 0;
-  cm << "cmake_minimum_required(VERSION 3.20)\n";
-  cm << "project(" << model.package_name << " LANGUAGES C CXX)\n";
-  cm << "set(CMAKE_CXX_STANDARD 17)\n";
-  cm << "set(CMAKE_CXX_STANDARD_REQUIRED ON)\n";
+  const auto pkg_root = infer_common_source_root(model);
+  const PrebuiltLinkIndex prebuilt_link = make_prebuilt_index(model);
 
-  const std::optional<std::filesystem::path> pkg_src_root = infer_common_source_root(model);
+  append_preamble(cm, model.package_name);
+  append_prebuilt_imported(cm, model, pkg_root);
+  append_native_libraries(cm, model, pkg_root, command_idx);
+  append_executables(cm, model, pkg_root, prebuilt_link);
+  append_test_block(cm, model);
+  append_install(cm, model, command_idx);
 
-  for (const auto& t : model.targets) {
-    if (!t.imported_prebuilt)
-      continue;
-    const bool sh = (t.type == "prebuilt_shared_library");
-    cm << "add_library(" << t.name << " " << (sh ? "SHARED" : "STATIC") << " IMPORTED)\n";
-    if (sh) {
-      cm << "if(WIN32)\n";
-      cm << "  set_target_properties(" << t.name << " PROPERTIES\n";
-      cm << "    IMPORTED_LOCATION \"" << cmake_escape_string_value(t.imported_location) << "\"\n";
-      if (!t.imported_implib.empty())
-        cm << "    IMPORTED_IMPLIB \"" << cmake_escape_string_value(t.imported_implib) << "\"\n";
-      cm << "  )\n";
-      cm << "else()\n";
-      cm << "  set_target_properties(" << t.name << " PROPERTIES IMPORTED_LOCATION \""
-         << cmake_escape_string_value(t.imported_location) << "\")\n";
-      cm << "endif()\n";
-    } else {
-      cm << "set_target_properties(" << t.name << " PROPERTIES IMPORTED_LOCATION \""
-         << cmake_escape_string_value(t.imported_location) << "\")\n";
-    }
-    if (!t.include_dirs.empty()) {
-      cm << "target_include_directories(" << t.name << " INTERFACE";
-      for (const auto& inc : t.include_dirs)
-        cm << " \"" << inc << "\"";
-      cm << ")\n";
-    }
-    if (pkg_src_root) {
-      cm << "target_include_directories(" << t.name << " INTERFACE \""
-          << to_posix_path_string(std::filesystem::absolute(*pkg_src_root)) << "\")\n";
-    }
-  }
-
-  for (const auto& t : model.targets) {
-    if (t.imported_prebuilt || t.type == "asset_bundle")
-      continue;
-    if (!(t.type == "static_library" || t.type == "shared_library"))
-      continue;
-    const char* kind = (t.type == "shared_library") ? "SHARED" : "STATIC";
-    cm << "add_library(" << t.name << " " << kind;
-    for (const auto& s : t.source_paths)
-      cm << " \"" << s << "\"";
-    cm << ")\n";
-    if (!t.include_dirs.empty()) {
-      cm << "target_include_directories(" << t.name << " PUBLIC";
-      for (const auto& inc : t.include_dirs)
-        cm << " \"" << inc << "\"";
-      cm << ")\n";
-    }
-    if (pkg_src_root) {
-      cm << "target_include_directories(" << t.name << " PUBLIC \""
-          << to_posix_path_string(std::filesystem::absolute(*pkg_src_root)) << "\")\n";
-    }
-    if (!t.compile_definitions.empty()) {
-      cm << "target_compile_definitions(" << t.name << " PRIVATE";
-      for (const auto& d : t.compile_definitions)
-        cm << " \"" << cmake_escape_string_value(d) << "\"";
-      cm << ")\n";
-    }
-    for (const auto& s : t.source_rules) {
-      if (!s.preprocess_command.empty()) {
-        const std::string stamp = "pre_stamp_" + std::to_string(command_idx++);
-        cm << "add_custom_command(OUTPUT " << stamp << " COMMAND " << s.preprocess_command
-           << " COMMAND ${CMAKE_COMMAND} -E touch " << stamp << " DEPENDS \"" << s.path << "\")\n";
-        cm << "add_custom_target(pre_target_" << command_idx << " DEPENDS " << stamp << ")\n";
-        cm << "add_dependencies(" << t.name << " pre_target_" << command_idx << ")\n";
-      }
-      if (!s.postprocess_command.empty()) {
-        cm << "add_custom_command(TARGET " << t.name << " POST_BUILD COMMAND " << s.postprocess_command << ")\n";
-      }
-    }
-  }
-
-  for (const auto& t : model.targets) {
-    if (t.type != "executable")
-      continue;
-    cm << "add_executable(" << t.name;
-    for (const auto& s : t.source_paths)
-      cm << " \"" << s << "\"";
-    cm << ")\n";
-    if (!t.links.empty()) {
-      cm << "target_link_libraries(" << t.name;
-      std::vector<std::string> priv, pub, iface;
-      for (const auto& pr : t.links) {
-        if (pr.second == "public")
-          pub.push_back(pr.first);
-        else if (pr.second == "interface")
-          iface.push_back(pr.first);
-        else
-          priv.push_back(pr.first);
-      }
-      auto emit_group = [&](const char* kw, const std::vector<std::string>& names) {
-        if (names.empty())
-          return;
-        cm << " " << kw;
-        for (const auto& n : names)
-          cm << " " << n;
-      };
-      emit_group("PRIVATE", priv);
-      emit_group("PUBLIC", pub);
-      emit_group("INTERFACE", iface);
-      cm << ")\n";
-    }
-    if (!t.include_dirs.empty()) {
-      cm << "target_include_directories(" << t.name << " PRIVATE";
-      for (const auto& inc : t.include_dirs)
-        cm << " \"" << inc << "\"";
-      cm << ")\n";
-    }
-    if (!t.compile_definitions.empty()) {
-      cm << "target_compile_definitions(" << t.name << " PRIVATE";
-      for (const auto& d : t.compile_definitions)
-        cm << " \"" << cmake_escape_string_value(d) << "\"";
-      cm << ")\n";
-    }
-  }
-
-  cm << "include(CTest)\n";
-  cm << "enable_testing()\n";
-  for (const auto& t : model.targets) {
-    if (t.type == "executable")
-      cm << "add_test(NAME " << t.name << " COMMAND $<TARGET_FILE:" << t.name << ">)\n";
-  }
-  if (!model.install_exe_names.empty()) {
-    cm << "install(TARGETS";
-    for (const auto& exe_name : model.install_exe_names)
-      cm << " " << exe_name;
-    cm << " RUNTIME DESTINATION bin)\n";
-  }
-
-  {
-    std::vector<std::string> native_lib_names;
-    for (const auto& t : model.targets) {
-      if (t.imported_prebuilt || t.type == "asset_bundle")
-        continue;
-      if (t.type == "static_library" || t.type == "shared_library")
-        native_lib_names.push_back(t.name);
-    }
-    if (!native_lib_names.empty()) {
-      cm << "install(TARGETS";
-      for (const auto& n : native_lib_names)
-        cm << " " << n;
-      cm << " ARCHIVE DESTINATION lib LIBRARY DESTINATION lib RUNTIME DESTINATION bin)\n";
-    }
-  }
-
-  for (const auto& t : model.targets) {
-    if (!t.imported_prebuilt)
-      continue;
-    if (t.type == "prebuilt_shared_library") {
-      cm << "if(WIN32)\n";
-      if (!t.imported_dll.empty())
-        cm << "  install(FILES \"" << cmake_escape_string_value(t.imported_dll) << "\" DESTINATION bin)\n";
-      if (!t.imported_implib.empty())
-        cm << "  install(FILES \"" << cmake_escape_string_value(t.imported_implib) << "\" DESTINATION lib)\n";
-      cm << "else()\n";
-      cm << "  install(FILES \"" << cmake_escape_string_value(t.imported_location) << "\" DESTINATION lib)\n";
-      cm << "endif()\n";
-    } else {
-      cm << "install(FILES \"" << cmake_escape_string_value(t.imported_location) << "\" DESTINATION lib)\n";
-    }
-  }
-
-  for (const auto& rule : model.install_dir_rules) {
-    if (!rule.preprocess_command.empty())
-      cm << "add_custom_target(pre_include_dir_" << command_idx++ << " COMMAND " << rule.preprocess_command << ")\n";
-    if (!rule.postprocess_command.empty())
-      cm << "add_custom_target(post_include_dir_" << command_idx++ << " COMMAND " << rule.postprocess_command << ")\n";
-    cm << "install(DIRECTORY \"" << rule.src << "/\" DESTINATION " << rule.dst
-       << " FILES_MATCHING PATTERN \"*.h\" PATTERN \"*.hh\" PATTERN \"*.hpp\" PATTERN \"*.hxx\")\n";
-  }
-  for (const auto& rule : model.install_file_rules) {
-    if (!rule.preprocess_command.empty())
-      cm << "add_custom_target(pre_include_file_" << command_idx++ << " COMMAND " << rule.preprocess_command << ")\n";
-    if (!rule.postprocess_command.empty())
-      cm << "add_custom_target(post_include_file_" << command_idx++ << " COMMAND " << rule.postprocess_command << ")\n";
-    cm << "install(FILES \"" << rule.src << "\" DESTINATION " << rule.dst << ")\n";
-  }
-  for (const auto& rule : model.asset_dir_rules) {
-    if (!rule.preprocess_command.empty())
-      cm << "add_custom_target(pre_asset_dir_" << command_idx++ << " COMMAND " << rule.preprocess_command << ")\n";
-    if (!rule.postprocess_command.empty())
-      cm << "add_custom_target(post_asset_dir_" << command_idx++ << " COMMAND " << rule.postprocess_command << ")\n";
-    cm << "install(DIRECTORY \"" << rule.src << "/\" DESTINATION " << rule.dst << ")\n";
-  }
-  for (const auto& rule : model.asset_file_rules) {
-    if (!rule.preprocess_command.empty())
-      cm << "add_custom_target(pre_asset_file_" << command_idx++ << " COMMAND " << rule.preprocess_command << ")\n";
-    if (!rule.postprocess_command.empty())
-      cm << "add_custom_target(post_asset_file_" << command_idx++ << " COMMAND " << rule.postprocess_command << ")\n";
-    cm << "install(FILES \"" << rule.src << "\" DESTINATION " << rule.dst << ")\n";
-  }
-
-  // Ensure Visual Studio generators always emit an install target even for library-wrapper-only packages.
-  cm << "install(CODE \"message(STATUS \\\"gz: install stage complete\\\")\")\n";
-
+  const std::string rendered = cm.str();
   const auto out_cmake = model.build_root / "CMakeLists.txt";
   std::ofstream f(out_cmake);
   if (!f) {
     return 5;
   }
-  f << cm.str();
+  f << rendered;
   std::cout << "Wrote " << to_posix_path_string(out_cmake) << std::endl;
   return 0;
 }

@@ -32,6 +32,8 @@ static void init_windows_console_utf8() {
 struct Options {
   fs::path source_dir;
   fs::path out_dir;
+  /// L7: 预置的 codemodel / File API 风格 JSON (不执行 cmake)
+  std::string file_api_json;
   std::string package_name;
   std::string package_version = "0.1.0";
   bool help = false;
@@ -61,9 +63,11 @@ static void print_usage() {
       << "说明: 不调用 cmake。将 Listfile 解析为命令流(语句级浅层 AST)后做静态子集重解释:\n"
       << "      project, set, include_directories, add_subdirectory, add_executable,\n"
       << "      add_library(STATIC/SHARED/MODULE 等), target_sources, target_link_libraries,\n"
-      << "      target_include_directories; 不执行 if/foreach 真值, function/macro 内 add_* 忽略;\n"
+      << "      target_include_directories, configure_file(可映射为 <config_files>); 不执行 if/foreach 真值, function/macro 内对 add_* 与 configure_file 不解释;\n"
       << "      生成器表达式 $<> 在相关实参上跳过。\n"
-      << "XML: 若有 <headers> 则写在 <sources> 之前; <sources> 为 .c/.cpp 等 + 非对外头; <headers> 仅 public 头(<file>); 不写未展开 ${...} 。\n";
+      << "      ${CMAKE_BINARY_DIR} 等按 GroundZero 与 gz 相同, 从 <source>/.intermediate/build/… 自动推算(见注)。\n"
+      << "      可选: --file-api <path>  用户预置的 File API / codemodel 回复 JSON, 仅作 target 名对照 (不运行 cmake)。\n"
+      << "XML: <headers> 若存在先写, 再 <config_files>(若有), 再 <sources>; <sources> 为 .c/.cpp 等 + 非对外头; 不写未展开 ${...} 。\n";
 }
 
 static bool is_skipped_utility_name(const std::string &name) {
@@ -117,6 +121,14 @@ static void warn_out_equals_source(const fs::path &source, const fs::path &out_r
          "警告: 输出根与源目录相同, 生成物会混在源根; 可省略 --out 以用默认的 <source>/gz_reverse/ 作输出根\n";
 }
 
+/// GZ `package.xml` / `target.xml` 的 `<file to="…"/>`：`to` 相对 **`.intermediate/generated/<arch 段>/<包名>/_package/`**（包级）或
+/// **`.intermediate/generated/<arch 段>/<包名>/<目标名>/`**（目标级；`arch` 与 `gz_cache.txt` 的 `arch=` 一致）——见 `package-target-xml-spec` §2.6、§3.5。
+/// 与 CMake 在 `CMAKE_CURRENT_BINARY_DIR` 下算出的**绝对/构建树**路径解耦，不要写入整条 `.intermediate/build/<叶>/...`。
+/// 反解侧仅输出**生成文件名**；若需子目录布局请在包内手改 `to`（如 `include/foo.h`）。
+static std::string config_to_for_gz(const fs::path &out_abs) {
+  return out_abs.filename().generic_string();
+}
+
 static std::string source_path_for_target_xml(const fs::path &tdir, const fs::path &abs_path, const fs::path & /*top*/) {
   std::error_code ec;
   fs::path p = abs_path;
@@ -128,6 +140,68 @@ static std::string source_path_for_target_xml(const fs::path &tdir, const fs::pa
     return path_to_posix(abs_path.generic_string());
   }
   return path_to_posix(r);
+}
+
+static bool same_canonical_path(const fs::path &a, const fs::path &b) {
+  std::error_code ec, ec2;
+  const fs::path ca = fs::weakly_canonical(a, ec);
+  const fs::path cb = fs::weakly_canonical(b, ec2);
+  if (ec || ec2) return false;
+  return ca == cb;
+}
+
+/// 与 `package.xml` 或本目标 `target.xml` 中已声明的 `config_files` **输出** 为同一文件时, 不写入 `<sources>`/`<headers>`,
+/// 避免与 `gz configure` 对包级/目标级 `config_files` 自动并入编译列表重复.
+static bool is_covered_by_config_files(const fs::path &sp, const TargetModel &tm, const std::vector<ConfigFilePathPair> &package_cf) {
+  for (const auto &cf : package_cf) {
+    if (same_canonical_path(cf.out_abs, sp)) return true;
+  }
+  for (const auto &cf : tm.config_files) {
+    if (same_canonical_path(cf.out_abs, sp)) return true;
+  }
+  return false;
+}
+
+static bool is_strict_subpath(const fs::path &root, const fs::path &p) {
+  std::error_code ec;
+  const fs::path rel = fs::relative(p, root, ec);
+  if (ec) return false;
+  if (rel.empty()) return true;
+  for (const auto &c : rel)
+    if (c == fs::path("..")) return false;
+  return true;
+}
+
+/// 把 CMake 推断的 **.intermediate/build/&lt;叶&gt;/** 下源路径改写成 GZ 的
+/// **.intermediate/generated/&lt;arch 段&gt;/&lt;包&gt;/( _package 或 &lt;目标名&gt; )/…**（与 `gz configure` 的 `compose_arch_tag` + `arch=` 一致；反解用 `gz_cache.txt` 或 build 叶名 — 见 `infer_gz_generated_arch_segment`）。
+static std::string source_path_for_gz_remap(const fs::path &tdir, const fs::path &sp, const fs::path &source_root, const std::string &gen_arch,
+                                            const std::string &pkg_name, const std::string &tname, const TargetModel &tm,
+                                            const std::vector<ConfigFilePathPair> &package_cf) {
+  std::error_code ec;
+  const fs::path wc = fs::weakly_canonical(sp, ec);
+  if (ec) return source_path_for_target_xml(tdir, sp, source_root);
+  const fs::path gbase = source_root / ".intermediate" / "generated" / gen_arch;
+
+  for (const auto &cf : package_cf) {
+    if (!same_canonical_path(cf.out_abs, sp)) continue;
+    const fs::path g = gbase / pkg_name / "_package" / config_to_for_gz(cf.out_abs);
+    return source_path_for_target_xml(tdir, g, source_root);
+  }
+  for (const auto &cf : tm.config_files) {
+    if (!same_canonical_path(cf.out_abs, sp)) continue;
+    const fs::path g = gbase / pkg_name / tname / config_to_for_gz(cf.out_abs);
+    return source_path_for_target_xml(tdir, g, source_root);
+  }
+
+  const fs::path top_parent = source_root;  // 顶层 Listfile 所在 = --source
+  const fs::path broot = infer_gz_default_cmake_binary_root(top_parent);
+  std::error_code ec2;
+  const fs::path brc = fs::weakly_canonical(broot, ec2);
+  if (ec2 || !is_strict_subpath(brc, wc)) return source_path_for_target_xml(tdir, sp, source_root);
+  const fs::path rel = fs::relative(wc, brc, ec2);
+  if (ec2) return source_path_for_target_xml(tdir, sp, source_root);
+  const fs::path g = gbase / pkg_name / tname / rel;
+  return source_path_for_target_xml(tdir, g, source_root);
 }
 
 static bool string_has_cmake_deref(const std::string &s) { return s.find("${") != std::string::npos; }
@@ -193,6 +267,10 @@ static int parse_args(int argc, char **argv, Options *o) {
       have_out = true;
       continue;
     }
+    if (a == "--file-api" && i + 1 < argc) {
+      o->file_api_json = argv[++i];
+      continue;
+    }
     if (a == "--package-name" && i + 1 < argc) {
       o->package_name = argv[++i];
       continue;
@@ -246,7 +324,11 @@ int main(int argc, char **argv) {
   if (opt.source_from_default) std::cerr << "  (未在命令行写 --source, 为当前工作目录)";
   std::cerr << "\n   输出根目录 (--out)  = " << path_to_posix(opt.out_dir);
   if (opt.out_from_default) std::cerr << "  (未在命令行写 --out, 默认: <source>/gz_reverse/)";
-  std::cerr << "\n";
+  std::cerr << "\n   CMAKE_BINARY_DIR 估计 = " << path_to_posix(infer_gz_default_cmake_binary_root(opt.source_dir))
+            << "  (与 gz: <source>/.intermediate/build/<叶>)\n";
+  const std::string gen_arch = infer_gz_generated_arch_segment(opt.source_dir);
+  std::cerr << "   .intermediate/generated/... 的 arch 段 = " << gen_arch
+            << "  (gz_cache 的 arch= 或 build 叶名, 与 gz configure 的 compose_arch_tag 一致)\n";
   warn_out_equals_source(opt.source_dir, opt.out_dir);
 
   try {
@@ -255,7 +337,13 @@ int main(int argc, char **argv) {
       std::cerr << "找不到: " << path_to_posix(top) << "\n";
       return 1;
     }
-    InterpretResult ir = interpret_cmake_tree(opt.source_dir, top);
+    fs::path fapi_path;
+    const fs::path *fapi = nullptr;
+    if (!opt.file_api_json.empty()) {
+      fapi_path = fs::path(opt.file_api_json);
+      fapi = &fapi_path;
+    }
+    InterpretResult ir = interpret_cmake_tree(opt.source_dir, top, fapi);
     std::string pkg_name = opt.package_name;
     if (pkg_name.empty()) pkg_name = ir.project_name;
     if (pkg_name.empty()) pkg_name = "reversed_project";
@@ -279,7 +367,29 @@ int main(int argc, char **argv) {
     {
       std::ofstream f(pkg_root / "package.xml", std::ios::binary);
       f << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<package name=\"" << pkg_name << "\" version=\"" << opt.package_version
-        << "\">\n</package>\n";
+        << "\">\n";
+      if (!ir.package_config_files.empty()) {
+        std::vector<std::pair<std::string, std::string>> pkg_cf_rows;
+        for (const auto &cf : ir.package_config_files) {
+          std::string rel_in = source_path_for_target_xml(pkg_root, cf.in_abs, opt.source_dir);
+          if (string_has_cmake_deref(rel_in)) {
+            std::cerr << "注: 跳过含未展开 ${...} 的 package config_files in (请手补): " << rel_in << "\n";
+            continue;
+          }
+          const std::string to = config_to_for_gz(cf.out_abs);
+          std::string ain = rel_in;
+          std::string ato = to;
+          xml_escape(ain);
+          xml_escape(ato);
+          pkg_cf_rows.emplace_back(std::move(ain), std::move(ato));
+        }
+        if (!pkg_cf_rows.empty()) {
+          f << "  <config_files>\n";
+          for (const auto &pr : pkg_cf_rows) f << "    <file in=\"" << pr.first << "\" to=\"" << pr.second << "\"/>\n";
+          f << "  </config_files>\n";
+        }
+      }
+      f << "</package>\n";
     }
 
     std::set<std::string> our_names;
@@ -298,12 +408,17 @@ int main(int argc, char **argv) {
           std::cerr << "注: 跳过含未展开 ${...} 的路径(请手补): " << path_to_posix(sp) << "\n";
           continue;
         }
-        std::string rel = source_path_for_target_xml(tdir, sp, opt.source_dir);
+        if (is_covered_by_config_files(sp, tm, ir.package_config_files)) continue;
+        const std::string ext = ext_to_lower(sp);
+        if (ext == ".obj" || ext == ".o") {
+          std::cerr << "注: 跳过 .obj/.o(编译产物, 非 add_library 源; 请改列 .c/.cpp/.rc): " << path_to_posix(sp) << "\n";
+          continue;
+        }
+        std::string rel = source_path_for_gz_remap(tdir, sp, opt.source_dir, gen_arch, pkg_name, tname, tm, ir.package_config_files);
         if (string_has_cmake_deref(rel)) {
           std::cerr << "注: 跳过(相对路径中含 ${...} 未展开): " << rel << "\n";
           continue;
         }
-        const std::string ext = ext_to_lower(sp);
         if (is_header_ext(ext)) {
           if (is_public_install_header_guess(sp, opt.source_dir, pkg_name))
             header_install_files.push_back(std::move(rel));
@@ -341,6 +456,27 @@ int main(int argc, char **argv) {
         }
         f << "  </headers>\n";
       }
+      if (!tm.config_files.empty()) {
+        std::vector<std::pair<std::string, std::string>> tgt_cf_rows;
+        for (const auto &cf : tm.config_files) {
+          std::string rel_in = source_path_for_target_xml(tdir, cf.in_abs, opt.source_dir);
+          if (string_has_cmake_deref(rel_in)) {
+            std::cerr << "注: 目标 \"" << tname << "\": 跳过含 ${...} 的 config_files in: " << rel_in << "\n";
+            continue;
+          }
+          const std::string to = config_to_for_gz(cf.out_abs);
+          std::string ain = rel_in;
+          std::string ato = to;
+          xml_escape(ain);
+          xml_escape(ato);
+          tgt_cf_rows.emplace_back(std::move(ain), std::move(ato));
+        }
+        if (!tgt_cf_rows.empty()) {
+          f << "  <config_files>\n";
+          for (const auto &pr : tgt_cf_rows) f << "    <file in=\"" << pr.first << "\" to=\"" << pr.second << "\"/>\n";
+          f << "  </config_files>\n";
+        }
+      }
       f << "  <sources>\n";
       for (const std::string &rs : source_files) {
         std::string fp = rs;
@@ -358,6 +494,10 @@ int main(int argc, char **argv) {
     }
     std::cout << "已写入: " << path_to_posix(pkg_root) << " (package.xml + " << n_written << " 个 target 目录)\n";
     for (const std::string &w : ir.errors) std::cerr << "注: " << w << "\n";
+    for (const std::string &m : ir.file_api_merge_notes) std::cerr << "注: " << m << "\n";
+    if (!ir.file_api_target_names.empty()) {
+      std::cerr << "注: L7 file_api 提取了 " << ir.file_api_target_names.size() << " 个 target 名 (对照用)\n";
+    }
     return 0;
   } catch (const std::exception &e) {
     std::cerr << "异常: " << e.what() << "\n";

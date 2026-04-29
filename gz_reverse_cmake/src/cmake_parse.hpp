@@ -11,8 +11,11 @@
 // (statement-level AST), 再交给 cmake_interpret 重解释为包/目标模型.
 
 struct CmakeCommand {
-  std::string name;               // 命令名
-  std::vector<std::string> args;  // 括号内按 CMake 规则切分的实参(未做 ${} 完全展开)
+  std::string name;  // 命令名
+  std::vector<std::string> args;
+  /// Listfile 路径 (L1, UTF-8 可移植字符串)
+  std::string file_path;
+  /// 行号(命令起首 `identifier` 行)
   std::size_t line{0};
 };
 
@@ -33,6 +36,15 @@ struct CmakeParseState {
   bool at_end() const { return i >= s.size(); }
 };
 
-/// 从单文件内容解析出命令流(不解释 if/foreach, 不展开 macro 与 function 体; function/macro 内可扫描见补充说明)
+struct CmakeParseResult {
+  std::vector<CmakeCommand> commands;
+  /// 无法识别为 `name(…)` 的杂散片段(如缺少括号) 等提示
+  std::vector<std::string> parse_notes;
+};
+
+/// 从**内存**内容解析(不含 file_path, line 有)
 std::vector<CmakeCommand> parse_cmake_script(std::string_view text);
+
+/// L1: 与 `parse_cmake_script` 相同, 但为每条命令设置 `file_path` 为 `for_path` 的 portable 字符串
+CmakeParseResult parse_cmake_listfile_text(std::string_view text, const std::string &file_path);
 

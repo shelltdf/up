@@ -217,9 +217,9 @@
 
 - 与 **`target.xml` 中 `<config_files>`** 同形：**`<config_files>...</config_files>`**（可出现多个，见 §1.1）内若干 **`<file in="相对路径" to="相对路径"/>`**（`in`、`to` 均必填）。
 - **`in`**：相对 **`package.xml` 所在目录**（包根）。
-- **`to`**：相对 **`.intermediate/generated/<包名>/_package/`**（实现保留目录名 **`_package`**；请勿在本包内再使用同名编译目标目录以免混淆）。
+- **`to`**：相对 **`.intermediate/generated/<arch 段>/<包名>/_package/`**（`<arch 段>` 与本次 configure 的 **`gz_cache.txt` 中 `arch=`** / **`compose_arch_tag`** 一致，按构建配置区分多架构/多叶；实现保留目录名 **`_package`**；请勿在本包内再使用同名编译目标目录以免混淆）。
 - **`@NAME@` / `${NAME}` 替换**：使用 **内置变量 + `package.xml` 中 `<vars>` + 本包内所有 `target.xml` 的 `<vars>`**（按 `configure` 收集目标的顺序依次叠加；**同名键以后写入者为准**，含同一 `<vars>` 块内靠后的 `<var/>`）+ **`--opt` / `gz_cache.txt`**。内置 **`GZ_TARGET_NAME` 在包级模板中默认为空串**，除非某个目标用 `<var name="GZ_TARGET_NAME" …/>` 覆盖。
-- **生成时机**：`configure` 对每个含条目的包生成一次；生成文件加入本包内**每一个** **`executable` / `library` / `static_library` / `shared_library`** 目标的编译源列表，并把 **`generated/<包名>/_package/`** 加入这些目标的编译期 **include 路径**（**`library`** 解析后同上）。
+- **生成时机**：`configure` 对每个含条目的包生成一次；生成文件加入本包内**每一个** **`executable` / `library` / `static_library` / `shared_library`** 目标的编译源列表，并把 **`generated/<arch 段>/<包名>/_package/`** 加入这些目标的编译期 **include 路径**（**`library`** 解析后同上）。
 
 ### 2.7 脚本型 `<var type="script">`（消息 / trigger）
 
@@ -269,8 +269,8 @@
 
 #### `<config_files>`（类 configure_file 的最小子集）
 
-- **目标级**（`target.xml`）：块 **`<config_files>...</config_files>`**（可出现多个，见 §1.1），内为 **`<file in="模板相对路径" to="输出相对路径"/>`**（`in`、`to` 均必填）。`in` 相对 **`target.xml` 所在目录**；`to` 相对 **`.intermediate/generated/<包名>/<目标名>/`**，且须为安全相对路径（**不得**含 `..` 段、不得为绝对路径）。**`@NAME@`** 使用 **§3.5 完整变量层**。生成文件加入**该目标**的编译源列表，并把 **`generated/<包名>/<目标名>/`** 加入该目标的 **编译期 include 路径**。
-- **包级**（`package.xml`）：形状相同（可出现多个，见 §1.1）；`in` 相对 **包根**；`to` 相对 **`.intermediate/generated/<包名>/_package/`**（保留名 **`_package`**）。**`@NAME@` / `${NAME}`** 使用 **包级 `<vars>` + 本包内全部目标的 `<vars>`**（顺序与叠加规则见上）+ 工作区；**`GZ_TARGET_NAME`** 默认为空。生成文件加入本包内**所有**原生编译目标的源列表，并把 **`generated/<包名>/_package/`** 加入这些目标的 **include 路径**。
+- **目标级**（`target.xml`）：块 **`<config_files>...</config_files>`**（可出现多个，见 §1.1），内为 **`<file in="模板相对路径" to="输出相对路径"/>`**（`in`、`to` 均必填）。`in` 相对 **`target.xml` 所在目录**；`to` 相对 **`.intermediate/generated/<arch 段>/<包名>/<目标名>/`**，且须为安全相对路径（**不得**含 `..` 段、不得为绝对路径）。**`@NAME@`** 使用 **§3.5 完整变量层**。生成文件加入**该目标**的编译源列表，并把 **`generated/<arch 段>/<包名>/<目标名>/`** 加入该目标的 **编译期 include 路径**。
+- **包级**（`package.xml`）：形状相同（可出现多个，见 §1.1）；`in` 相对 **包根**；`to` 相对 **`.intermediate/generated/<arch 段>/<包名>/_package/`**（保留名 **`_package`**）。**`@NAME@` / `${NAME}`** 使用 **包级 `<vars>` + 本包内全部目标的 `<vars>`**（顺序与叠加规则见上）+ 工作区；**`GZ_TARGET_NAME`** 默认为空。生成文件加入本包内**所有**原生编译目标的源列表，并把 **`generated/<arch 段>/<包名>/_package/`** 加入这些目标的 **include 路径**。
 - **`${NAME}`**（CMake **`configure_file`** 风格）：与 **`@NAME@`** 使用**同一套**合并后的变量表；`NAME` 须为 C 标识符（`${` 与 `}` 之间允许首尾空白）。**先做占位符收集**：模板里出现但表中**没有**的 `NAME` 会**以空串加入表**，再交替替换，故未在 XML / `--opt` 声明的占位符会变成**空展开**（不再保留 `${NAME}`）；需要非空内容必须在 **`<vars>`** 或 **`--opt`** 中提供。不解析 **`$<...>`** 生成器表达式。处理顺序：**反复交替 `@NAME@` 与 `${NAME}` 至不再变化（有上限）**，最后再做 **`#cmakedefine`**。
 - **`#cmakedefine` / `#cmakedefine01`**：在上述占位符替换之后，按与 CMake **`configure_file`** 相近的**子集**处理（见 `GroundZero/lib/engine/xml/var_subst.cpp` 中 `apply_cmakedefine_directives`）：未出现在合并变量表、或值为空 / `0` / `false` / `off` / `no` 视为假；`#cmakedefine01` 展开为 **`#define NAME 0`** 或 **`1`**；`#cmakedefine NAME` 为真则 **`#define NAME`**，否则 **`/* #undef NAME */`**；带尾部内容的 **`#cmakedefine NAME …`** 为真则输出 **`#define NAME …`**。用于 zlib 等 **`zconf.h.in`** 类模板；**不是**完整 CMake 生成器。
 

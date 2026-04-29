@@ -17,6 +17,6 @@ cmake -S gz_reverse_cmake -B gz_reverse_cmake/build
 cmake --build gz_reverse_cmake/build
 ```
 
-- **行为与约束**：见同目录 [spec.md](spec.md)
+- **行为与约束**：见同目录 [spec.md](spec.md)（含 L1–L7 分层、可选 CLI **`--file-api`**）。
 - **组件级结构**：见 [uml-component.md](uml-component.md)
 - **实现映射**：见 [mapping.md](mapping.md)

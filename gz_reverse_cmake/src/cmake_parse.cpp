@@ -1,6 +1,7 @@
 #include "cmake_parse.hpp"
 
 #include <cctype>
+#include <string>
 
 void CmakeParseState::skip_line_comment() {
   if (i < s.size() && s[i] == '#') {
@@ -203,37 +204,45 @@ void split_cmake_arguments(std::string_view body, std::vector<std::string> &out)
   }
 }
 
-std::vector<CmakeCommand> parse_cmake_script(std::string_view t) {
+CmakeParseResult parse_cmake_listfile_text(std::string_view t, const std::string &file_path) {
   CmakeParseState st;
   st.s = t;
   st.skip_bom();
-  std::vector<CmakeCommand> out;
+  CmakeParseResult res;
   while (true) {
     st.skip_ws();
     if (st.at_end()) break;
     std::string name;
-    std::size_t line0 = st.line;
+    const std::size_t line0 = st.line;
     if (!read_ident(st.s, st.i, name)) {
+      if (!file_path.empty() && st.i < st.s.size() && res.parse_notes.size() < 200u) {
+        res.parse_notes.push_back(file_path + ":" + std::to_string(st.line) + ": expected command name, skipped byte");
+      }
       st.i++;
       continue;
     }
     st.skip_ws();
     if (st.at_end() || st.s[st.i] != '(') {
-      st.skip_ws();
+      if (!file_path.empty()) res.parse_notes.push_back(file_path + ":" + std::to_string(line0) + ": expected '(' after " + name);
+      st.i++;
       continue;
     }
     st.i++;  //(
-    std::size_t body_start = st.i;
+    const std::size_t body_start = st.i;
     skip_balanced_parens(st, 1);
-    // st.i 指向 ')' 之后; 参数体为 [body_start, st.i-1) 不含 ')'
     if (st.i <= body_start) break;
-    std::string_view bodyv = st.s.substr(body_start, (st.i - 1) - body_start);
+    const std::string_view bodyv = st.s.substr(body_start, (st.i - 1) - body_start);
     CmakeCommand cmd;
-    cmd.name = name;
+    cmd.name = std::move(name);
+    cmd.file_path = file_path;
     cmd.line = line0;
     if (!bodyv.empty()) split_cmake_arguments(bodyv, cmd.args);
-    out.push_back(std::move(cmd));
+    res.commands.push_back(std::move(cmd));
   }
-  return out;
+  return res;
+}
+
+std::vector<CmakeCommand> parse_cmake_script(std::string_view t) {
+  return parse_cmake_listfile_text(t, "").commands;
 }
 

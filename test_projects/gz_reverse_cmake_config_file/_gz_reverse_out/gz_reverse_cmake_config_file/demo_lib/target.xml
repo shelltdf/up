@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<target name="demo_lib" type="static_library">
+  <config_files>
+    <file in="../../../config.h.in" to="generated/config.h"/>
+  </config_files>
+  <sources>
+    <file>../../../lib.c</file>
+  </sources>
+</target>
