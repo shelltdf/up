@@ -6,16 +6,35 @@ namespace gz {
 
 namespace {
 
-// English-only: embedded copy of rules aligned with doc/zh/package-target-xml-spec.md for AI/tools without repo .md.
-// Split into named chunks: MSVC ~16kB string literal limit; edit the slice you need.
-constexpr const char* kXmlSpecEnThroughSection3 =
-  R"SPEC(GZ_XML_SPEC_REVISION=32
+// English-only: embedded spec for `gz spec` stdout. Aligned with doc/en/package-target-xml-spec.md; AI-oriented layout.
+// Split into chunks: MSVC ~16kB string literal limit.
+constexpr const char* kXmlSpecEnPart1 =
+  R"SPEC(GZ_XML_SPEC_REVISION=33
 
 # gz — package.xml and target.xml (machine-oriented summary)
 
 This text is shipped inside `gz.exe`. It describes what the **current** `gz` implementation expects when you author
-`package.xml` and `target.xml`. The parser is a **lightweight regex scanner**, not a full XML validator: write well-formed
-XML and follow the shapes below.
+`package.xml` and `target.xml`. The parser is a **lightweight regex scanner**, not a full XML validator or DOM with
+XSD: write well-formed XML and follow the shapes below.
+
+---
+
+## Table of contents (read in order for full behavior)
+
+1. [Validation commands](#1-validation-commands) — `gz configure` / `gz list` (quick check after editing XML)
+2. [Document model: DOM-style trees](#2-document-model-dom-style-trees) — what may appear under `<package>` / `<target>`
+3. [Variables, builtins, merge, `when`, templates](#3-variables-builtins-merge-when-templates) — one place for substitution rules
+4. [Scripts, triggers, preprocess / postprocess](#4-scripts-triggers-preprocess--postprocess) — message names and command fallback
+5. [package.xml — field reference](#5-packagexml--field-reference)
+6. [target.xml — field reference](#6-targetxml--field-reference)
+7. [Encoding, paths, primary package](#7-encoding-paths-primary-package)
+8. [Examples](#8-examples)
+9. [Implementation pointers](#9-implementation-pointers)
+10. [Install trees, `gz pack`, redistribution XML](#10-install-trees-gz-pack-redistribution-xml)
+
+---
+
+## 1. Validation commands
 
 After authoring XML, always validate with:
 
@@ -32,285 +51,259 @@ After authoring XML, always validate with:
   - `--format xml` + `--json <path>`: warns stdout is XML while JSON is file-only.
   - `--format json` + `--xml <path>`: warns stdout is JSON while XML is file-only.
 
----
-
-## 1. Layout
-
-| File | Location | Role |
-|------|----------|------|
-)SPEC"
-  R"SPEC(| package.xml | One per **package root** (same tree as targets below) | Package `name`, optional `version`, **package-level** `<dependency/>`, optional `<vars>` / `<defines>`. |
-)SPEC"
-  R"SPEC(| target.xml | **Exactly one** per **target directory** (each target lives in its own subdirectory) | Target `name`, `type`, sources, optional `<headers>`/assets, **target-level** `<dependency/>`. |
-
-Rules:
-- Every `target.xml` must sit **under** some `package.xml` directory tree. `configure` assigns each target to the
-  nearest parent `package.xml` ("nearest_package_parent" behavior).
-- `gz configure` recursively scans from cwd and/or each `--scan` root for `package.xml` and `target.xml`.
-
-### Repeated balanced blocks (merge order)
-Under **`<package>`** and **`<target>`**, these **paired** sections may appear **multiple times** in document order; each
-body is parsed and **appended** to the same logical list (or merged per rules below):
-- **package.xml:** `<vars>`, `<defines>`, `<config_files>`
-- **target.xml:** `<sources>`, `<headers>`, `<assets>`, `<vars>`, `<defines>`, `<config_files>`
-**Self-closing / void tags:** multiple **`<prebuilt …/>`** — the **last** non-empty parse wins for the prebuilt slot.
-**`<dependency/>`** remains global-regex collected; order is list order.
-**Bare `<file>…</file>`** (no `<sources>` wrapper): only scanned **when there is zero** `<sources>…</sources>` block in the
-file; if **any** `<sources>` block exists, sources come **only** from those block bodies (outer bare `<file>` ignored).
+**Scan / discovery (configure and `gz list`).** The engine searches recursively for `package.xml` and `target.xml` from **cwd** and
+each `--scan` root. Recursion **does not** descend into directories named **`.intermediate`**. Any `--scan` path that resolves
+under **`<cwd>/.intermediate/`** (after normalization) is **dropped** with a warning, so e.g. **`gz-redist/`** under a build
+tree is not treated as a source package root.
 
 ---
 
-## 2. package.xml
+## 2. Document model: DOM-style trees
 
-### Root element
-- First occurrence of `<package` … up to the first `>` is treated as the header.
-- **Required attribute:** `name` — globally unique among all packages in one configure scan.
-- **Optional attribute:** `version` — if omitted, implementation defaults to `0.0.0`.
+The loader builds in-memory **package** and **target** descriptions (see **§9** source files). **Logical** structure (order of
+**paired** child blocks in the file is **document order**; repeated block bodies **merge** per rules in each section):
 
-### Package dependencies
-- Self-closing tags: `<dependency name="other_pkg" optional="true|false"/>`
-- `name` is another **package** name that must appear in the same scan (unless `optional` is true / 1 / yes).
-- If a `target.xml` uses `OtherPkg:SomeLib`, that `OtherPkg` **must** be listed here (non-optional), or configure fails.
+### 2.1. `package.xml` (one file per **package root**)
 
-)SPEC"
-  R"SPEC(### Optional package variables `<vars>`
-- Block: `<vars>...</vars>` (may repeat; bodies merge in order) with self-closing entries `<var name="KEY" value="VAL"/>`
-  (`value` may be omitted for empty).
-- Each pair is a **default** for `KEY` for all targets in the package (for `@KEY@` / `when=`); the same key may be
-  **overridden** at configure time (see merge order below).
-- Script var (special var type): `<var name="SCRIPT_NAME" type="script" script_type="lua" trigger="manual|sources.preprocess|sources.postprocess|headers.preprocess|headers.postprocess|assets.preprocess|assets.postprocess" value="..."/>`
-  - `script_type` defaults to `lua`; `trigger` defaults to `manual`.
-  - Unsupported `trigger` is a parse error at configure/list load time.
+```
+package  (root; attributes: name= required, version= optional; default version 0.0.0 if omitted)
++-- dependency*     (self-closing: <dependency name="..." optional="true|false"/>; regex-collected, order preserved)
++-- vars*            (block; may repeat; body entries merge: <var name= value=/>; script vars: type=script, see §4)
++-- defines*         (block; may repeat: <define name= value=/>)
++-- config_files*   (block; may repeat: <file in= to=/> — paths relative to package root for `in`)
+```
 
-### Workspace overrides (`--opt` / `gz_cache.txt`)
+- Every `target.xml` under this tree is assigned the **nearest** parent `package.xml` (`nearest_package_parent`).
+- `gz configure` scans from cwd and each `--scan` root for `package.xml` and `target.xml` recursively.
 
-- `gz configure --opt KEY=value` (or `KEY=value` lines in `gz_cache.txt`) supplies entries merged into the same option
-  map as `GZ_*` build switches.
-- Keys accepted into that map: any **`GZ_*`**, plus any **C identifier** (`[A-Za-z_][A-Za-z0-9_]*`)
-  except reserved cache metadata (`cwd`, `arch`, `package`, `generated_file`, `scan_roots`, `gz.cache.version`).
-- These entries apply **after** package and target `<vars>` in the template/`when` merge, so they **override** XML
-  defaults for the same name.
+### 2.2. `target.xml` (**exactly one** per **target directory**)
 
-### Optional package compile definitions `<defines>`
-- Same shape as target **`<defines>`** (see below): `<defines>...</defines>` (may repeat; bodies merge in order) with
-  `<define name="IDENT" value="..."/>`.
-- Applied to **every** `executable` / `library` / `static_library` / `shared_library` target in this package **before** that
-  target’s own `<defines>` entries (so target-level definitions follow and may override at the toolchain level).
+**Native compile** (`type` = `executable` | `library` | `static_library` | `shared_library`) — typical layout:
 
-### Optional package config files `<config_files>`
-- Same block shape as target **`<config_files>`**: `<config_files>...</config_files>` (may repeat; bodies merge in order)
-  with **`<file in="rel" to="out"/>`** (both required).
-- `in` is relative to the **`package.xml` parent directory** (package root).
-- `to` is relative to **`.intermediate/generated/<package>/_package/`** (reserved directory name **`_package`**; avoid
-  naming a compile target `_package` in the same package). Same safe-path rules as target config: no `..`, not absolute.
-- **`@NAME@` / `${NAME}` substitution map:** builtins + package `<vars>` + **every `target.xml` `<vars>` in this package**
-  (flattened in `configure` **build_targets** order; **later** `<var>` / **later** target wins on duplicate keys) +
-  workspace options. Builtin **`GZ_TARGET_NAME` is empty** unless a target `<var>` sets it.
-- Generated files are written **once per configure** per package and appended to **every** native compile target in that
-  package as extra sources. **`.intermediate/generated/<package>/_package/`** is added to compile **include directories**
-  for every `executable` / `library` / `static_library` / `shared_library` in the package whenever any package-level
-  `<config_files>` entry exists.
+```
+target  (root; name= required, type= optional, default `executable`)
++-- vars*
++-- config_files*
++-- defines*
++-- sources*        (or bare <file> only when zero <sources> block exists, see §6)
++-- headers*
++-- assets*
++-- dependency*     (self-closing)
+```
 
----
+**Prebuilt** (`type` = `prebuilt_static_library` | `prebuilt_shared_library`):
 
-## 2b. Variable merge order (builtin / package / target / workspace)
+```
+target
++-- prebuilt        (void: last non-empty parse wins if multiple; layout attrs, see §6)
+```
 
-Used for **`@KEY@`** and **`${KEY}`** substitution in **target-level** `<config_files>` templates (full stack below),
-**package-level** `<config_files>` (builtins + package `<vars>` + **all targets' `<vars>` in the package** in build order,
-then workspace; builtin `GZ_TARGET_NAME` empty unless overlaid), and for evaluating `when="..."` on sources and headers.
+**Asset bundle** (`type` = `asset_bundle`): at least one of `sources` / `headers` / `assets` per type rules in §6.
 
-**Layers (later overrides earlier):**
-
-1. **Builtins** (names from configure context): `GZ_OS` (`windows` | `linux` | `darwin`),
-   `GZ_PACKAGE_NAME`, `GZ_PACKAGE_VERSION`, `GZ_TARGET_NAME`, `GZ_TARGET_BUILD_SYSTEM` (`cmake` | `ninja`),
-   `GZ_CONFIG` (`debug` | `release`).
-2. **Package `<vars>`** from `package.xml` (defaults for the whole package).
-3. **Target `<vars>`** from `target.xml` (defaults for that target; same key replaces the package default).
-4. **Workspace options**: keys from `--opt` and `gz_cache.txt` (same map as `GZ_*` switches, plus extra identifiers;
-   **overrides** XML defaults for the same key).
-
-**Template syntax:** **`@NAME@`** and **`${NAME}`** in **`when="..."`** use the merged map only; `NAME` must be a C
-identifier. **`$<...>`** generator expressions are not interpreted.
-
-For **`<config_files>`** templates only: before substitution, every **`@NAME@`** and **`${NAME}`** in the template text
-where `NAME` is a C identifier and **`NAME` is missing** from the merged map is **added to the map with an empty value**,
-so the placeholder is **removed** (replaced by nothing). Set real values in **`<vars>`** or **`--opt`** when empty is
-wrong (e.g. `typedef ${ZIP_INT8_T} …`).
-
-### `when` attribute — where it is supported today
-
-- **Implemented:** optional `when="..."` on **`<sources>`** entries (`<file …/>`, `<glob …/>`, and paired opening tags with
-  `from=`) and on **`<headers>`** entries (`<dir/>`, `<file/>`, `<glob/>`).
-- **Not implemented (ignored if present; do not rely on it):** `<assets>`, `<define>`, `<dependency/>`, `<config_files>`,
-  `<var>`, package-level rows, `<prebuilt/>`, preprocess/postprocess tags, and the `<target>` / `<package>` roots
-  themselves. (**`<install …/>`** is not a supported `target.xml` void tag; use **`<prebuilt …/>`** with paths relative to **`target.xml`**
-  or absolute.)
-
-Uniform `when` on every repeatable row is a reasonable **product direction**, but each construct needs a defined meaning
-(e.g. skipping a `<dependency>` vs failing resolution; skipping `<define>` vs compile flags) and extra configure work.
-
-### `when` expression grammar (matches `eval_when` in `GroundZero/lib/engine/xml/var_subst.cpp`)
-
-The string is **trimmed** of leading/trailing ASCII whitespace, then evaluated as **exactly one** of the following forms
-(in this order):
-
-1. **Empty** after trim — treated as **true** (always include the item).
-2. **Boolean literal:** whole string is `true` or `false` (ASCII letters; compared case-insensitively) — **true** or
-   **false**.
-3. **Comparison:** must match the **entire** string (after trim), pattern  
-   `KEY == RHS` or `KEY != RHS` with optional spaces around `==` / `!=`, where:
-   - **`KEY`** is a single C-like identifier: `[A-Za-z_][A-Za-z0-9_]*` (matches keys in the merged map: builtins,
-     package `<vars>`, target `<vars>`, `--opt` / `gz_cache.txt`).
-   - **`RHS`** is a **single token** `[A-Za-z0-9_.]+` only (no spaces, no quotes, no `/`, no `-` unless you encode them
-     outside this grammar — use another `KEY` or a different expression form).
-   - The variable’s value and `RHS` are compared as **ASCII lowercased** strings for `==` / `!=`.
-   - If `KEY` is missing from the map, its value is treated as **empty** for the comparison.
-4. **Bare identifier:** the whole string is **one** identifier `[A-Za-z_][A-Za-z0-9_]*` that **must exist** as a key in the
-   merged map; the result is **truthy** or **falsy** on the stored value:
-   - **Falsy:** empty, or (case-insensitive) `0`, `false`, `off`, `no`.
-   - **Truthy:** any other value.
-   - If the key is **not** in the map — **configure error** (unknown `when`).
-
-**Not supported:** logical combinators (`&&`, `||`), parentheses, function calls, substring match, or arbitrary text
-outside the forms above.
+**Repeated balanced blocks (merge order)** under `<package>` / `<target>`:
+- **package.xml:** `<vars>`, `<defines>`, `<config_files>` — each may repeat; bodies **append** in file order to one logical list.
+- **target.xml:** `<sources>`, `<headers>`, `<assets>`, `<vars>`, `<defines>`, `<config_files>` — same merge rule.
+- **Self-closing / void tags:** multiple **`<prebuilt …/>`** — the **last** non-empty parse wins for the prebuilt slot.
+- **`<dependency/>`** is global-regex collected; order is list order.
+- **Bare `<file>…</file>`** (no `<sources>` wrapper): only scanned when there is **zero** `<sources>…</sources>` in the file;
+  if any `<sources>` exists, only inner block bodies are used; outer bare `<file>` is ignored.
+- For **full-tag sketches** of every child shape, see **§8** (6b).
 
 ---
 
-## 3. target.xml
+## 3. Variables, builtins, merge, `when`, templates
 
-### Root element
-- First `<target` … up to first `>`.
-- **Required attribute:** `name` — target id (executable name for `gz run`, etc.).
-- **Optional attribute:** `type` — if omitted, defaults to `executable`.
+### 3.1. Who sets what (for AI / automation)
 
-### Supported `type` values (use lowercase)
+| Category | Set by | Examples / notes |
+|----------|--------|------------------|
+| **Builtins (per configure context)** | `gz configure` | `GZ_OS` (`windows`|`linux`|`darwin`), `GZ_PACKAGE_NAME`, `GZ_PACKAGE_VERSION`, `GZ_TARGET_NAME`, `GZ_TARGET_BUILD_SYSTEM` (`cmake`|`ninja`), `GZ_CONFIG` (`debug`|`release`) — see `var_subst.cpp` `builtin_host_os` and similar. |
+| **User / project defaults** | `package.xml` and `target.xml` **`<vars>`** | Scalar `<var name="K" value="V"/>` (and optional empty value). Merged in layers (below). **Script** vars are a separate sub-syntax (`type="script"`, §4) and **not** in the `when` scalar map. |
+| **User overrides at configure** | `gz configure --opt KEY=value` and `gz_cache.txt` | Same key namespace as `GZ_*` and extra C identifiers; **wins** over XML defaults for the same name (see layers). **Reserved** keys: `cwd`, `arch`, `package`, `generated_file`, `scan_roots`, `gz.cache.version` (and similar metadata) — not used as free-form opt keys. |
+| **Compile macros** | `package.xml` / `target.xml` **`<defines>`** | C identifiers; applied in package-then-target order (target can add/override for compile flags). |
+| **Config file templates** | `package.xml` / `target.xml` **`<config_files>`** | `in` / `to` files; `to` under `.intermediate/generated/...` — see §5/§6. **Placeholder rule:** in template text only, missing `@NAME@` / `${NAME}` get **empty** entries added to the map so placeholders strip (see §3.3). |
 
-| type | `<sources>` / `<file>` | `<prebuilt/>` | Notes |
-|------|------------------------|---------------|------|
-| executable | required (>=1 source) | no | Normal compile target. |
-| library | required | no | Configure maps to STATIC or SHARED from `GZ_TARGET_DYNAMIC_LIBRARY` / `GZ_DYNAMIC_LIBRARY`. |
-| static_library | required | no | Always STATIC (ignores global dynamic preference). |
-| shared_library | required | no | Always SHARED (ignores global static preference). |
-| asset_bundle | may be empty | no | Need at least one of sources / assets / `<headers>`. |
-| prebuilt_static_library | not required | **required** | Paths relative to `target.xml` dir unless absolute. |
-| prebuilt_shared_library | not required | **required** | On Windows, dll + import `.lib` must be resolvable. |
+### 3.2. Merge order (later overrides earlier)
 
-**Unknown** `type=` (not in the table) ⇒ **`gz configure` fails** with `unknown target type` (forbidden names are not enumerated in messages).
+Used for **`@KEY@`** and **`${KEY}`** in **target-level** `<config_files>` (full per-target map), **package-level** `<config_files>`
+(builtins + package `<vars>` + **all targets'** `<vars>` in **build** order, then workspace; `GZ_TARGET_NAME` empty at package level unless set by context), and for **`when="..."`** on **`<sources>`** and **`<headers>`** lines.
 
-### `<prebuilt/>` (binary layout attributes)
+**Layers:**
 
-- Optional **layout** attributes: the install root directory name (for the **current** `gz` build) is implied by **`gz_cache.txt`**
-  **`arch=`** and **`compose_arch_tag`**, not duplicated on **`<prebuilt/>`**. Use **`os`**, **`cpu`**, **`build_system`**, **`toolchain`**, **`link`**
-  (`static` | `dynamic`), **`config`** (`debug` | `release`), **`crt`** (e.g. `dynamic_md`) — see **`compose_arch_tag`** and
-  **`try_decompose_compose_arch_tag`** in `GroundZero/lib/infra/platform/paths.cpp`. **`gz build`**-emitted **`<prebuilt/>`**
-  in **redistribution** `target.xml` and **schema 3** **`gz_redist_manifest.json`** set these split fields only.
-- **Read compatibility (deprecated monolithic `arch` only):** legacy **`arch="…"`** on **`<prebuilt/>`** is used only in-memory to run
-  **`try_decompose_compose_arch_tag`**, then split fields are set and the monolithic string is **not** re-emitted. **Schema 1**
-  manifests with **`arch`** behave the same; **schema 2/3** use split **layout** fields from JSON.
+1. **Builtins** — as in §3.1 table.
+2. **Package `<vars>`** — defaults for all targets in the package.
+3. **Target `<vars>`** — overrides package for the same key.
+4. **Workspace options** — from `--opt` and `gz_cache.txt` (same map as `GZ_*` build switches, plus C identifiers) — **overrides** XML for same key.
 
-### Sources
-- Repeat: `<file>relative/path.cpp</file>` — path is **relative to the directory that contains this target.xml**.
-- If **no** `<sources>…</sources>` block exists, bare `<file>…</file>` anywhere in the file is collected. If **one or more**
-  `<sources>` blocks exist, only entries **inside** those blocks are used; outer bare `<file>` is ignored. Multiple
-  `<sources>` blocks append in document order.
-- Under `<sources>`, you may also use self-closing **`<file from="rel.cpp" when="..."/>`** or **`<glob from="*.cpp" when="..."/>`**
-  (requires `from=`). Paired `<file from="...">…</file>` / `<glob …>` still support optional **`when="..."`** on the
-  opening tag.
-- Optional **`<vars>...</vars>`** (may repeat; bodies merge in order; same shape as package vars): **defaults** for that
-  target; same key overrides the package default, and may still be overridden last by `--opt` / `gz_cache.txt`.
-- Script vars are also allowed at target level with the same `type="script"` + `script_type` + `trigger` + `value` shape.
+**`when` and templates:** in **`when="..."`**, only the merged map applies; `NAME` must be a C identifier. **`$<...>`** generator expressions are **not** interpreted by `gz`.
 
-### Config files (`<config_files>`) — target-level configure-time templates
+### 3.3. `config_files` template-only behavior
 
-- Block: `<config_files>...</config_files>` (may repeat; bodies merge in order) with **`<file in="template.rel" to="out.rel"/>`**
-  (both required).
-- `in` is relative to **`target.xml` directory**; `to` is relative to **`.intermediate/generated/<package>/<target>/`** and
-  must be a safe relative path (no `..` segments, not absolute).
-- During **configure**, `gz` reads each template, **extends** the merged variable map with **default-empty** entries for
-  every **`@NAME@`** / **`${NAME}`** placeholder in the file that is not already in the map (see §2b template syntax),
-  then applies **`@NAME@`** and **`${NAME}`** substitution, alternating both passes until nothing changes (max 64 rounds),
-  using the **full** merged variable map for target-level templates, then
-  writes the output under the generated directory, and adds that file to the target’s compile sources. The target’s
-  generated directory is also added as an **include directory** for `executable` / `library` / `static_library` /
-  `shared_library` targets.
-- After `@` / `${}` replacement, lines **`#cmakedefine NAME ...`** and **`#cmakedefine01 NAME`** are expanded like CMake
-  `configure_file` (subset): unknown / empty / `0` / `false` / `off` / `no` treat as false; `#cmakedefine01` becomes
-  **`#define NAME 0|1`**. This helps zlib-style `zconf.h` templates; it is **not** a full CMake `configure_file` engine.
+Before substitution, every **`@NAME@`** and **`${NAME}`** in the template where `NAME` is a C identifier and **missing** from the
+merged map is **added with empty value** so the placeholder is removed. Set real values in **`<vars>`** or **`--opt`** if empty
+is wrong (e.g. `typedef ${ZIP_INT8_T} ...`).
 
-)SPEC"
-  R"SPEC(**Backends (CMake vs Ninja):** both backends consume the **already generated** file as a normal source path. `gz` does
-**not** emit CMake `configure_file()` for these entries; both backends treat the output like any other source file. For
-  full upstream CMake `configure_file` semantics, run that step **outside** `gz` and commit or stage the generated headers.
+Substitution alternates both passes (max 64 rounds) for **target** templates. After replacement, `#cmakedefine` / `#cmakedefine01`
+are expanded (subset like CMake). See **§6** for full `config_files` path rules and backends note.
 
-)SPEC"
-  R"SPEC(### Headers block (`<headers>`) — compile + install layout
-- The `<headers>…</headers>` block may repeat; entries from each block append in document order.
-- Self-closing entries under `<headers>` (`<includes>` is not supported):
-  - `<dir from="rel/path" to="optional_include_subdir"/>`
-  - `<file from="rel/path.hpp" to="optional_subdir"/>`
-  - `<glob from="rel/*.hpp" to="optional_subdir"/>`
-- `from` is required, relative to `target.xml` directory. `to` is optional (under install prefix `include/`).
-- Optional **`when="..."`** on each entry: if false, the entry is omitted from compile include paths and from install rules.
+### 3.4. `when` — where it is supported
 
-### Assets block (`<assets>`)
-- `<assets>…</assets>` may repeat; entries from each block append in document order. Inner shape matches examples
-  (`<dir|file|glob from="…" to="…"/>` with optional preprocess/postprocess bodies). **`when` on assets is not implemented.**
+- **Implemented:** optional `when="..."` on **`<sources>`** entries (`<file …/>`, `<glob …/>`, paired with `from=`) and on **`<headers>`** entries (`<dir/>`, `<file/>`, `<glob/>`).
+- **Not implemented (ignored; do not rely on):** `<assets>`, `<define>`, `<dependency/>`, `<config_files>`, `<var>`, package-level
+  rows, `<prebuilt/>`, preprocess/postprocess tags, `<package>`/`<target>` roots. **`<install …/>`** is not a supported void tag; use
+  **`<prebuilt …/>`**.
 
-### Compile definitions (`<defines>`) — target
-- Optional block: `<defines>...</defines>` (may repeat; bodies merge in order) containing self-closing
-  `<define name="IDENT" value="..."/>`.
-- `name` is required (C identifier: `[A-Za-z_][A-Za-z0-9_]*`). `value` is optional; omitted means define the macro name only.
-- `value` (if present) may only contain letters, digits, and `._+-/` (no spaces).
-- Applied to native compile targets (`executable`, `library`, `static_library`, `shared_library`): CMake uses
-  `target_compile_definitions(... PRIVATE ...)`, Ninja appends `/D` or `-D` flags to compile commands.
+**Product direction (not all implemented).** Extending `when` uniformly to every repeatable child would need a defined
+meaning (e.g. skip vs fail for `<dependency>`) and more configure work; the forms above are what the code evaluates today.
 
-### Target dependencies
-- `<dependency name="LocalLib"/>` — depends on another **library** target in the **same** package (same `name`).
-- `<dependency name="OtherPkg:TheirLib"/>` — cross-package; `OtherPkg` must be in `package.xml` `<dependency/>` and
-  `TheirLib` must exist in the scan set.
-- **Optional attribute:** `visibility="private|public|interface"` (default **`private`**, ASCII case-insensitive on
-  parse). Maps to CMake `target_link_libraries` link keywords for **executable** consumers when explicit `<dependency/>`
-  rows are used: **`PRIVATE`** / **`PUBLIC`** / **`INTERFACE`**. **`interface` is rejected** when the consumer target is
-  an **`executable`** (an executable must actually link the library; use `private` or `public`).
-- Valid dependency target types are library-like (`static_library`, `shared_library`, `library`, `prebuilt_static_library`,
-  `prebuilt_shared_library`). Configure fails if the reference cannot be resolved or points to a non-library.
+### 3.5. `when` expression grammar (matches `eval_when` in `GroundZero/lib/engine/xml/var_subst.cpp`)
 
-CMake backend note (current behavior):
-- **`library`** targets are rewritten internally to **`static_library`** or **`shared_library`** before backend emission,
-  using the same **`GZ_TARGET_DYNAMIC_LIBRARY`** / **`GZ_DYNAMIC_LIBRARY`** rule as default exe→lib link filtering.
-- **Executable** targets also **PRIVATE-link all library targets in the same package** when no explicit `<dependency/>`
-  link rows exist; otherwise explicit rows (with their `visibility`) are used for `target_link_libraries`.
-- **Library** targets: `<dependency/>` participates in validation and external-package library wiring; static-to-static
-  **transitive** `target_link_libraries` chaining may **not** be generated—ensure the final executable links all needed
-  libs if symbols must be pulled from multiple static libs.
+String is **trimmed**; then **exactly one** of (in order):
+
+1. **Empty** — **true**.
+2. **Boolean literal** — whole string `true` or `false` (case-insensitive).
+3. **Comparison** — `KEY == RHS` or `KEY != RHS` (optional spaces). `KEY` is one identifier; `RHS` is a **single** token
+   `[A-Za-z0-9_.]+` only. The left-hand value is the merge-map entry for `KEY` or, if `KEY` is **missing**, the **empty string**;
+   compared **lowerASCII** to `RHS`.
+4. **Bare identifier** — must **exist** in the merged map; truthy unless empty/0/false/off/no. **Missing key** = configure error
+   (unlike `==` / `!=` forms).
+
+**Not supported:** `&&` `||`, parentheses, functions, substring, arbitrary text.
 
 ---
+
 )SPEC";
 
-constexpr const char* kXmlSpecEnSections4And5 = R"SPEC(
+constexpr const char* kXmlSpecEnPart2 =
+  R"SPEC(## 4. Scripts, triggers, preprocess / postprocess
 
-## 4. Encoding and paths
+**`<var type="script" .../>`** in **`<vars>`** (package or target) declares a **message slot** (attribute **`trigger`**).
+**`script_type`** defaults to **`lua`**. The repo does **not** yet execute a **Lua VM** on `value`; the attribute name is
+historical. **Actual behavior:** for a given `trigger` on a `<preprocess>`/`<postprocess>` node, if **`<preprocess command="..."/>`**
+or **`<postprocess command="..."/>`** is **non-empty**, that string is used. If the command is **empty**, **`resolve_script_command`**
+walks from **current target** up the **parent chain to package**, collecting `<var type="script">` with the **same** `trigger`
+(see `script_execution.cpp`); **target-level before package-level**; **first non-empty `value`** wins as the **entire** shell
+line. Put **real shell** (or `lua -e '...'` if on PATH) in `value` if you need executable behavior today.
 
-- Prefer UTF-8 files.
-- **ASCII-only paths** for scanned paths are enforced in places (non-ASCII paths may hard-fail configure).
+| trigger | Meaning | Dispatched at configure? | Paired XML |
+|---------|---------|--------------------------|------------|
+| sources.preprocess | Before each source compiles | Yes | `<preprocess command="..."/>` under `<sources>` `<file>`/`<glob>`; empty command uses script `value` |
+| sources.postprocess | After each source (backend-specific) | Yes | `<postprocess command="..."/>` |
+| headers.preprocess | Before header entry for compile+install | Yes | Under `<headers>` entries |
+| headers.postprocess | After header entry | Yes | Under `<headers>` |
+| assets.preprocess | Before assets | Yes | Under `<assets>` |
+| assets.postprocess | After assets | Yes | Under `<assets>` |
+| manual | Reserved; not auto-dispatched | **No** | Future CLI/GUI |
+
+**Case-sensitive** `trigger` string; must match the table **exactly**. Any other string = **load error** (`is_supported_script_trigger` in `simple_xml.cpp`).
+
+- **Scalar `<var>`** participates in **`when`** and **`@` / `${}`**; **script `<var>`** does **not** participate in the scalar **merge
+  map** for `when` — it is only **command fallback** for paired preprocess/postprocess entries.
 
 ---
 
-## 5. Primary package selection (multi-package scans)
+)SPEC"
+  R"SPEC(## 5. package.xml — field reference
 
-- Prefer the package whose `package.xml` directory equals **cwd**.
-- Otherwise the **first** discovered package may be treated as primary (filesystem order). Prefer single-package cwd
-  workflows when possible.
+### Root
+- First `<package` … up to first `>` = header.
+- **Required attribute:** `name` — **globally unique** among all packages in one scan.
+- **Optional:** `version` — default `0.0.0` if omitted.
+
+### `<dependency/>`
+- Self-closing. `name` = another **package** in the same scan (unless `optional` = true/1/yes).
+- If any `target.xml` uses `OtherPkg:TargetName`, that **OtherPkg** must appear here (non-optional) or configure fails.
+
+### `<vars>` (see also §3, §4)
+- Repeating blocks; `<var name= value=/>` merge in order. Script vars: `type=script` `script_type=lua` `trigger=...` `value=...`.
+
+### Workspace / `--opt` (see §3.1)
+- Keys: any `GZ_*` plus C identifiers, except reserved cache lines listed in §3.1. Applied **after** package/target vars.
+
+### `<defines>` (package)
+- Same element shape as target. Applied to **every** native compile target in the package **before** that target's own
+  `<defines>` (so target can override for compile flags).
+
+### `<config_files>` (package)
+- `<file in="rel" to="out"/>` both required. `in` relative to **package root** (parent of `package.xml`). `out` under
+  **`.intermediate/generated/<package>/_package/`**; reserved name **`_package`**. Avoid naming a **compile** target
+  **`_package`** in the same package (clashes with the reserved output dir). Substitution map: builtins + package
+  **`<vars>`** + **all** this package's `target.xml` **`<vars>`** in **build target order** (later wins on duplicate) +
+  workspace. **`GZ_TARGET_NAME` empty** unless a target var sets it when used in package config map. Output written
+  **once per configure**; appended to **every** native compile target as extra source; include path **`.intermediate/generated/<package>/_package/`**
+  added to all when any package `config_files` exist.
 
 ---
+
+## 6. target.xml — field reference
+
+### Root
+- First `<target` … to first `>`. **name** required. **type** optional, default `executable` (lowercase in table below).
+
+### Supported `type` values
+
+| type | sources | prebuilt | Notes |
+|------|---------|----------|------|
+| executable | required 1+ | no | |
+| library | required | no | Resolves to static/shared via `GZ_TARGET_DYNAMIC_LIBRARY` / `GZ_DYNAMIC_LIBRARY` |
+| static_library | required | no | Always static |
+| shared_library | required | no | Always shared |
+| asset_bundle | may be empty | no | Need at least one of sources / headers / assets |
+| prebuilt_static_library | not required | **required** | Paths relative to `target.xml` unless abs |
+| prebuilt_shared_library | not required | **required** | Win: dll + import .lib resolvable |
+
+Unknown `type` = configure error (`unknown target type`).
+
+### `<prebuilt/>`
+- Layout: implied install dir segment from `gz_cache.txt` `arch=` and `compose_arch_tag`; on `<prebuilt/>` use split fields
+  `os` `cpu` `build_system` `toolchain` `link` `config` `crt` — see `paths.cpp` `compose_arch_tag` / `try_decompose_compose_arch_tag`.
+  `gz build` redistribution and schema 3 `gz_redist_manifest.json` use split fields. Legacy `arch="..."` read then decomposed; not re-emitted.
+  Schema 1 legacy `arch`; 2/3 from JSON.
+
+### `<sources>`, bare `<file>`
+- As §2.2. Self-closing `<file from= when=/>` `<glob from= when=/>` or paired with inner preprocess/postprocess. **`<vars>`** in
+  target block merges like package. Script vars: §4.
+
+### `<config_files>` (target)
+- `in` relative to `target.xml` directory; `to` under **`.intermediate/generated/<package>/<target>/`**, no `..`, not absolute.
+  Merged var map: full target stack per §3.2; `#cmakedefine` after `@` substitution; 64 pass limit. Generated dir added to **include
+  paths** for that target. **Backends (CMake and Ninja)**: no CMake `configure_file()` emission — generated file is a normal source. For full upstream
+  `configure_file`, run outside `gz` and check in the file.
+
+)SPEC"
+  R"SPEC(### `<headers>` — compile + install layout
+- Repeating blocks. Self-closing: `<dir from= to=/>` `<file from= to=/>` `<glob from= to=/>` (`<includes>` not supported).
+- `from` required, relative to `target.xml`. `to` optional under install prefix `include/`. `when` per §3.4/3.5 on each row.
+
+### `<assets>`
+- Repeating; `from` / `to` and preprocess/postprocess. **`when` on assets not implemented.**
+
+### `<defines>` (target)
+- C identifier `name`, optional `value`. If `value` is present, it may use only alnum and **`._+-/`** (no spaces), matching the
+  current implementation. Applied `PRIVATE` for native compiles; CMake: `target_compile_definitions`; Ninja: `/D` or `-D` flags.
+
+### `<dependency/>`
+- Same package: `name` only. Cross: `Package:Target`. **visibility** `private|public|interface` (default private). `interface` **rejected** when consumer is **executable**. **Valid** ref targets: library-like (`static_library`, `shared_library`, `library`, `prebuilt_*`); `asset_bundle` in graph **validation**; configure **fails** if unresolved or non-library. CMake notes: `library` rewritten to static or shared before emission; exes in same package **implicit private-link** all in-package library targets if **no** explicit `<dependency/>` lines; with explicit lines, use visibility. Static-to-static **transitive** `target_link_libraries` may **not** be fully chained — final exe may need explicit deps.
+
+---
+
+## 7. Encoding, paths, primary package
+
+- Prefer **UTF-8** files. **ASCII-only** paths for scanned files are enforced in places; non-ASCII may hard-fail.
+
+### Multi-package scans (primary)
+- Prefer the package whose `package.xml` directory **equals cwd**.
+- Otherwise the **first** discovered package may be treated as primary (implementation / filesystem order). Single-package
+  cwd workflows are the least surprising.
+
+---
+
 )SPEC";
 
-constexpr const char* kXmlSpecEnSections6Through7 =
-  R"SPEC(
+constexpr const char* kXmlSpecEnPart3 =
+  R"SPEC(## 8. Examples
 
-## 6. Examples
-
-### 6a. Minimal (typical app + dependency)
+### 8.1. Minimal (typical app + dependency) — also see full shapes in 8.2
 
 package.xml:
 ```xml
@@ -335,12 +328,12 @@ target.xml (executable next to sources):
 </target>
 ```
 
-### 6b. Full-tag reference sketches (syntax only; trim for real trees)
+### 8.2. Full-tag reference sketches (syntax only; not one runnable tree)
 
-These snippets are **not** one runnable layout: they show **every major child shape** the scanner recognizes. Omit
-blocks you do not need. Some combinations are **mutually exclusive by `type`** (e.g. `prebuilt_*` vs normal `<sources>`).
+Omit blocks you do not need. Some combinations are mutually exclusive by `type` (e.g. `prebuilt_*` vs full `<sources>`). **Full logical DOM**
+for all tags is in **§2** and the tables in **§5–6**.
 
-**package.xml — all supported top-level constructs (except duplicate `<dependency/>` rows shown as one each):**
+**package.xml — all major top-level constructs (duplicate dependency rows not all shown):**
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -363,11 +356,7 @@ blocks you do not need. Some combinations are **mutually exclusive by `type`** (
 </package>
 ```
 
-**target.xml — native compile target** (`executable` | `library` | `static_library` | `shared_library`): `<vars>`, `<config_files>`,
-`<defines>`, `<sources>` (`<file>text</file>`, wrapper block, self-closing `from=` / `when=`, paired tags with
-`<preprocess command="..."/>` / `<postprocess command="..."/>`), `<headers>` (`dir` / `file` / `glob`, optional `to`,
-optional `when`), `<assets>` (same `from` / `to` / preprocess / postprocess pattern; **`when` not implemented**),
-`<dependency/>`:
+**target.xml — native compile** (`executable` | `library` | `static_library` | `shared_library`):
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -405,7 +394,7 @@ optional `when`), `<assets>` (same `from` / `to` / preprocess / postprocess patt
 </target>
 ```
 
-**target.xml — `prebuilt_static_library` / `prebuilt_shared_library`** (uses `<prebuilt/>`, no compile `<sources>`):
+**target.xml — prebuilt:**
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -415,37 +404,39 @@ optional `when`), `<assets>` (same `from` / `to` / preprocess / postprocess patt
 </target>
 ```
 
-**target.xml — `asset_bundle`** (may omit compile sources; needs sources and/or `<headers>` and/or `<assets>` per rules above.)
+**asset_bundle:** at least one of sources / headers / assets per type rules in §6.
 
 ---
 
-## 7. Implementation pointers (for humans maintaining `gz`)
+## 9. Implementation pointers (for humans and AI)
 
 | Topic | Source |
 |-------|--------|
-| DOM model / script execution context | GroundZero/lib/engine/dom/dom_model.hpp (umbrella), dom_nodes.hpp, dom_node_visitor.{hpp,cpp}, dom_document.{hpp,cpp}, script_execution.{hpp,cpp} |
-| Load/parse XML | GroundZero/lib/engine/xml/simple_xml.cpp |
-| Types | GroundZero/lib/engine/xml/simple_xml.hpp (`PackageDesc`, `TargetDesc`, `ConfigFileEntry`, `DefineEntry`) |
-| Configure validation / graph | GroundZero/lib/engine/commands/configure.cpp |
-| Variable merge + `@` / `${}` + `when` + `#cmakedefine` (config_files) | GroundZero/lib/engine/xml/var_subst.cpp |
+| DOM model, script context | `GroundZero/lib/engine/dom/dom_model.hpp`, `dom_nodes.hpp`, `dom_node_visitor.{hpp,cpp}`, `dom_document.{hpp,cpp}`, `script_execution.{hpp,cpp}` |
+| Load/parse XML | `GroundZero/lib/engine/xml/simple_xml.cpp` |
+| Types | `GroundZero/lib/engine/xml/simple_xml.hpp` (`PackageDesc`, `TargetDesc`, `ConfigFileEntry`, `DefineEntry`, …) |
+| Configure / graph | `GroundZero/lib/engine/commands/configure.cpp` |
+| Variable merge, `when`, `#cmakedefine` | `GroundZero/lib/engine/xml/var_subst.cpp` |
+| `gz list` / export | `list.cpp` and related |
+| `gz pack` / redist | `redist_emit.cpp`, `build.cpp`, `pack.cpp`, `backend_dispatch.cpp` (`run_pack_backend`) |
+
+Longer **human** topic docs: `script-messages` (triggers, shell fallback detail), `script-tutorial`, `internal-variables` (repo `doc/en/` or `doc/zh/`), and **`package-target-xml-spec`** (narrative + `gz spec` as embedded master for English).
 
 ---
 
-## 8. Install trees, `gz pack`, and optional redistribution XML (`gz build`)
+)SPEC"
+  R"SPEC(## 10. Install trees, `gz pack`, redistribution XML (`gz build`)
 
-- **`gz pack`** only **archives** the install root(s) selected by `--install-dir-name` (under `.intermediate/install/<arch>/`, including `bin/`, `lib/`, `include/`, etc.). It **does not** generate new `package.xml` / `target.xml` and does not rewrite source targets.
+- **`gz pack`** only **archives** the install root(s) for `--install-dir-name` (under `.intermediate/install/<arch>/`, e.g. `bin/`, `lib/`, `include/`). It does **not** create new `package.xml` / `target.xml` at source; it does not rewrite your hand-authored targets from the scan set.
 
-- **Redistribution XML (default on)**: after a successful **`gz build`**, the engine reads **`.intermediate/build/<leaf>/gz_redist_manifest.json`**
-  (written by **`gz configure`**, **schema 3** with split **layout** fields) and, if it lists
-  **targets**, writes **`<install>/gz-redist/package.xml`** plus one **`<install>/gz-redist/<emit-name>/target.xml`** per entry. Skip
-  with **`--no-emit-redistribution-xml`** or **`GZ_EMIT_REDIST_XML=0`** / **`false`** / **`off`** / **`no`**. Library-like targets
-  are emitted as **`prebuilt_*`** with **`<prebuilt …/>`** paths rebased relative to each `target.xml` directory, and the **layout**
-  attributes (see above) copied from the manifest. **Schema 1** may carry legacy
-  **`arch`** (decomposed when **`try_decompose_compose_arch_tag`** matches). **Schema 2/3** use split **layout** fields from JSON.
-  **`executable`** targets are omitted from the manifest (MVP). Code:
-  **`redist_emit.cpp`**, **`configure.cpp`** (manifest), **`build.cpp`**.
+- **Redistribution XML (default on)**: after **`gz build`**, the engine reads **`.intermediate/build/<leaf>/gz_redist_manifest.json`**
+  (from **`gz configure`**, **schema 3** with split layout fields). If it lists **targets**, writes **`<install>/gz-redist/package.xml`**
+  and one **`<install>/gz-redist/<emit-name>/target.xml`** per entry. Disable with **`--no-emit-redistribution-xml`** or
+  **`GZ_EMIT_REDIST_XML=0`** / `false` / `off` / `no`. Library targets emit as **`prebuilt_*`** with **`<prebuilt …/>`** rebased
+  relative to each `target.xml` and layout from manifest. Schema 1 may use legacy **`arch`**. **Executable** targets omitted
+  (MVP). Code: **`redist_emit.cpp`**, **`configure.cpp`**, **`build.cpp`**.
 
-- **`gz pack`** will include **`gz-redist/`** automatically when it exists under the packaged install tree.
+- **`gz pack`** includes **`gz-redist/`** when it exists under the packaged install tree.
 
 End of embedded spec.
 )SPEC";
@@ -454,7 +445,7 @@ End of embedded spec.
 
 int cmd_spec(const std::vector<std::string>& args) {
   (void)args;
-  std::cout << kXmlSpecEnThroughSection3 << kXmlSpecEnSections4And5 << kXmlSpecEnSections6Through7;
+  std::cout << kXmlSpecEnPart1 << kXmlSpecEnPart2 << kXmlSpecEnPart3;
   return 0;
 }
 

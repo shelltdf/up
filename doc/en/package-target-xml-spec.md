@@ -3,7 +3,9 @@
 > **Documentation index** (full `doc/zh` / `doc/en` table): [`../README.md`](../README.md)  
 > This file is the **full English** specification prose. Optional **Simplified Chinese** edition: [`../zh/package-target-xml-spec.md`](../zh/package-target-xml-spec.md).
 
-This document describes **gz (GroundZero)**’s current **parsing rules** for the two descriptor files and **configure-time semantic constraints**. The implementation uses a **lightweight regex scanner** (see `GroundZero/lib/engine/xml/simple_xml.cpp`), **not** a full XML validator: write well-formed XML and follow the recognizable shapes below. If this file disagrees with the embedded English in **`gz spec`**, **`gz spec` and source code** win; this file is the English prose companion with repo cross-links.
+This document describes **gz (GroundZero)**’s current **parsing rules** for the two descriptor files and **configure-time semantic constraints**. The implementation uses a **lightweight regex scanner** (see `GroundZero/lib/engine/xml/simple_xml.cpp`), **not** a full XML validator: write well-formed XML and follow the recognizable shapes below.
+
+**Authoritative machine-oriented English** is the text printed by **`gz spec`** (stdout), versioned by **`GZ_XML_SPEC_REVISION`** inside `GroundZero/lib/engine/commands/spec.cpp` (currently **33**). That embedded text is organized for tooling around three pillars: **DOM-style trees** (`package` / `target`), **variables** (builtins, merge, `when`, templates), and **scripts / triggers** (with `script-messages.md` detail). **This file** keeps narrative prose, field tables, examples, and cross-links; if anything disagrees with **`gz spec`** or the implementation, **`gz spec` and source code** win.
 
 ### How this doc fits with others
 
@@ -14,6 +16,19 @@ This document describes **gz (GroundZero)**’s current **parsing rules** for th
 | **Doc map, FAQ, gz-gui, high-level overview without XML fields** | [`user-manual.md`](user-manual.md) |
 | **Built-ins, `gz_cache.txt`, `GZ_*`, `CMAKE_PREFIX_PATH` aggregation** | [`internal-variables.md`](internal-variables.md) |
 | **This file**: `package.xml` / `target.xml` **fields, repeated blocks, `when`, deps, type rules** | (this page) + **`gz spec`** |
+
+### Alignment with embedded `gz spec` (revision 33)
+
+| Topic in `gz spec` | Where to read in this document and repo |
+|--------------------|----------------------------------------|
+| §1 Validation (`gz configure` / `gz list`) | Subcommand details: [`cli-reference.md`](cli-reference.md); list stdout / export quirks are also summarized in `gz spec` §1. |
+| §2 DOM-style trees (`package` / `target` allowed children) | **§1** (file roles, merge), **§2–3** (field-by-field). |
+| §3 Variables (builtins, merge order, `when`, `config_files` templates) | **§2.4–2.6**, **§3.5**, and [`internal-variables.md`](internal-variables.md). |
+| §4 Scripts / `trigger` / preprocess | **§2.7** and [`script-messages.md`](script-messages.md). |
+| §5–6 `package.xml` / `target.xml` field reference | **§2** and **§3** below. |
+| §7 Encoding / primary package | **§4–5**. |
+| §8 Examples | **§6** and [`../../test_projects/README.md`](../../test_projects/README.md). |
+| §9–10 Implementation / `gz pack` / redistribution | **§7–8**; `redist_emit.cpp` / `pack.cpp` as listed in `gz spec` §9–10. |
 
 ### Product direction (recommended workflow)
 

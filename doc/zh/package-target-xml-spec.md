@@ -3,7 +3,9 @@
 > **文档索引**（`doc/zh` / `doc/en` 全部入口表）：[`../README.md`](../README.md)  
 > **English full text**: [`../en/package-target-xml-spec.md`](../en/package-target-xml-spec.md)
 
-本文档描述 **gz（GroundZero）** 当前实现对两种描述文件的**解析约定**与 **configure** 阶段的**语义约束**。实现采用轻量正则扫描（见 `GroundZero/lib/engine/xml/simple_xml.cpp`），**不是**完整 XML 校验器：建议仍写成良构 XML，并遵守下列可识别形态。与 **`gz spec`** 内嵌英文规范不一致时，以 **`gz spec`** 与源码为准；本文件侧重中文说明与仓库内交叉引用。
+本文档描述 **gz（GroundZero）** 当前实现对两种描述文件的**解析约定**与 **configure** 阶段的**语义约束**。实现采用轻量正则扫描（见 `GroundZero/lib/engine/xml/simple_xml.cpp`），**不是**完整 XML 校验器：建议仍写成良构 XML，并遵守下列可识别形态。
+
+**权威英文机器可比对文本** 为 **`gz spec`** 命令在标准输出打印的全文，版本以 `GroundZero/lib/engine/commands/spec.cpp` 中的 **`GZ_XML_SPEC_REVISION`** 为准（当前 **33**）。内嵌文本按 **DOM 树**（`package` / `target`）、**变量体系**（内置、合并、`when`、模板）、**脚本与 trigger**（细节另见 `script-messages.md`）三条主线组织。**本中文文档** 保留叙述、字段表、示例与交叉引用；若与 **`gz spec`** 或实现冲突，以 **`gz spec` 与源码** 为准。
 
 ### 与其它文档的分工
 
@@ -14,6 +16,19 @@
 | **文档地图、FAQ、gz-gui、不写 XML 字段时的鸟瞰** | [`user-manual.md`](user-manual.md) |
 | **内置变量、`gz_cache.txt`、`GZ_*`、`CMAKE_PREFIX_PATH` 聚合** | [`internal-variables.md`](internal-variables.md) |
 | **本文**：`package.xml` / `target.xml` **字段、多块合并、`when`、依赖与类型约束** | （当前页）+ **`gz spec`** |
+
+### 与内嵌 `gz spec` 的对照（rev 33）
+
+| `gz spec` 中的节 | 本文与仓库中对应位置 |
+|------------------|------------------------|
+| §1 校验命令（`gz configure` / `gz list`） | 子命令全文见 [`cli-reference.md`](cli-reference.md)；`gz spec` §1 亦概括 list 的 stdout/导出行为。 |
+| §2 DOM 式树 | **§1**（角色与合并）、**§2–3**（分字段说明）。 |
+| §3 变量 | **§2.4–2.6**、**§3.5**、[`internal-variables.md`](internal-variables.md)。 |
+| §4 脚本与 trigger | **§2.7**、[`script-messages.md`](script-messages.md)。 |
+| §5–6 `package.xml` / `target.xml` 字段 | 下述 **§2**、**§3**。 |
+| §7 编码与主包 | **§4–5**。 |
+| §8 示例 | **§6**、[`../../test_projects/README.md`](../../test_projects/README.md)。 |
+| §9–10 实现指针与 pack/再分发 | **§7–8**；源码见 `gz spec` 表。 |
 
 ### 产品方向（推荐工作流）
 

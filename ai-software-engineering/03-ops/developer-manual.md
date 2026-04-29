@@ -44,5 +44,5 @@ cmake --build gz_reverse_cmake/build
 ## 文档维护
 
 - 规则驱动四阶段目录：**`ai-software-engineering/`**（本仓库已建立）。
-- 实现侧用户文档：**`doc/zh/`** 与 **`doc/en/`** 同名文件一一对应，**均为完整正文**（中/英各一份；与 **`gz spec`** 或源码冲突时以 **`gz spec` 与源码** 为准）。**索引**：**`doc/README.md`**（**不**再在 `doc/` 根目录维护与 `zh/` 同名的跳转 `.md`）。
+- 实现侧用户文档：**`doc/zh/`** 与 **`doc/en/`** 同名文件一一对应，**均为完整正文**（中/英各一份；与 **`gz spec`** 或源码冲突时以 **`gz spec` 与源码** 为准）。**索引**：**`doc/README.md`**（**不**再在 `doc/` 根目录维护与 `zh/` 同名的跳转 `.md`）。**`gz spec`** 内嵌英文正文的版本号见 **`GZ_XML_SPEC_REVISION`**（`GroundZero/lib/engine/commands/spec.cpp`），正文按 DOM / 变量 / 脚本 三条主线组织，与 **`doc/*/package-target-xml-spec.md`** 中「与内嵌 / Alignment」表交叉引用。
 - 总览：`README.md`、`DESIGN.md`。
