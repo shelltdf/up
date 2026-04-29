@@ -9,7 +9,7 @@ namespace {
 // English-only: embedded spec for `gz spec` stdout. Aligned with doc/en/package-target-xml-spec.md; AI-oriented layout.
 // Split into chunks: MSVC ~16kB string literal limit.
 constexpr const char* kXmlSpecEnPart1 =
-  R"SPEC(GZ_XML_SPEC_REVISION=33
+  R"SPEC(GZ_XML_SPEC_REVISION=34
 
 # gz — package.xml and target.xml (machine-oriented summary)
 
@@ -85,6 +85,8 @@ target  (root; name= required, type= optional, default `executable`)
 +-- vars*
 +-- config_files*
 +-- defines*
++-- compile_flags*  (body: <arg>…</arg> per argv token; may repeat, merge appends; CMake: target_compile_options)
++-- link_flags*     (body: <arg>…; CMake: target_link_options)
 +-- sources*        (or bare <file> only when zero <sources> block exists, see §6)
 +-- headers*
 +-- assets*
@@ -102,7 +104,7 @@ target
 
 **Repeated balanced blocks (merge order)** under `<package>` / `<target>`:
 - **package.xml:** `<vars>`, `<defines>`, `<config_files>` — each may repeat; bodies **append** in file order to one logical list.
-- **target.xml:** `<sources>`, `<headers>`, `<assets>`, `<vars>`, `<defines>`, `<config_files>` — same merge rule.
+- **target.xml:** `<sources>`, `<headers>`, `<assets>`, `<vars>`, `<defines>`, `<compile_flags>`, `<link_flags>`, `<config_files>` — same merge rule.
 - **Self-closing / void tags:** multiple **`<prebuilt …/>`** — the **last** non-empty parse wins for the prebuilt slot.
 - **`<dependency/>`** is global-regex collected; order is list order.
 - **Bare `<file>…</file>`** (no `<sources>` wrapper): only scanned when there is **zero** `<sources>…</sources>` in the file;
@@ -282,6 +284,11 @@ Unknown `type` = configure error (`unknown target type`).
 - C identifier `name`, optional `value`. If `value` is present, it may use only alnum and **`._+-/`** (no spaces), matching the
   current implementation. Applied `PRIVATE` for native compiles; CMake: `target_compile_definitions`; Ninja: `/D` or `-D` flags.
 
+### `<compile_flags>`, `<link_flags>` (target, native compiles)
+- Repeating blocks. Body: one or more `<arg>...</arg>`; each `arg` body (trimmed) is **one** argv token passed `PRIVATE` to
+  `target_compile_options` / `target_link_options` in CMake, or concatenated to Ninja per-target extra compile/link argv.
+- Merge: repeated blocks append in file order.
+
 ### `<dependency/>`
 - Same package: `name` only. Cross: `Package:Target`. **visibility** `private|public|interface` (default private). `interface` **rejected** when consumer is **executable**. **Valid** ref targets: library-like (`static_library`, `shared_library`, `library`, `prebuilt_*`); `asset_bundle` in graph **validation**; configure **fails** if unresolved or non-library. CMake notes: `library` rewritten to static or shared before emission; exes in same package **implicit private-link** all in-package library targets if **no** explicit `<dependency/>` lines; with explicit lines, use visibility. Static-to-static **transitive** `target_link_libraries` may **not** be fully chained — final exe may need explicit deps.
 
@@ -371,6 +378,9 @@ for all tags is in **§2** and the tables in **§5–6**.
   <defines>
     <define name="DEMO_TARGET" value="1"/>
   </defines>
+  <compile_flags>
+    <arg>/W3</arg>
+  </compile_flags>
   <sources>
     <file>source_path.cpp</file>
     <file from="single.cpp" when="GZ_OS==windows"/>

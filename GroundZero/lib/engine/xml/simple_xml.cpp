@@ -230,6 +230,16 @@ bool parse_defines_body(const std::string& body, std::vector<DefineEntry>& out, 
   return true;
 }
 
+bool parse_flag_arg_body(const std::string& body, std::vector<std::string>& out, std::string& /*error*/) {
+  std::regex arg_re(R"rx(<\s*arg\s*>\s*([^<]*?)\s*</\s*arg\s*>)rx");
+  for (std::sregex_iterator it(body.begin(), body.end(), arg_re), end; it != end; ++it) {
+    const std::string t = trim_copy((*it)[1].str());
+    if (!t.empty())
+      out.push_back(t);
+  }
+  return true;
+}
+
 bool parse_config_files_body(const std::string& body, std::vector<ConfigFileEntry>& out, std::string& error) {
   std::regex cf_re(R"rx(<\s*file\s+([^>]+)/\s*>)rx");
   for (std::sregex_iterator it(body.begin(), body.end(), cf_re), end; it != end; ++it) {
@@ -568,6 +578,16 @@ bool load_target_xml(const std::filesystem::path& path, TargetDesc& out, std::st
           error))
     return false;
   if (!for_each_balanced_children(
+          raw, "compile_flags",
+          [&](const std::string& body, std::string& err) { return parse_flag_arg_body(body, out.compile_flags, err); },
+          error))
+    return false;
+  if (!for_each_balanced_children(
+          raw, "link_flags",
+          [&](const std::string& body, std::string& err) { return parse_flag_arg_body(body, out.link_flags, err); },
+          error))
+    return false;
+  if (!for_each_balanced_children(
           raw, "vars",
           [&](const std::string& body, std::string& err) { return parse_vars_body(body, out.vars, out.scripts, err); },
           error))
@@ -747,6 +767,18 @@ bool write_target_xml(std::ostream& out, const TargetDesc& desc) {
       out << "/>\n";
     }
     out << "  </defines>\n";
+  }
+  if (!desc.compile_flags.empty()) {
+    out << "  <compile_flags>\n";
+    for (const auto& a : desc.compile_flags)
+      out << "    <arg>" << xml_escape_text(a) << "</arg>\n";
+    out << "  </compile_flags>\n";
+  }
+  if (!desc.link_flags.empty()) {
+    out << "  <link_flags>\n";
+    for (const auto& a : desc.link_flags)
+      out << "    <arg>" << xml_escape_text(a) << "</arg>\n";
+    out << "  </link_flags>\n";
   }
   if (!desc.includes.empty()) {
     out << "  <headers>\n";

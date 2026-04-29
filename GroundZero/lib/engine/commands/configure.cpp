@@ -1760,6 +1760,8 @@ int run_configure(const ConfigureRequest& req) {
           continue;
         tm.compile_definitions.push_back(de.value.empty() ? de.name : (de.name + "=" + de.value));
       }
+      tm.compile_flags = lt.desc.compile_flags;
+      tm.link_flags = lt.desc.link_flags;
     }
     if (lt.desc.type == "executable") {
       auto eit = exe_extra_links.find(lt.desc.name);

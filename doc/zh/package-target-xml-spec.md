@@ -5,7 +5,7 @@
 
 本文档描述 **gz（GroundZero）** 当前实现对两种描述文件的**解析约定**与 **configure** 阶段的**语义约束**。实现采用轻量正则扫描（见 `GroundZero/lib/engine/xml/simple_xml.cpp`），**不是**完整 XML 校验器：建议仍写成良构 XML，并遵守下列可识别形态。
 
-**权威英文机器可比对文本** 为 **`gz spec`** 命令在标准输出打印的全文，版本以 `GroundZero/lib/engine/commands/spec.cpp` 中的 **`GZ_XML_SPEC_REVISION`** 为准（当前 **33**）。内嵌文本按 **DOM 树**（`package` / `target`）、**变量体系**（内置、合并、`when`、模板）、**脚本与 trigger**（细节另见 `script-messages.md`）三条主线组织。**本中文文档** 保留叙述、字段表、示例与交叉引用；若与 **`gz spec`** 或实现冲突，以 **`gz spec` 与源码** 为准。
+**权威英文机器可比对文本** 为 **`gz spec`** 命令在标准输出打印的全文，版本以 `GroundZero/lib/engine/commands/spec.cpp` 中的 **`GZ_XML_SPEC_REVISION`** 为准（当前 **34**）。内嵌文本按 **DOM 树**（`package` / `target`）、**变量体系**（内置、合并、`when`、模板）、**脚本与 trigger**（细节另见 `script-messages.md`）三条主线组织。**本中文文档** 保留叙述、字段表、示例与交叉引用；若与 **`gz spec`** 或实现冲突，以 **`gz spec` 与源码** 为准。
 
 ### 与其它文档的分工
 
@@ -17,7 +17,7 @@
 | **内置变量、`gz_cache.txt`、`GZ_*`、`CMAKE_PREFIX_PATH` 聚合** | [`internal-variables.md`](internal-variables.md) |
 | **本文**：`package.xml` / `target.xml` **字段、多块合并、`when`、依赖与类型约束** | （当前页）+ **`gz spec`** |
 
-### 与内嵌 `gz spec` 的对照（rev 33）
+### 与内嵌 `gz spec` 的对照（rev 34）
 
 | `gz spec` 中的节 | 本文与仓库中对应位置 |
 |------------------|------------------------|
@@ -52,7 +52,7 @@
 在 **`package.xml`** 的 **`<package>`** 内、以及 **`target.xml`** 的 **`<target>`** 内，下列**成对闭合**子块可出现**任意多次**（按**文档中出现顺序**依次解析，结果**追加**到同一列表或同一合并语义；块内条目相对顺序仍按各块内规则）：
 
 - **`package.xml`**：**`<vars>`**、**`<defines>`**、**`<config_files>`**
-- **`target.xml`**：**`<sources>`**、**`<headers>`**、**`<assets>`**、**`<vars>`**、**`<defines>`**、**`<config_files>`**
+- **`target.xml`**：**`<sources>`**、**`<headers>`**、**`<assets>`**、**`<vars>`**、**`<defines>`**、**`<compile_flags>`**、**`<link_flags>`**、**`<config_files>`**
 
 **自闭合/无体标签**（如 **`<prebuilt …/>`**、**`<dependency …/>`**）可出现多次：**`<prebuilt/>`** 以**最后一次**有效声明覆盖预置库信息；**`<dependency/>`** 仍为全文正则匹配，顺序即依赖列表顺序。
 
@@ -202,6 +202,11 @@
   <define name="APP_VERSION" value="1.0.0"/>
 </defines>
 ```
+
+### 3.4.1 编译与链接参数 `<compile_flags>` / `<link_flags>`（可选，仅原生编译目标）
+
+- 可选、可多次出现（见 §1.1 合并）的成对块 **`<compile_flags>…</compile_flags>`**、**`<link_flags>…</link_flags>`**；块体为若干 **`<arg>…</arg>`**，**每个** `<arg>` 的文本（去首尾空白）对应 **一个** 传给 **CMake** 的 `target_compile_options` / `target_link_options`（**PRIVATE**）的参数字符串，在 **Ninja** 后端的对应目标的编译/链接命令中追加为额外 argv 片段（顺序与块内、多块合并顺序一致）。
+- **预置/资源包等** 不参与本机工具链时，可解析进 DOM 但 **configure 不**写入模型（与 `<defines>` 的忽略方式一致）。
 
 ### 2.4 包级变量 `<vars>`（可选）
 

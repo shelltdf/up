@@ -115,6 +115,10 @@ struct TargetDesc {
   std::vector<std::pair<std::string, std::string>> vars;
   std::vector<ScriptEntry> scripts;
   std::vector<ConfigFileEntry> config_files;
+  /** `<compile_flags><arg>…</arg>…` — one arg = one `target_compile_options` token; repeated blocks append. */
+  std::vector<std::string> compile_flags;
+  /** `<link_flags><arg>…</arg>…` — one arg = one `target_link_options` token. */
+  std::vector<std::string> link_flags;
 };
 
 // Minimal attribute scanner for root elements (no full XML parser dependency).

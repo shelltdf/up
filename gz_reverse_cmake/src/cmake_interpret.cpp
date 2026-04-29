@@ -62,6 +62,25 @@ static std::vector<std::string> split_list(const std::string &s) {
   return o;
 }
 
+/// target_compile_options / target_link_options: skip visibility keywords, split CMake lists, ignore generator expr.
+static void collect_target_options_list(const CmakeCommand &c, const std::unordered_map<std::string, std::string> &vars,
+                                        std::vector<std::string> *out) {
+  for (std::size_t j = 1; j < c.args.size(); ++j) {
+    std::string tok = c.args[j];
+    std::string tlow = tok;
+    to_lower(&tlow);
+    if (tlow == "private" || tlow == "public" || tlow == "interface" || tlow == "before" || tlow == "after" || tlow == "system" ||
+        tlow == "key" || tlow == "sublink_options" || tlow == "file_set")
+      continue;
+    if (tok.find("$<") != std::string::npos) continue;
+    for (const std::string &seg : split_list(expc(tok, vars))) {
+      if (seg.find("$<") != std::string::npos) continue;
+      if (seg.empty()) continue;
+      out->push_back(seg);
+    }
+  }
+}
+
 static void handle_set(const CmakeCommand &c, std::unordered_map<std::string, std::string> *vars) {
   if (c.args.empty()) return;
   const std::string &n = c.args[0];
@@ -739,6 +758,53 @@ static void process_listfile(const fs::path &listfile, const std::vector<fs::pat
           if (p.is_relative()) p = this_dir / p;
           std::error_code ec;
           it2->second.include_dir_abs.push_back(fs::weakly_canonical(p, ec));
+        }
+      }
+    }
+    if (n == "target_compile_options" && block == 0 && c.args.size() >= 2) {
+      const std::string tname = expc(c.args[0], *vars);
+      auto it2 = targets->find(tname);
+      if (it2 == targets->end()) continue;
+      collect_target_options_list(c, *vars, &it2->second.compile_flags);
+    }
+    if (n == "target_link_options" && block == 0 && c.args.size() >= 2) {
+      const std::string tname = expc(c.args[0], *vars);
+      auto it2 = targets->find(tname);
+      if (it2 == targets->end()) continue;
+      collect_target_options_list(c, *vars, &it2->second.link_flags);
+    }
+    if (n == "set_target_properties" && block == 0 && c.args.size() >= 3) {
+      // CMake: set_target_properties(t1 [t2 ...] PROPERTIES k v k v ...) — 须在实参中定位 PROPERTIES。
+      std::size_t prop_i = c.args.size();
+      for (std::size_t p = 0; p < c.args.size(); ++p) {
+        std::string a = c.args[p];
+        to_lower(&a);
+        if (a == "properties") {
+          prop_i = p;
+          break;
+        }
+      }
+      if (prop_i > 0 && prop_i < c.args.size() && prop_i + 1 < c.args.size()) {
+        for (std::size_t i = 0; i < prop_i; ++i) {
+          const std::string tname = expc(c.args[i], *vars);
+          if (tname.find("::") != std::string::npos) continue;  // 与 add_* 一致, 略过 ALIAS/IMPORTED:: 等
+          auto it2 = targets->find(tname);
+          if (it2 == targets->end()) continue;
+          for (std::size_t j = prop_i + 1; j + 1 < c.args.size(); j += 2) {
+            std::string k = c.args[j];
+            to_lower(&k);
+            const std::string v = expc(c.args[j + 1], *vars);
+            if (v.find("$<") != std::string::npos) continue;
+            if (k == "compile_flags") {
+              for (const std::string &seg : split_list(v)) {
+                if (seg.find("$<") == std::string::npos && !seg.empty()) it2->second.compile_flags.push_back(seg);
+              }
+            } else if (k == "link_flags") {
+              for (const std::string &seg : split_list(v)) {
+                if (seg.find("$<") == std::string::npos && !seg.empty()) it2->second.link_flags.push_back(seg);
+              }
+            }
+          }
         }
       }
     }

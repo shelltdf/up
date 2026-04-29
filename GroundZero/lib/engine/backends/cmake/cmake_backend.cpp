@@ -282,6 +282,18 @@ void append_native_libraries(
         o << kInd << "\"" << cmake_escape_string_value(d) << "\"\n";
       o << ")\n";
     }
+    if (!t.compile_flags.empty()) {
+      o << "target_compile_options(" << t.name << " PRIVATE\n";
+      for (const auto& f : t.compile_flags)
+        o << kInd << "\"" << cmake_escape_string_value(f) << "\"\n";
+      o << ")\n";
+    }
+    if (!t.link_flags.empty()) {
+      o << "target_link_options(" << t.name << " PRIVATE\n";
+      for (const auto& f : t.link_flags)
+        o << kInd << "\"" << cmake_escape_string_value(f) << "\"\n";
+      o << ")\n";
+    }
     append_source_rules_for_target(o, t, m, command_idx);
     o << "\n";
   }
@@ -375,6 +387,18 @@ void append_executables(
       o << "target_compile_definitions(" << t.name << " PRIVATE\n";
       for (const auto& d : t.compile_definitions)
         o << kInd << "\"" << cmake_escape_string_value(d) << "\"\n";
+      o << ")\n";
+    }
+    if (!t.compile_flags.empty()) {
+      o << "target_compile_options(" << t.name << " PRIVATE\n";
+      for (const auto& f : t.compile_flags)
+        o << kInd << "\"" << cmake_escape_string_value(f) << "\"\n";
+      o << ")\n";
+    }
+    if (!t.link_flags.empty()) {
+      o << "target_link_options(" << t.name << " PRIVATE\n";
+      for (const auto& f : t.link_flags)
+        o << kInd << "\"" << cmake_escape_string_value(f) << "\"\n";
       o << ")\n";
     }
     o << "\n";

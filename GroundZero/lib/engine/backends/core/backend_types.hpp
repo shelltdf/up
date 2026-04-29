@@ -59,6 +59,10 @@ struct ConfigureTargetModel {
   std::vector<std::string> include_dirs;
   /** CMake `NAME` or `NAME=value` items for target_compile_definitions / Ninja -D. */
   std::vector<std::string> compile_definitions;
+  /** One string = one `target_compile_options` / one compile argv token; from `target.xml` `<compile_flags>`. */
+  std::vector<std::string> compile_flags;
+  /** One string = one `target_link_options` / one link argv token; from `target.xml` `<link_flags>`. */
+  std::vector<std::string> link_flags;
   /** CMake `target_link_libraries`: target name + visibility keyword (private|public|interface). */
   std::vector<std::pair<std::string, std::string>> links;
   bool imported_prebuilt = false;

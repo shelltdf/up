@@ -63,7 +63,8 @@ static void print_usage() {
       << "说明: 不调用 cmake。将 Listfile 解析为命令流(语句级浅层 AST)后做静态子集重解释:\n"
       << "      project, set, include_directories, add_subdirectory, add_executable,\n"
       << "      add_library(STATIC/SHARED/MODULE 等), target_sources, target_link_libraries,\n"
-      << "      target_include_directories, configure_file(可映射为 <config_files>); 不执行 if/foreach 真值, function/macro 内对 add_* 与 configure_file 不解释;\n"
+      << "      target_include_directories, target_compile_options, target_link_options, set_target_properties(COMPILE_FLAGS|LINK_FLAGS),\n"
+      << "      configure_file(可映射为 <config_files>); 不执行 if/foreach 真值, function/macro 内对 add_* 与 configure_file 不解释;\n"
       << "      生成器表达式 $<> 在相关实参上跳过。\n"
       << "      ${CMAKE_BINARY_DIR} 等按 GroundZero 与 gz 相同, 从 <source>/.intermediate/build/… 自动推算(见注)。\n"
       << "      可选: --file-api <path>  用户预置的 File API / codemodel 回复 JSON, 仅作 target 名对照 (不运行 cmake)。\n"
@@ -476,6 +477,24 @@ int main(int argc, char **argv) {
           for (const auto &pr : tgt_cf_rows) f << "    <file in=\"" << pr.first << "\" to=\"" << pr.second << "\"/>\n";
           f << "  </config_files>\n";
         }
+      }
+      if (!tm.compile_flags.empty()) {
+        f << "  <compile_flags>\n";
+        for (const std::string &a : tm.compile_flags) {
+          std::string ac = a;
+          xml_escape(ac);
+          f << "    <arg>" << ac << "</arg>\n";
+        }
+        f << "  </compile_flags>\n";
+      }
+      if (!tm.link_flags.empty()) {
+        f << "  <link_flags>\n";
+        for (const std::string &a : tm.link_flags) {
+          std::string ac = a;
+          xml_escape(ac);
+          f << "    <arg>" << ac << "</arg>\n";
+        }
+        f << "  </link_flags>\n";
       }
       f << "  <sources>\n";
       for (const std::string &rs : source_files) {

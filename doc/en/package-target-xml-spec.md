@@ -5,7 +5,7 @@
 
 This document describes **gz (GroundZero)**’s current **parsing rules** for the two descriptor files and **configure-time semantic constraints**. The implementation uses a **lightweight regex scanner** (see `GroundZero/lib/engine/xml/simple_xml.cpp`), **not** a full XML validator: write well-formed XML and follow the recognizable shapes below.
 
-**Authoritative machine-oriented English** is the text printed by **`gz spec`** (stdout), versioned by **`GZ_XML_SPEC_REVISION`** inside `GroundZero/lib/engine/commands/spec.cpp` (currently **33**). That embedded text is organized for tooling around three pillars: **DOM-style trees** (`package` / `target`), **variables** (builtins, merge, `when`, templates), and **scripts / triggers** (with `script-messages.md` detail). **This file** keeps narrative prose, field tables, examples, and cross-links; if anything disagrees with **`gz spec`** or the implementation, **`gz spec` and source code** win.
+**Authoritative machine-oriented English** is the text printed by **`gz spec`** (stdout), versioned by **`GZ_XML_SPEC_REVISION`** inside `GroundZero/lib/engine/commands/spec.cpp` (currently **34**). That embedded text is organized for tooling around three pillars: **DOM-style trees** (`package` / `target`), **variables** (builtins, merge, `when`, templates), and **scripts / triggers** (with `script-messages.md` detail). **This file** keeps narrative prose, field tables, examples, and cross-links; if anything disagrees with **`gz spec`** or the implementation, **`gz spec` and source code** win.
 
 ### How this doc fits with others
 
@@ -17,7 +17,7 @@ This document describes **gz (GroundZero)**’s current **parsing rules** for th
 | **Built-ins, `gz_cache.txt`, `GZ_*`, `CMAKE_PREFIX_PATH` aggregation** | [`internal-variables.md`](internal-variables.md) |
 | **This file**: `package.xml` / `target.xml` **fields, repeated blocks, `when`, deps, type rules** | (this page) + **`gz spec`** |
 
-### Alignment with embedded `gz spec` (revision 33)
+### Alignment with embedded `gz spec` (revision 34)
 
 | Topic in `gz spec` | Where to read in this document and repo |
 |--------------------|----------------------------------------|
@@ -52,7 +52,7 @@ This document describes **gz (GroundZero)**’s current **parsing rules** for th
 Inside **`<package>`** in **`package.xml`** and **`<target>`** in **`target.xml`**, these **paired** sections may appear **any number of times** in document order; each body is parsed and results are **appended** to the same logical list (intra-block order rules still apply):
 
 - **`package.xml`**: **`<vars>`**, **`<defines>`**, **`<config_files>`**
-- **`target.xml`**: **`<sources>`**, **`<headers>`**, **`<assets>`**, **`<vars>`**, **`<defines>`**, **`<config_files>`**
+- **`target.xml`**: **`<sources>`**, **`<headers>`**, **`<assets>`**, **`<vars>`**, **`<defines>`**, **`<compile_flags>`**, **`<link_flags>`**, **`<config_files>`**
 
 **Void / self-closing tags** (e.g. **`<prebuilt …/>`**, **`<dependency …/>`**) may repeat: **`<prebuilt/>`** — the **last** non-empty parse wins for the prebuilt slot; **`<dependency/>`** is still collected by global regex; order is list order.
 
@@ -186,6 +186,11 @@ Where:
 
 - **CMake**: `target_compile_definitions(<target> PRIVATE …)` for native compile targets (`imported` / `asset_bundle` skip; **`library`** resolved first).
 - **Ninja**: append **`/D…`** (MSVC `cl`) or **`-D…`** (Unix-like).
+
+### 3.4.1 Per-target `<compile_flags>` and `<link_flags>`
+
+- Optional, repeatable blocks (§1.1 merge) **`<compile_flags>…</compile_flags>`** and **`<link_flags>…</link_flags>`**; body uses **`<arg>…</arg>`**; each `arg` text (trimmed) is **one** `PRIVATE` token for `target_compile_options` / `target_link_options` in **CMake** and an extra argv fragment on the per-target **Ninja** compile or link line (order follows block order and multi-block append).
+- **Prebuilt / non-compile targets**: may parse into the DOM, but **configure** does not apply them (same pattern as ignored `<defines>` for those target kinds).
 
 ### 2.4 Package-level `<vars>` (optional)
 

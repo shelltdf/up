@@ -65,6 +65,29 @@ std::string ninja_compile_def_flags(const std::vector<std::string>& defs) {
   return s;
 }
 
+// Extra argv tokens from target.xml: escape `$` and spaces for Ninja.
+std::string ninja_extra_argv_flags(const std::vector<std::string>& flags) {
+  if (flags.empty())
+    return {};
+  std::string s;
+  for (const std::string& t : flags) {
+    for (char c : t) {
+      if (c == '$')
+        s += "$$";
+      else if (c == ' ')
+        s += "$ ";
+      else if (c == ':')
+        s += "$:";
+      else
+        s.push_back(c);
+    }
+    s += ' ';
+  }
+  while (!s.empty() && s.back() == ' ')
+    s.pop_back();
+  return s;
+}
+
 }  // namespace
 
 std::string build_ninja_install_command(const BuildBackendContext& ctx) {
@@ -91,18 +114,20 @@ int write_ninja_file(const ConfigureGraphModel& model) {
 #if defined(_WIN32)
   nf << "cxx = cl\n";
   nf << "cflags = /nologo /EHsc /std:c++17 " << (debug ? "/Zi /Od" : "/O2") << "\n";
-  nf << "ldflags = /nologo\n\n";
+  nf << "ldflags = /nologo\n";
+  nf << "extra_cxx = \n";
+  nf << "extra_lnk = \n\n";
   nf << "rule cxx\n";
-  nf << "  command = $cxx /c $cflags $defs /Fo$out $in\n";
+  nf << "  command = $cxx /c $cflags $extra_cxx $defs /Fo$out $in\n";
   nf << "  description = CXX $out\n\n";
   nf << "rule link_exe\n";
-  nf << "  command = link $ldflags /OUT:$out $in $libs\n";
+  nf << "  command = link $ldflags $extra_lnk /OUT:$out $in $libs\n";
   nf << "  description = LINK $out\n\n";
   nf << "rule link_shared\n";
-  nf << "  command = link $ldflags /DLL /OUT:$out $in $libs\n";
+  nf << "  command = link $ldflags $extra_lnk /DLL /OUT:$out $in $libs\n";
   nf << "  description = SHARED $out\n\n";
   nf << "rule link_static\n";
-  nf << "  command = lib /nologo /OUT:$out $in\n";
+  nf << "  command = lib /nologo $extra_lnk /OUT:$out $in\n";
   nf << "  description = STATIC $out\n\n";
   nf << "rule copy\n";
   nf << "  command = cmd /c if not exist \"$outdir\" mkdir \"$outdir\" && copy /Y \"$in\" \"$out\" >nul\n";
@@ -112,16 +137,18 @@ int write_ninja_file(const ConfigureGraphModel& model) {
   nf << "  description = RUN $cmd\n\n";
 #else
   nf << "cxx = c++\n";
-  nf << "cflags = -std=c++17 " << (debug ? "-g -O0" : "-O2") << "\n\n";
+  nf << "cflags = -std=c++17 " << (debug ? "-g -O0" : "-O2") << "\n";
+  nf << "extra_cxx = \n";
+  nf << "extra_lnk = \n\n";
   nf << "rule cxx\n";
-  nf << "  command = $cxx -MMD -MF $out.d -c $cflags $defs -o $out $in\n";
+  nf << "  command = $cxx -MMD -MF $out.d -c $cflags $extra_cxx $defs -o $out $in\n";
   nf << "  depfile = $out.d\n";
   nf << "  description = CXX $out\n\n";
   nf << "rule link_exe\n";
-  nf << "  command = $cxx -o $out $in $libs\n";
+  nf << "  command = $cxx -o $out $in $libs $extra_lnk\n";
   nf << "  description = LINK $out\n\n";
   nf << "rule link_shared\n";
-  nf << "  command = $cxx -shared -o $out $in $libs\n";
+  nf << "  command = $cxx -shared -o $out $in $libs $extra_lnk\n";
   nf << "  description = SHARED $out\n\n";
   nf << "rule link_static\n";
   nf << "  command = ar rcs $out $in\n";
@@ -170,6 +197,11 @@ int write_ninja_file(const ConfigureGraphModel& model) {
       nf << "\n";
       if (!t.compile_definitions.empty())
         nf << "  defs =" << ninja_compile_def_flags(t.compile_definitions) << "\n";
+      {
+        const std::string ec = ninja_extra_argv_flags(t.compile_flags);
+        if (!ec.empty())
+          nf << "  extra_cxx = " << ec << "\n";
+      }
       objs.push_back(obj_n);
       all_outputs.push_back(obj_n);
     }
@@ -213,6 +245,15 @@ int write_ninja_file(const ConfigureGraphModel& model) {
     if (!objs.empty())
       nf << " " << in_list.str();
     nf << "\n";
+    {
+      const std::string el = ninja_extra_argv_flags(t.link_flags);
+      if (!el.empty()
+#if !defined(_WIN32)
+          && t.type != "static_library"
+#endif
+      )
+        nf << "  extra_lnk = " << el << "\n";
+    }
     if (t.type == "executable" || t.type == "shared_library") {
       if (!lib_outputs.empty()) {
         nf << "  libs =";

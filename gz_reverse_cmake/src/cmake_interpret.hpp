@@ -26,6 +26,10 @@ struct TargetModel {
   std::vector<std::filesystem::path> include_dir_abs;
   /// 归属本 target 的 configure_file(…) 对 (in/out 已相对 Listfile 目录解算为绝对)
   std::vector<ConfigFilePathPair> config_files;
+  /// target_compile_options / set_target_properties(COMPILE_FLAGS) 等（约简为一串 argv 片段，顺序见 interpret）
+  std::vector<std::string> compile_flags;
+  /// target_link_options / set_target_properties(LINK_FLAGS)
+  std::vector<std::string> link_flags;
 };
 
 struct InterpretResult {
