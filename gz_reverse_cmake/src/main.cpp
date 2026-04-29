@@ -15,7 +15,19 @@
 
 #include <filesystem>
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 namespace fs = std::filesystem;
+
+#if defined(_WIN32)
+// 避免 cmd 默认非 UTF-8 时中文帮助/错误显示为乱码 (e.g. "缺少" -> "缂哄皯")
+static void init_windows_console_utf8() {
+  SetConsoleOutputCP(65001);
+  SetConsoleCP(65001);
+}
+#endif
 
 struct Options {
   fs::path source_dir;
@@ -120,12 +132,14 @@ static int parse_args(int argc, char **argv, Options *o) {
       o->package_version = argv[++i];
       continue;
     }
-    std::cerr << "未知参数: " << a << "\n";
+    std::cerr << "error: unknown argument: " << a << " (use --help)\n";
     return 2;
   }
   if (o->source_dir.empty() || o->out_dir.empty()) {
     if (!o->help) {
-      std::cerr << "缺少 --source 或 --out\n";
+      // 英文行在任意控制台代码页均可读; 中文说明在 UTF-8/65001 下可正常显示
+      std::cerr << "error: need both --source <path> and --out <path>\n"
+                << "缺少: 请指定 --source 与 --out (同见 --help)\n";
       return 2;
     }
   }
@@ -135,6 +149,9 @@ static int parse_args(int argc, char **argv, Options *o) {
 }
 
 int main(int argc, char **argv) {
+#if defined(_WIN32)
+  init_windows_console_utf8();
+#endif
   Options opt;
   int pr = parse_args(argc, argv, &opt);
   if (pr != 0) {
