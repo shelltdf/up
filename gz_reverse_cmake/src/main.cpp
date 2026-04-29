@@ -62,7 +62,8 @@ static void print_usage() {
       << "      project, set, include_directories, add_subdirectory, add_executable,\n"
       << "      add_library(STATIC/SHARED/MODULE 等), target_sources, target_link_libraries,\n"
       << "      target_include_directories; 不执行 if/foreach 真值, function/macro 内 add_* 忽略;\n"
-      << "      生成器表达式 $<> 在相关实参上跳过。\n";
+      << "      生成器表达式 $<> 在相关实参上跳过。\n"
+      << "XML: 若有 <headers> 则写在 <sources> 之前; <sources> 为 .c/.cpp 等 + 非对外头; <headers> 仅 public 头(<file>); 不写未展开 ${...} 。\n";
 }
 
 static bool is_skipped_utility_name(const std::string &name) {
@@ -127,6 +128,51 @@ static std::string source_path_for_target_xml(const fs::path &tdir, const fs::pa
     return path_to_posix(abs_path.generic_string());
   }
   return path_to_posix(r);
+}
+
+static bool string_has_cmake_deref(const std::string &s) { return s.find("${") != std::string::npos; }
+
+static std::string ext_to_lower(const fs::path &p) {
+  std::string e = p.extension().string();
+  for (char &c : e) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+  return e;
+}
+
+static bool is_compile_source_ext(const std::string &ext) {
+  return ext == ".c" || ext == ".cc" || ext == ".cpp" || ext == ".cxx" || ext == ".m" || ext == ".mm" || ext == ".S" || ext == ".s" ||
+         ext == ".ccm" || ext == ".c++" || ext == ".cppm";
+}
+
+static bool is_header_ext(const std::string &ext) {
+  return ext == ".h" || ext == ".hpp" || ext == ".hh" || ext == ".hxx" || ext == ".h++";
+}
+
+static bool icase_eq_stem_to_pkg(const fs::path &file_path, const std::string &package_var_name) {
+  if (package_var_name.empty()) return false;
+  std::string stem = file_path.stem().string();
+  for (char &c : stem) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+  std::string pkg = package_var_name;
+  for (char &c : pkg) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+  return stem == pkg;
+}
+
+// <headers> 在 GZ 里表示**安装**到 include/ 的对外头, 与 compile -I 不同. 无 install() 时: 路径段含 include/, 或主头 <package>.h
+static bool is_public_install_header_guess(const fs::path &abs, const fs::path &source_root, const std::string &package_var_name) {
+  if (!is_header_ext(ext_to_lower(abs))) return false;
+  std::error_code ec;
+  const fs::path a = fs::absolute(abs);
+  const fs::path s = fs::absolute(source_root);
+  const fs::path rel = fs::relative(a, s, ec);
+  if (ec) return false;
+  for (const fs::path &comp : rel) {
+    std::string c = comp.string();
+    for (char &x : c) x = static_cast<char>(::tolower(static_cast<unsigned char>(x)));
+    if (c == "include")
+      return true;
+  }
+  if (icase_eq_stem_to_pkg(abs, package_var_name))
+    return true;
+  return false;
 }
 
 static int parse_args(int argc, char **argv, Options *o) {
@@ -246,21 +292,34 @@ int main(int argc, char **argv) {
       fs::path tdir = pkg_root / tname;
       fs::create_directories(tdir);
 
-      std::vector<std::string> rel_sources;
+      std::vector<std::string> source_files, header_install_files;
       for (const fs::path &sp : tm.source_paths_abs) {
-        rel_sources.push_back(source_path_for_target_xml(tdir, sp, opt.source_dir));
+        if (string_has_cmake_deref(path_to_posix(sp))) {
+          std::cerr << "注: 跳过含未展开 ${...} 的路径(请手补): " << path_to_posix(sp) << "\n";
+          continue;
+        }
+        std::string rel = source_path_for_target_xml(tdir, sp, opt.source_dir);
+        if (string_has_cmake_deref(rel)) {
+          std::cerr << "注: 跳过(相对路径中含 ${...} 未展开): " << rel << "\n";
+          continue;
+        }
+        const std::string ext = ext_to_lower(sp);
+        if (is_header_ext(ext)) {
+          if (is_public_install_header_guess(sp, opt.source_dir, pkg_name))
+            header_install_files.push_back(std::move(rel));
+          else
+            source_files.push_back(std::move(rel));
+        } else
+          source_files.push_back(std::move(rel));
       }
-      std::sort(rel_sources.begin(), rel_sources.end());
-      rel_sources.erase(std::unique(rel_sources.begin(), rel_sources.end()), rel_sources.end());
-
-      std::set<std::string> rel_includes;
-      for (const fs::path &ip : tm.include_dir_abs) {
-        std::string r = source_path_for_target_xml(tdir, ip, opt.source_dir);
-        if (r.empty() || r == ".")
-          rel_includes.insert(".");
-        else
-          rel_includes.insert(r);
+      if (source_files.empty()) {
+        std::cerr << "注: 目标 \"" << tname << "\" 在过滤后无 <sources> 可写(可能仅余含 ${} 的条目), 跳过\n";
+        continue;
       }
+      std::sort(source_files.begin(), source_files.end());
+      source_files.erase(std::unique(source_files.begin(), source_files.end()), source_files.end());
+      std::sort(header_install_files.begin(), header_install_files.end());
+      header_install_files.erase(std::unique(header_install_files.begin(), header_install_files.end()), header_install_files.end());
 
       std::vector<std::string> dep_names;
       for (const std::string &d : tm.link_to) {
@@ -273,22 +332,22 @@ int main(int argc, char **argv) {
 
       std::ofstream f(tdir / "target.xml", std::ios::binary);
       f << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<target name=\"" << tname << "\" type=\"" << tm.kind << "\">\n";
+      if (!header_install_files.empty()) {
+        f << "  <headers>\n";
+        for (const std::string &hf : header_install_files) {
+          std::string a = hf;
+          xml_escape(a);
+          f << "    <file from=\"" << a << "\"/>\n";
+        }
+        f << "  </headers>\n";
+      }
       f << "  <sources>\n";
-      for (const std::string &rs : rel_sources) {
+      for (const std::string &rs : source_files) {
         std::string fp = rs;
         xml_escape(fp);
         f << "    <file>" << fp << "</file>\n";
       }
       f << "  </sources>\n";
-      if (!rel_includes.empty()) {
-        f << "  <headers>\n";
-        for (const std::string &inc : rel_includes) {
-          std::string a = inc;
-          xml_escape(a);
-          f << "    <dir from=\"" << a << "\"/>\n";
-        }
-        f << "  </headers>\n";
-      }
       for (const std::string &d : dep_names) {
         std::string dcopy = d;
         xml_escape(dcopy);

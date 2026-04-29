@@ -36,7 +36,7 @@ path\to\gz_reverse_cmake
 path\to\gz_reverse_cmake --source E:\dev\egg_next\3rdparty\zlib-1.2.13 --out E:\dev\egg_next\gz_reverse
 ```
 
-其它：`--package-name`、`--package-version`；`--help` 查看全部参数。将 `--out` 显式指到与 `--source` 同一路径时可能产生警告，见 `02-physical/gz-reverse-cmake/spec.md`。
+其它：`--package-name`、`--package-version`；`--help` 查看全部参数。`target.xml` 中 **`<sources>`** 为编译单元 + 非对外头；**`<headers>`** 仅 **`<file from=…/>`** 表示可安装 public 头（启发式，见 `02-physical/gz-reverse-cmake/spec.md` §过程-5）。将 `--out` 显式指到与 `--source` 同一路径时可能产生警告。
 
 ## 能力边界（与真实 CMake 的差异）
 

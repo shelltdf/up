@@ -23,7 +23,12 @@
    - `target_sources`：向已存在目标**追加**源；`IMPORTED`/`INTERFACE`/`ALIAS`/`OBJECT` 等仍按实现跳过或不出现在可编译目标集；
    - `target_link_libraries` / `target_include_directories`：在已登记目标上追加依赖与头路径（跳过多数关键字与 `$<…>` 生成式片段）。
 3. `function`/`macro`/`foreach`/`while` 块内：用块深度屏蔽 `add_*` / `add_subdirectory` 等，**不**模拟宏展开与循环实例化；块外 `if` 不建执行流，**两分支内**的 `add_*` 在命令流中**均可被扫到**（与互斥配置可能冲突，见边界）。
-4. 写出 `package.xml` 与各 `target.xml`；路径均为**相对**对应 `target.xml` 所在目录的 portable 形式。
+4. 写出 `package.xml` 与各 `target.xml`；路径均为**相对**对应 `target.xml` 所在目录的 portable 形式。若同时存在 **`<headers>`** 与 **`<sources>`**，**默认**先写 **`<headers>`** 再写 **`<sources>`**（与 `target` 子元素常见阅读顺序「对外头 → 源」一致；`gz` 合并解析不依赖子块物理顺序，见 `package-target-xml-spec` §1.1）。
+5. **`target.xml` 中 `<sources>` 与 `<headers>`**（与 `package-target-xml-spec` 中「头文件**安装**」一致，**不**把编译期 `-I` 混成安装块）：
+   - 含未展开 ``${...}`` 的源路径**不**写出，并**注**至 stderr，由用户按真实 configure 手补。
+   - **不**将 `include_directories` / `target_include_directories` 的目录列成 `<headers><dir from=…/>`；实现仍可在解释阶段用其信息，**默认**不在 XML 中反映为「待安装头」的 `<dir>`。
+   - **`<sources><file>`**：常见编译扩展名（如 `.c`、`.cpp` 等）及**未**判为「对外安装」的头文件；其余头（如 `deflate.h`）归此块，作为与实现同列的**私有/实现头**初稿。
+   - **`<headers>`**：仅对**可判为 public 安装**的头使用 **`<file from="…"/>`**（启发式：相对 `--source` 路径中**出现**名为 `include` 的**路径段**，或**无** `include/` 时头文件主名与 `project` 导出的包名同 stem、且扩展名为头文件，如 `zlib` → `zlib.h`）。**不**解析 `install(FILES|DIRECTORY|…)` 时，与真实安装集可能不一致（例：`zconf.h` 常需 configure 后手改补入）。
 
 ## 与 File API 路线的关系
 
