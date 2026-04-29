@@ -15,6 +15,7 @@
 | **`gz_cache.txt`、`GZ_*`、内置变量、`arch` 含义** | [`internal-variables.md`](internal-variables.md) |
 | **脚本 `trigger`、派发阶段** | [`script-messages.md`](script-messages.md) |
 | **预处理 / Qt 等脚本实操** | [`script-tutorial.md`](script-tutorial.md) |
+| **从 CMake 静态反解为 `package.xml` / `target.xml`（`gz_reverse_cmake`）** | [`gz-reverse-cmake.md`](gz-reverse-cmake.md)（[`../en/gz-reverse-cmake.md`](../en/gz-reverse-cmake.md)） |
 | **仓库命令表、从源码构建** | 根目录 [`README.md`](../../README.md) |
 | **设计与中间目录大图** | [`DESIGN.md`](../../DESIGN.md) |
 | **可跑示例树** | [`test_projects/README.md`](../../test_projects/README.md) |

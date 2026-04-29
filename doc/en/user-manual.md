@@ -15,6 +15,7 @@ This manual is for first-time users of `gz` (GroundZero): mental model, **how th
 | **`gz_cache.txt`, `GZ_*`, `arch`** | [`internal-variables.md`](internal-variables.md) |
 | **Script triggers** | [`script-messages.md`](script-messages.md) |
 | **Preprocess / Qt** | [`script-tutorial.md`](script-tutorial.md) |
+| **Static CMake → `package.xml` / `target.xml` (`gz_reverse_cmake`)** | [`gz-reverse-cmake.md`](../en/gz-reverse-cmake.md)（[`../zh/gz-reverse-cmake.md`](../zh/gz-reverse-cmake.md)） |
 | **Repo overview / build from source** | [`README.md`](../README.md) |
 | **Design** | [`DESIGN.md`](../DESIGN.md) |
 | **Examples** | [`test_projects/README.md`](../test_projects/README.md) |

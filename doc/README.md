@@ -17,6 +17,7 @@
 | 内置变量与缓存键 | [zh/internal-variables.md](zh/internal-variables.md) | [en/internal-variables.md](en/internal-variables.md) |
 | `trigger` 消息表 | [zh/script-messages.md](zh/script-messages.md) | [en/script-messages.md](en/script-messages.md) |
 | 脚本与预处理教程 | [zh/script-tutorial.md](zh/script-tutorial.md) | [en/script-tutorial.md](en/script-tutorial.md) |
+| **CMake 逆向为 GZ XML**（`gz_reverse_cmake` 功能与用法） | [zh/gz-reverse-cmake.md](zh/gz-reverse-cmake.md) | [en/gz-reverse-cmake.md](en/gz-reverse-cmake.md) |
 
 正文路径均在 **`zh/`** / **`en/`** 上表；仓库根 **`README.md`**、**`DESIGN.md`** 等可链 **`doc/zh/...`** 或 **`doc/en/...`** 任选语言。**不再**在 `doc/` 根目录保留同名跳转 `.md`，避免与 **`doc/README.md`** 重复维护。
 

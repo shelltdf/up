@@ -21,11 +21,22 @@ python build.py
 
 ## 用法
 
+- **`--source`**：含顶层 `CMakeLists.txt` 的目录（**只读**扫描）。**省略 = 当前工作目录**（先 `cd` 到该根再跑）。
+- **`--out`**：**输出根**；下建 **`<包名>/…`**。**省略 = 当前工作目录**，实际 XML 在 **`<当前目录>/<包名>/`**。为把整包反解结果放在**源码树外**，请**显式**传 `--out`（例如 `…\gz_reverse` 或任意空目录）。若**仅**写 `--source` 而不写 `--out`，则输出根为**当前工作目录**（与「先 `cd` 到源根、无参运行」在路径上一致时行为相同）。
+- **最简**：在含 `CMakeLists.txt` 的目录下执行无参命令（零路径输入）：
+
 ```text
-path\to\gz_reverse_cmake --source E:\path\to\cmake\project --out E:\out\reversed
+cd E:\dev\egg_next\3rdparty\zlib-1.2.13
+path\to\gz_reverse_cmake
 ```
 
-可选：`--package-name`、`--package-version`；`--help` 查看全部参数。
+- **把输出收到树外**（仍扫描同一 zlib 源）：
+
+```text
+path\to\gz_reverse_cmake --source E:\dev\egg_next\3rdparty\zlib-1.2.13 --out E:\dev\egg_next\gz_reverse
+```
+
+其它：`--package-name`、`--package-version`；`--help` 查看全部参数。显式路径与源重叠时可能打印警告（双默认不警告），见 `02-physical/gz-reverse-cmake/spec.md`。
 
 ## 能力边界（与真实 CMake 的差异）
 

@@ -35,27 +35,34 @@ struct Options {
   std::string package_name;
   std::string package_version = "0.1.0";
   bool help = false;
+  // --source 未在命令行出现时使用当前工作目录
+  bool source_from_default = false;
+  // --out 未在命令行出现时使用当前工作目录 (生成 <输出根>/<包名>/  )
+  bool out_from_default = false;
 };
 
 static void print_usage() {
-  std::cerr << "gz_reverse_cmake — 静态解析 CMakeLists.txt 子集, 生成 package.xml / target.xml 初稿\n"
-            << "\n"
-            << "用法:\n"
-            << "  gz_reverse_cmake --source <CMAKE_SOURCE_DIR> --out <输出包根> [选项]\n"
-            << "\n"
-            << "必选:\n"
-            << "  --source <path>   含顶层 CMakeLists.txt 的源目录\n"
-            << "  --out <path>      输出根 (创建 <包名>/package.xml 与 <包名>/<目标名>/target.xml)\n"
-            << "\n"
-            << "可选:\n"
-            << "  --package-name    包名 (默认: project() 第一个参数, 否则 reversed_project)\n"
-            << "  --package-version 版本 (默认 0.1.0)\n"
-            << "\n"
-            << "说明: 不调用 cmake。将 Listfile 解析为命令流(语句级浅层 AST)后做静态子集重解释:\n"
-            << "      project, set, include_directories, add_subdirectory, add_executable,\n"
-            << "      add_library(STATIC/SHARED/MODULE 等), target_sources, target_link_libraries,\n"
-            << "      target_include_directories; 不执行 if/foreach 真值, function/macro 内 add_* 忽略;\n"
-            << "      生成器表达式 $<> 在相关实参上跳过。\n";
+  std::cerr
+      << "gz_reverse_cmake — 静态解析 CMakeLists.txt 子集, 生成 package.xml / target.xml 初稿\n"
+      << "\n"
+      << "用法:\n"
+      << "  gz_reverse_cmake [ --source <path> ] [ --out <path> ] [选项]\n"
+      << "  在含顶层 CMakeLists.txt 的目录下可不带路径: 未写 --source / --out 时二者均为当前工作目录。\n"
+      << "\n"
+      << "参数:\n"
+      << "  --source <path>   含顶层 CMakeLists.txt 的源目录; 省略 = 当前工作目录。\n"
+      << "  --out <path>      输出根, 下建 <包名>/… ; 省略 = 当前工作目录 (先 cd 到要扫描的根再跑)。\n"
+      << "                    将 XML 写在源码树外时: 显式传 --out 到空目录(如 ../gz_reverse 或 其它盘符路径)。\n"
+      << "\n"
+      << "其它:\n"
+      << "  --package-name    包名 (默认: project() 第一个参数, 否则 reversed_project)\n"
+      << "  --package-version 版本 (默认 0.1.0)\n"
+      << "\n"
+      << "说明: 不调用 cmake。将 Listfile 解析为命令流(语句级浅层 AST)后做静态子集重解释:\n"
+      << "      project, set, include_directories, add_subdirectory, add_executable,\n"
+      << "      add_library(STATIC/SHARED/MODULE 等), target_sources, target_link_libraries,\n"
+      << "      target_include_directories; 不执行 if/foreach 真值, function/macro 内 add_* 忽略;\n"
+      << "      生成器表达式 $<> 在相关实参上跳过。\n";
 }
 
 static bool is_skipped_utility_name(const std::string &name) {
@@ -96,6 +103,31 @@ static void xml_escape(std::string &s) {
 
 static std::string path_to_posix(const fs::path &p) { return p.generic_string(); }
 
+/// root 为规范路径时, 若 c 为 root 本身或子路径, 为真 (同盘符下; 不跨设备则 weakly_canonical 可靠)
+static bool is_same_path_or_subpath(const fs::path &root, const fs::path &c) {
+  std::error_code ec;
+  fs::path a = fs::weakly_canonical(root, ec);
+  if (ec) return false;
+  fs::path b = fs::weakly_canonical(c, ec);
+  if (ec) return false;
+  if (a == b) return true;
+  auto a_it = a.begin(), b_it = b.begin();
+  for (; a_it != a.end() && b_it != b.end(); ++a_it, ++b_it) {
+    if (*a_it != *b_it) return false;
+  }
+  return a_it == a.end();
+}
+
+static void warn_out_overlaps_source(const fs::path &source, const fs::path &out_root, bool both_path_args_default) {
+  if (both_path_args_default)
+    return;
+  if (is_same_path_or_subpath(source, out_root)) {
+    std::cerr << "warning: --out matches --source (or is inside it). package.xml will land under the scan tree as <out>/<package>/. "
+                 "Use a separate --out to keep outputs outside the source tree (e.g. a sibling directory).\n"
+                 "警告: 输出根与源目录相同或在源目录内, 生成物将出现在源码树下; 可改用独立的 --out 根目录\n";
+  }
+}
+
 static std::string source_path_for_target_xml(const fs::path &tdir, const fs::path &abs_path, const fs::path & /*top*/) {
   std::error_code ec;
   fs::path p = abs_path;
@@ -110,6 +142,7 @@ static std::string source_path_for_target_xml(const fs::path &tdir, const fs::pa
 }
 
 static int parse_args(int argc, char **argv, Options *o) {
+  bool have_source = false, have_out = false;
   for (int i = 1; i < argc; i++) {
     std::string a = argv[i];
     if (a == "--help" || a == "-h") {
@@ -118,10 +151,12 @@ static int parse_args(int argc, char **argv, Options *o) {
     }
     if (a == "--source" && i + 1 < argc) {
       o->source_dir = fs::path(argv[++i]);
+      have_source = true;
       continue;
     }
     if (a == "--out" && i + 1 < argc) {
       o->out_dir = fs::path(argv[++i]);
+      have_out = true;
       continue;
     }
     if (a == "--package-name" && i + 1 < argc) {
@@ -135,16 +170,18 @@ static int parse_args(int argc, char **argv, Options *o) {
     std::cerr << "error: unknown argument: " << a << " (use --help)\n";
     return 2;
   }
-  if (o->source_dir.empty() || o->out_dir.empty()) {
-    if (!o->help) {
-      // 英文行在任意控制台代码页均可读; 中文说明在 UTF-8/65001 下可正常显示
-      std::cerr << "error: need both --source <path> and --out <path>\n"
-                << "缺少: 请指定 --source 与 --out (同见 --help)\n";
-      return 2;
-    }
-  }
+  if (o->help) return 0;
+  o->source_from_default = !have_source;
+  o->out_from_default = !have_out;
+  if (!have_source) o->source_dir = fs::current_path();
+  if (!have_out) o->out_dir = fs::current_path();
   o->source_dir = fs::weakly_canonical(fs::absolute(o->source_dir));
   o->out_dir = fs::absolute(o->out_dir);
+  {
+    std::error_code ec;
+    fs::path co = fs::weakly_canonical(o->out_dir, ec);
+    o->out_dir = ec ? fs::absolute(o->out_dir) : co;
+  }
   return 0;
 }
 
@@ -165,6 +202,13 @@ int main(int argc, char **argv) {
     print_usage();
     return 0;
   }
+  if (opt.source_from_default && opt.out_from_default) {
+    std::cerr << "注: 未指定 --source / --out, 源目录与输出根均用当前工作目录: " << path_to_posix(opt.out_dir) << "\n";
+  } else {
+    if (opt.source_from_default) std::cerr << "注: 未指定 --source, 使用: " << path_to_posix(opt.source_dir) << "\n";
+    if (opt.out_from_default) std::cerr << "注: 未指定 --out, 使用: " << path_to_posix(opt.out_dir) << "\n";
+  }
+  warn_out_overlaps_source(opt.source_dir, opt.out_dir, opt.source_from_default && opt.out_from_default);
 
   try {
     fs::path top = opt.source_dir / "CMakeLists.txt";
