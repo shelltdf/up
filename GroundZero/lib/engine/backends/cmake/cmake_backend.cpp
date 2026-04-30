@@ -252,7 +252,7 @@ void append_native_libraries(
     const std::optional<std::filesystem::path>& pkg_root,
     int& command_idx) {
   for (const auto& t : m.targets) {
-    if (t.imported_prebuilt || t.type == "asset_bundle")
+    if (t.imported_prebuilt || t.type == "asset_bundle" || t.type == "custom_target")
       continue;
     if (!(t.type == "static_library" || t.type == "shared_library"))
       continue;
@@ -296,6 +296,35 @@ void append_native_libraries(
     }
     append_source_rules_for_target(o, t, m, command_idx);
     o << "\n";
+  }
+}
+
+void append_custom_targets(std::ostringstream& o, const ConfigureGraphModel& m) {
+  for (const auto& t : m.targets) {
+    if (t.type != "custom_target")
+      continue;
+    o << "add_custom_target(" << t.name << ")\n\n";
+  }
+  for (const auto& t : m.targets) {
+    if (t.type != "custom_target" || t.order_only_dependencies.empty())
+      continue;
+    o << "add_dependencies(" << t.name;
+    for (const auto& n : t.order_only_dependencies)
+      o << "\n" << kInd << n;
+    o << "\n)\n\n";
+  }
+}
+
+void append_order_only_for_native_libs(std::ostringstream& o, const ConfigureGraphModel& m) {
+  for (const auto& t : m.targets) {
+    if (t.type != "static_library" && t.type != "shared_library")
+      continue;
+    if (t.order_only_dependencies.empty())
+      continue;
+    o << "add_dependencies(" << t.name;
+    for (const auto& n : t.order_only_dependencies)
+      o << "\n" << kInd << n;
+    o << "\n)\n\n";
   }
 }
 
@@ -362,15 +391,17 @@ void append_executables(
       append_link_group(o, "PUBLIC", pub, pbi);
       append_link_group(o, "INTERFACE", iface, pbi);
       o << ")\n";
-      std::set<std::string> dep_unique;
-      for (const auto& pr : t.links)
-        dep_unique.insert(pr.first);
-      if (!dep_unique.empty()) {
-        o << "add_dependencies(" << t.name;
-        for (const auto& n : dep_unique)
-          o << "\n" << kInd << n;
-        o << "\n)\n";
-      }
+    }
+    std::set<std::string> dep_unique;
+    for (const auto& pr : t.links)
+      dep_unique.insert(pr.first);
+    for (const auto& d : t.order_only_dependencies)
+      dep_unique.insert(d);
+    if (!dep_unique.empty()) {
+      o << "add_dependencies(" << t.name;
+      for (const auto& n : dep_unique)
+        o << "\n" << kInd << n;
+      o << "\n)\n";
     }
     if (!t.include_dirs.empty()) {
       o << "target_include_directories(" << t.name << " PRIVATE\n";
@@ -422,7 +453,7 @@ void append_test_block(std::ostringstream& o, const ConfigureGraphModel& m) {
 void collect_native_lib_names_by_kind(const ConfigureGraphModel& m, std::vector<std::string>& static_out,
                                       std::vector<std::string>& shared_out) {
   for (const auto& t : m.targets) {
-    if (t.imported_prebuilt || t.type == "asset_bundle")
+    if (t.imported_prebuilt || t.type == "asset_bundle" || t.type == "custom_target")
       continue;
     if (t.type == "static_library")
       static_out.push_back(t.name);
@@ -604,6 +635,8 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
   append_preamble(cm, model.package_name);
   append_prebuilt_imported(cm, model, pkg_root);
   append_native_libraries(cm, model, pkg_root, command_idx);
+  append_custom_targets(cm, model);
+  append_order_only_for_native_libs(cm, model);
   append_executables(cm, model, pkg_root, prebuilt_link);
   append_test_block(cm, model);
   append_install(cm, model, command_idx);

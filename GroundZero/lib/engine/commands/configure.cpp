@@ -10,11 +10,13 @@
 #include "redist_emit.hpp"
 #include "simple_xml.hpp"
 #include "var_subst.hpp"
+#include "gz_embedded_lua.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <regex>
@@ -377,7 +379,7 @@ void try_write_gz_redist_manifest_json(const std::filesystem::path& manifest_pat
     const LoadedTarget& lt = build_targets[k];
     if (lt.package_name != primary_pkg.name)
       continue;
-    if (lt.desc.type == "asset_bundle" || lt.desc.type == "executable")
+    if (lt.desc.type == "asset_bundle" || lt.desc.type == "executable" || lt.desc.type == "custom_target")
       continue;
     const std::string& ty = lt.desc.type;
     if (static_link && ty == "shared_library" && primary_has_static_compiled_or_library)
@@ -883,6 +885,74 @@ int load_configure_dom_desc_collections(const DomDocument& dom,
   return 0;
 }
 
+/// Runs `trigger=configure` + `script_type=lua` vars from package.xml / target.xml: embedded VM + `gz.file` (not shell).
+static int run_dom_embedded_configure_lua(const DomDocument& dom, const std::filesystem::path& workspace,
+                                        const std::filesystem::path& build_root, const std::string& arch,
+                                        const std::filesystem::path& primary_pkg_dir, const std::string& primary_pkg_name) {
+  const GlobalNode* g = dom.global_root();
+  if (!g) return 0;
+  std::error_code ec;
+  GzLuaFileRoots base{};
+  base.workspace = std::filesystem::weakly_canonical(workspace, ec);
+  if (ec) base.workspace = workspace.lexically_normal();
+  base.build_root = std::filesystem::weakly_canonical(build_root, ec);
+  if (ec) base.build_root = build_root.lexically_normal();
+  if (!primary_pkg_dir.empty()) {
+    base.package_dir = std::filesystem::weakly_canonical(primary_pkg_dir, ec);
+    if (ec) base.package_dir = primary_pkg_dir.lexically_normal();
+  }
+  base.generated_dir = (base.workspace / ".intermediate" / "generated" / std::filesystem::u8path(arch)).lexically_normal();
+  std::map<std::string, std::string> env;
+  env["GZ_WORKSPACE"] = to_posix_path_string(base.workspace);
+  env["GZ_BUILD_ROOT"] = to_posix_path_string(base.build_root);
+  env["GZ_PACKAGE"] = primary_pkg_name;
+  env["GZ_ARCH"] = arch;
+
+  auto run_on = [&](const DomNode* node, const std::filesystem::path& pkg_dir) -> int {
+    for (const auto& ve : node->vars()) {
+      if (ve.value.type != VarValueType::Script) continue;
+      const ScriptValue& sc = ve.value.script;
+      if (sc.trigger != "configure") continue;
+      if (!sc.script_type.empty() && sc.script_type != "lua") continue;
+      if (sc.source.empty()) {
+        std::cerr << "configure: embedded Lua var \"" << ve.name << "\": empty script source; skipping.\n";
+        continue;
+      }
+      GzLuaFileRoots roots = base;
+      if (!pkg_dir.empty()) {
+        std::error_code e2;
+        roots.package_dir = std::filesystem::weakly_canonical(pkg_dir, e2);
+        if (e2) roots.package_dir = pkg_dir.lexically_normal();
+      }
+      const std::string err = run_gz_embedded_configure_lua(sc.source, roots, env);
+      if (!err.empty()) {
+        std::cerr << "configure: embedded Lua failed (var \"" << ve.name << "\"): " << err << "\n";
+        return 3;
+      }
+    }
+    return 0;
+  };
+
+  std::function<int(const PackageNode*)> visit_pkg;
+  visit_pkg = [&](const PackageNode* pkg) -> int {
+    const std::filesystem::path pdir = pkg->package_xml_path().parent_path();
+    if (int r = run_on(pkg, pdir)) return r;
+    for (const auto& tch : pkg->children()) {
+      if (tch->type() == DomNodeType::Target) {
+        if (int r = run_on(tch.get(), pdir)) return r;
+      } else if (tch->type() == DomNodeType::Package) {
+        if (int r = visit_pkg(static_cast<const PackageNode*>(tch.get()))) return r;
+      }
+    }
+    return 0;
+  };
+  for (const auto& ch : g->children()) {
+    if (ch->type() != DomNodeType::Package) continue;
+    if (int r = visit_pkg(static_cast<const PackageNode*>(ch.get()))) return r;
+  }
+  return 0;
+}
+
 }  // namespace
 
 int run_configure(const ConfigureRequest& req) {
@@ -1076,6 +1146,14 @@ int run_configure(const ConfigureRequest& req) {
   }
 
   std::set<std::string> extra_target_keys;
+  std::map<std::string, std::vector<std::string>> order_only_by_consumer;
+  const auto add_order_dep = [&order_only_by_consumer](const std::string& consumer, const std::string& name) {
+    if (consumer == name)
+      return;
+    std::vector<std::string>& v = order_only_by_consumer[consumer];
+    if (std::find(v.begin(), v.end(), name) == v.end())
+      v.push_back(name);
+  };
   for (const auto& lt : pkg_targets) {
     const std::string self_key = lt.package_name + ":" + lt.desc.name;
     for (const auto& dep : lt.desc.dependencies) {
@@ -1101,20 +1179,31 @@ int run_configure(const ConfigureRequest& req) {
           (dep_lt.desc.type == "static_library" || dep_lt.desc.type == "shared_library" || dep_lt.desc.type == "library" ||
            dep_lt.desc.type == "prebuilt_static_library" || dep_lt.desc.type == "prebuilt_shared_library");
       const bool dep_is_asset_bundle = (dep_lt.desc.type == "asset_bundle");
-      if (!(dep_is_link_lib || dep_is_asset_bundle)) {
-        std::cerr << "configure: target dependency must reference a library or asset_bundle target: " << dep_key << "\n";
+      const bool dep_is_custom_target = (dep_lt.desc.type == "custom_target");
+      if (!(dep_is_link_lib || dep_is_asset_bundle || dep_is_custom_target)) {
+        std::cerr << "configure: target dependency must reference a library, asset_bundle, or custom_target: " << dep_key
+                  << "\n";
         return 3;
       }
-      if (lt.desc.type == "executable" && dep.visibility == "interface") {
+      if (lt.desc.type == "executable" && dep.visibility == "interface" && dep_is_link_lib) {
         std::cerr << "configure: <dependency visibility=\"interface\"> is not supported when the consumer is an "
                      "executable (does not link the library): "
                   << self_key << " -> " << dep_key << "\n";
         return 3;
       }
-      if (dep_key != self_key && dep_is_link_lib)
+      if (dep_key == self_key)
+        continue;
+      if (dep_is_link_lib)
         exe_extra_links[lt.desc.name].emplace_back(dep_lt.desc.name, dep.visibility);
       if (dep_pkg != primary_pkg.name)
         extra_target_keys.insert(dep_key);
+      if (lt.desc.type == "executable" && (dep_is_asset_bundle || dep_is_custom_target))
+        add_order_dep(lt.desc.name, dep_lt.desc.name);
+      else if (lt.desc.type == "custom_target")
+        add_order_dep(lt.desc.name, dep_lt.desc.name);
+      else if ((lt.desc.type == "static_library" || lt.desc.type == "shared_library" || lt.desc.type == "library") &&
+               (dep_is_custom_target || dep_is_asset_bundle))
+        add_order_dep(lt.desc.name, dep_lt.desc.name);
     }
   }
   for (auto& kv : exe_extra_links) {
@@ -1552,7 +1641,7 @@ int run_configure(const ConfigureRequest& req) {
 
   const auto target_type_string_is_recognized = [](const std::string& t) {
     return t == "executable" || t == "library" || t == "static_library" || t == "shared_library" || t == "asset_bundle" ||
-           t == "prebuilt_static_library" || t == "prebuilt_shared_library";
+           t == "custom_target" || t == "prebuilt_static_library" || t == "prebuilt_shared_library";
   };
   for (const auto& lt : build_targets) {
     if (!target_type_string_is_recognized(lt.desc.type)) {
@@ -1568,6 +1657,12 @@ int run_configure(const ConfigureRequest& req) {
     const bool asset_only = (lt.desc.type == "asset_bundle");
     const bool prebuilt_static = (lt.desc.type == "prebuilt_static_library");
     const bool prebuilt_shared = (lt.desc.type == "prebuilt_shared_library");
+
+    {
+      const auto oit = order_only_by_consumer.find(lt.desc.name);
+      if (oit != order_only_by_consumer.end())
+        tm.order_only_dependencies = oit->second;
+    }
 
     if (prebuilt_static || prebuilt_shared) {
       if (!lt.desc.prebuilt.has_value()) {
@@ -1618,6 +1713,8 @@ int run_configure(const ConfigureRequest& req) {
         tm.imported_location = to_posix_path_string(*sf);
 #endif
       }
+    } else if (lt.desc.type == "custom_target") {
+      // Reverse-CMake / ordering-only: optional sources may be added later; empty is valid.
     } else {
       const auto src_vars = merged_vars_for_target(lt);
       const std::filesystem::path gen_root = std::filesystem::absolute(
@@ -1857,6 +1954,11 @@ int run_configure(const ConfigureRequest& req) {
       graph_model.cmake_parent_multi_config = true;
 #endif
   }
+
+  cli_verbose_phase("configure", "embedded_lua_configure");
+  if (const int lua_rc = run_dom_embedded_configure_lua(dom, cwd, build_root, arch, pkg_dir, primary_pkg.name);
+      lua_rc != 0)
+    return lua_rc;
 
   cli_verbose_phase("configure", "generate_backend");
   const int gen_code = run_generate_backend(graph_model);

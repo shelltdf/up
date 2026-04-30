@@ -1,5 +1,5 @@
 ﻿cmake_minimum_required(VERSION 3.20)
-project(GroundZero LANGUAGES CXX)
+project(GroundZero LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -12,6 +12,7 @@ endif()
 set(GZ_RUNTIME_COMPONENT gz_runtime)
 set(GZ_DEV_COMPONENT gz_dev)
 
+add_subdirectory(3rdparty/lua-5.5.0)
 add_subdirectory(GroundZero/lib)
 add_subdirectory(GroundZero/exe)
 add_subdirectory(GroundZeroGUI)
@@ -35,5 +36,15 @@ if(TARGET gz_reverse_cmake)
   add_test(
     NAME gz_reverse_cmake_help
     COMMAND "$<TARGET_FILE:gz_reverse_cmake>" --help
+  )
+  set(_fw_smoke "${CMAKE_SOURCE_DIR}/test_projects/gz_reverse_file_write_smoke")
+  add_test(
+    NAME gz_reverse_cmake_file_write_smoke
+    COMMAND "$<TARGET_FILE:gz_reverse_cmake>" --source "${_fw_smoke}" --out "${_fw_smoke}/_gz_rev_fw_out"
+  )
+  set(_frw_smoke "${CMAKE_SOURCE_DIR}/test_projects/gz_reverse_file_read_write_smoke")
+  add_test(
+    NAME gz_reverse_cmake_file_read_write_smoke
+    COMMAND "$<TARGET_FILE:gz_reverse_cmake>" --source "${_frw_smoke}" --out "${_frw_smoke}/_gz_rev_frw_out"
   )
 endif()

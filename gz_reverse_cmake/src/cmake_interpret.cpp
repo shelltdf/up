@@ -47,6 +47,8 @@ static std::string expc(std::string t, const std::unordered_map<std::string, std
   return t;
 }
 
+static bool string_has_cmake_deref(const std::string &s) { return s.find("${") != std::string::npos; }
+
 static std::vector<std::string> split_list(const std::string &s) {
   if (s.empty()) return {};
   std::vector<std::string> o;
@@ -560,6 +562,229 @@ static bool parse_configure_file_command(const CmakeCommand &c, const std::unord
   return true;
 }
 
+static void push_filegen_note(const fs::path &listfile, const CmakeCommand &c, const std::string &last_tname,
+                              std::unordered_map<std::string, TargetModel> *targets, InterpretResult *res) {
+  CmakeFilegenNote note;
+  note.ref = listfile.filename().string() + ":" + std::to_string(c.line);
+  std::string line;
+  for (char ch : c.name) {
+    if (ch == '\r' || ch == '\n' || ch == '\t')
+      line += ' ';
+    else
+      line += ch;
+  }
+  line += ' ';
+  for (std::size_t i = 0; i < c.args.size(); ++i) {
+    if (i) line += ' ';
+    for (char ch : c.args[i]) {
+      if (ch == '\r' || ch == '\n' || ch == '\t')
+        line += ' ';
+      else
+        line += ch;
+    }
+    if (line.size() > 500) {
+      line.resize(500);
+      line += "…";
+      break;
+    }
+  }
+  if (line.size() > 450) {
+    line.resize(450);
+    line += "…";
+  }
+  note.one_line = std::move(line);
+  if (!last_tname.empty()) {
+    auto it = targets->find(last_tname);
+    if (it != targets->end()) {
+      it->second.filegen_cmake_notes.push_back(std::move(note));
+      return;
+    }
+  }
+  res->package_filegen_cmake_notes.push_back(std::move(note));
+}
+
+/// 与 `file(WRITE|APPEND)` 及 `add_custom_command(OUTPUT…)` 共用: 将解算后的绝对输出路径登入 `file_write_outputs_*`
+static void register_listfile_file_write_output(const std::string &pex, const fs::path &this_dir, const std::string &last_tname,
+                                                std::unordered_map<std::string, TargetModel> *targets, InterpretResult *res,
+                                                const fs::path &listfile, unsigned line, const char *err_tag) {
+  if (pex.find("$<") != std::string::npos) {
+    res->errors.push_back(std::string(err_tag) + " skipped generator expression, " + listfile.filename().string() + " line " +
+                          std::to_string(line));
+    return;
+  }
+  if (string_has_cmake_deref(pex)) {
+    res->errors.push_back(std::string(err_tag) + " unexpanded ${...} in path, " + listfile.filename().string() + " line " +
+                          std::to_string(line));
+    return;
+  }
+  fs::path out(pex);
+  if (out.is_relative()) out = this_dir / out;
+  std::error_code ec;
+  out = fs::weakly_canonical(out, ec);
+  if (!last_tname.empty()) {
+    auto it = targets->find(last_tname);
+    if (it != targets->end())
+      it->second.file_write_outputs_abs.push_back(std::move(out));
+    else
+      res->package_file_write_outputs_abs.push_back(std::move(out));
+  } else
+    res->package_file_write_outputs_abs.push_back(std::move(out));
+}
+
+/// 遇下列词则结束**当前** OUTPUT 段、BYPRODUCTS 段 或 整个解析 (不将关键字后的词误登记为路径)
+static bool is_add_custom_command_section_start(const std::string &tlow) {
+  return tlow == "command" || tlow == "depends" || tlow == "byproducts" || tlow == "implicit_depends" || tlow == "main_dependency" ||
+         tlow == "working_directory" || tlow == "comment" || tlow == "verbatim" || tlow == "append" || tlow == "uses_terminal" ||
+         tlow == "command_expand_lists" || tlow == "job_pool" || tlow == "depfile";
+}
+
+/// `add_custom_command(OUTPUT a [b…] [BYPRODUCTS x [y…]] [COMMAND…])` 中主 OUTPUT 与 **BYPRODUCTS** 下路径, 不演算 COMMAND/DEPENDS. `TARGET` 表形略过.
+static void try_register_add_custom_command_outputs(const CmakeCommand &c, const fs::path &this_dir, const std::string &last_tname,
+                                                    std::unordered_map<std::string, std::string> *vars,
+                                                    std::unordered_map<std::string, TargetModel> *targets, InterpretResult *res,
+                                                    const fs::path &listfile) {
+  if (c.args.empty()) return;
+  {
+    std::string t0 = c.args[0];
+    to_lower(&t0);
+    if (t0 == "target") return;
+  }
+  std::size_t oi = static_cast<std::size_t>(-1);
+  for (std::size_t k = 0; k < c.args.size(); ++k) {
+    std::string tk = c.args[k];
+    to_lower(&tk);
+    if (tk == "output") {
+      oi = k;
+      break;
+    }
+  }
+  if (oi == static_cast<std::size_t>(-1)) return;
+  const char *const tag_out = "add_custom_command(OUTPUT):";
+  const char *const tag_byp = "add_custom_command(BYPRODUCTS):";
+  for (std::size_t j = oi + 1; j < c.args.size();) {
+    const std::string &piece = c.args[j];
+    std::string tjlow = piece;
+    to_lower(&tjlow);
+    if (tjlow == "byproducts") {
+      for (++j; j < c.args.size();) {
+        const std::string &p2 = c.args[j];
+        std::string w = p2;
+        to_lower(&w);
+        if (is_add_custom_command_section_start(w)) break;
+        if (!p2.empty()) {
+          const std::string pex = expc(p2, *vars);
+          register_listfile_file_write_output(pex, this_dir, last_tname, targets, res, listfile, c.line, tag_byp);
+        }
+        j++;
+      }
+      continue;
+    }
+    if (is_add_custom_command_section_start(tjlow)) break;  // command/depends/… (byproducts 已先处理)
+    if (piece.empty()) {
+      j++;
+      continue;
+    }
+    {
+      const std::string pex = expc(piece, *vars);
+      register_listfile_file_write_output(pex, this_dir, last_tname, targets, res, listfile, c.line, tag_out);
+    }
+    j++;
+  }
+}
+
+/// `add_custom_command(OUTPUT… … DEPENDS d1 [d2…] …)` 中输入路径, 不读盘; `out_var` 固定为 `"depends"` 以区别于 `file(READ)`.
+static void register_listfile_ac_depends_path(const std::string &pex, const fs::path &this_dir, const std::string &last_tname,
+                                              std::unordered_map<std::string, TargetModel> *targets, InterpretResult *res,
+                                              const fs::path &listfile, unsigned line) {
+  const char *err = "add_custom_command(DEPENDS):";
+  if (pex.find("$<") != std::string::npos) {
+    res->errors.push_back(std::string(err) + " skipped generator expression, " + listfile.filename().string() + " line " +
+                          std::to_string(line));
+    return;
+  }
+  if (string_has_cmake_deref(pex)) {
+    res->errors.push_back(std::string(err) + " unexpanded ${...} in path, " + listfile.filename().string() + " line " +
+                          std::to_string(line));
+    return;
+  }
+  fs::path pth(pex);
+  if (pth.is_relative()) pth = this_dir / pth;
+  std::error_code ec;
+  pth = fs::weakly_canonical(pth, ec);
+  FileReadEntry fre{std::move(pth), "depends"};
+  if (!last_tname.empty()) {
+    auto it = targets->find(last_tname);
+    if (it != targets->end())
+      it->second.file_read_entries.push_back(std::move(fre));
+    else
+      res->package_file_read_entries.push_back(std::move(fre));
+  } else
+    res->package_file_read_entries.push_back(std::move(fre));
+}
+
+/// 在**含** `output` 关键字之 `add_custom_command` 中扫描 `depends` 段 (非 `TARGET` 表形).
+static void try_register_add_custom_command_depends(const CmakeCommand &c, const fs::path &this_dir, const std::string &last_tname,
+                                                    std::unordered_map<std::string, std::string> *vars,
+                                                    std::unordered_map<std::string, TargetModel> *targets, InterpretResult *res,
+                                                    const fs::path &listfile) {
+  if (c.args.size() < 2) return;
+  {
+    std::string t0 = c.args[0];
+    to_lower(&t0);
+    if (t0 == "target") return;
+  }
+  bool has_output_keyword = false;
+  for (std::size_t k = 0; k < c.args.size(); ++k) {
+    std::string tk = c.args[k];
+    to_lower(&tk);
+    if (tk == "output") {
+      has_output_keyword = true;
+      break;
+    }
+  }
+  if (!has_output_keyword) return;
+  for (std::size_t i = 0; i < c.args.size(); ++i) {
+    std::string ti = c.args[i];
+    to_lower(&ti);
+    if (ti != "depends") continue;
+    for (std::size_t j = i + 1; j < c.args.size(); ++j) {
+      const std::string &p2 = c.args[j];
+      std::string w = p2;
+      to_lower(&w);
+      if (is_add_custom_command_section_start(w)) break;
+      if (p2.empty()) continue;
+      const std::string pex = expc(p2, *vars);
+      register_listfile_ac_depends_path(pex, this_dir, last_tname, targets, res, listfile, c.line);
+    }
+  }
+}
+
+static void append_file_read_to_target_model(TargetModel *tm, const std::string &pex, const std::string &out_var, const fs::path &this_dir, const fs::path &listfile, unsigned line, InterpretResult *res) {
+  const char *err = "add_custom_target path:";
+  if (pex.find("$<") != std::string::npos) {
+    res->errors.push_back(std::string(err) + " skipped generator expression, " + listfile.filename().string() + " line " + std::to_string(line));
+    return;
+  }
+  if (string_has_cmake_deref(pex)) {
+    res->errors.push_back(std::string(err) + " unexpanded ${...} in path, " + listfile.filename().string() + " line " + std::to_string(line));
+    return;
+  }
+  fs::path pth(pex);
+  if (pth.is_relative()) pth = this_dir / pth;
+  std::error_code ec;
+  pth = fs::weakly_canonical(pth, ec);
+  std::string v = out_var;
+  if (v.size() > 200u) v = "depends";
+  tm->file_read_entries.push_back(FileReadEntry{std::move(pth), std::move(v)});
+}
+
+static bool is_add_custom_target_sources_break(const std::string &tlow) {
+  return tlow == "command" || tlow == "working_directory" || tlow == "comment" || tlow == "verbatim" || tlow == "uses_terminal" || tlow == "depends" || tlow == "job_pool";
+}
+static bool is_add_custom_target_depends_break(const std::string &tlow) {
+  return tlow == "command" || tlow == "working_directory" || tlow == "comment" || tlow == "verbatim" || tlow == "uses_terminal" || tlow == "sources" || tlow == "job_pool" || tlow == "depends";
+}
+
 static void process_listfile(const fs::path &listfile, const std::vector<fs::path> &inherited_includes,
                              std::unordered_map<std::string, std::string> *vars,
                              std::unordered_map<std::string, TargetModel> *targets, InterpretResult *res,
@@ -641,7 +866,7 @@ static void process_listfile(const fs::path &listfile, const std::vector<fs::pat
   base.insert(base.end(), u.begin(), u.end());
 
   int block = 0;
-  std::string last_tname;  // 同 Listfile 内最近一次的 add_executable / add_library 目标名, 供 configure_file 归属
+  std::string last_tname;  // 同 Listfile 内最近一次的 add_executable / add_library / add_custom_target 目标名, 供 configure_file 等归属
   const std::size_t nwm = work.size();
   const std::size_t stpm = (nwm > 5000) ? 512u : (nwm > 500) ? 128u : (nwm > 100) ? 32u : 8u;
   for (std::size_t cmd_i = 0; cmd_i < nwm; ++cmd_i) {
@@ -753,6 +978,57 @@ static void process_listfile(const fs::path &listfile, const std::vector<fs::pat
       last_tname = tname;
     }
 
+    if (n == "add_custom_target" && block == 0 && c.args.size() >= 1) {
+      const std::string tname = expc(c.args[0], *vars);
+      if (tname.find("::") != std::string::npos) continue;
+      TargetModel tm;
+      tm.name = tname;
+      tm.kind = "custom_target";
+      tm.include_dir_abs = base;
+      for (std::size_t i = 0; i < c.args.size(); ++i) {
+        std::string ti = c.args[i];
+        to_lower(&ti);
+        if (ti != "sources") continue;
+        for (std::size_t j = i + 1; j < c.args.size(); ++j) {
+          const std::string &p2 = c.args[j];
+          std::string w = p2;
+          to_lower(&w);
+          if (is_add_custom_target_sources_break(w)) break;
+          if (p2.find("$<") != std::string::npos) continue;
+          for (const std::string &piece : split_list(expc(p2, *vars))) {
+            if (piece.find("$<") != std::string::npos) continue;
+            if (piece.empty()) continue;
+            fs::path p(piece);
+            if (p.is_relative()) p = this_dir / p;
+            std::error_code ec;
+            tm.source_paths_abs.push_back(fs::weakly_canonical(p, ec));
+          }
+        }
+      }
+      for (std::size_t i = 0; i < c.args.size(); ++i) {
+        std::string ti = c.args[i];
+        to_lower(&ti);
+        if (ti != "depends") continue;
+        for (std::size_t j = i + 1; j < c.args.size(); ++j) {
+          const std::string &p2 = c.args[j];
+          std::string w = p2;
+          to_lower(&w);
+          if (is_add_custom_target_depends_break(w)) break;
+          if (p2.find("$<") != std::string::npos) continue;
+          for (const std::string &seg : split_list(expc(p2, *vars))) {
+            if (seg.find("$<") != std::string::npos) continue;
+            if (seg.empty() || seg.find("::") != std::string::npos) continue;
+            if (seg.find('/') != std::string::npos)
+              append_file_read_to_target_model(&tm, seg, "depends", this_dir, listfile, c.line, res);
+            else
+              tm.link_to.insert(seg);
+          }
+        }
+      }
+      (*targets)[tname] = std::move(tm);
+      last_tname = tname;
+    }
+
     if (n == "configure_file" && block == 0 && c.args.size() >= 2) {
       ConfigFilePathPair cfp;
       if (parse_configure_file_command(c, *vars, this_dir, &cfp)) {
@@ -772,6 +1048,55 @@ static void process_listfile(const fs::path &listfile, const std::vector<fs::pat
         }
       }
     }
+
+    if (n == "file" && block == 0 && c.args.size() >= 2) {
+      std::string sub = c.args[0];
+      to_lower(&sub);
+      if (sub == "write" && c.args.size() >= 3)
+        register_listfile_file_write_output(expc(c.args[1], *vars), this_dir, last_tname, targets, res, listfile, c.line, "file(WRITE:");
+      if (sub == "append" && c.args.size() >= 2)
+        register_listfile_file_write_output(expc(c.args[1], *vars), this_dir, last_tname, targets, res, listfile, c.line, "file(APPEND:");
+      if (sub == "read" && c.args.size() >= 3) {
+        // file(READ <filename> <out-var> [OFFSET o] [LIMIT n] [HEX])
+        const std::string pex = expc(c.args[1], *vars);
+        if (pex.find("$<") != std::string::npos) {
+          res->errors.push_back("file(READ: skipped generator expression, " + listfile.filename().string() + " line " + std::to_string(c.line));
+        } else if (string_has_cmake_deref(pex)) {
+          res->errors.push_back("file(READ: unexpanded ${...} in path, " + listfile.filename().string() + " line " + std::to_string(c.line));
+        } else {
+          fs::path pth(pex);
+          if (pth.is_relative()) pth = this_dir / pth;
+          std::error_code ec;
+          pth = fs::weakly_canonical(pth, ec);
+          std::string vname = expc(c.args[2], *vars);
+          if (vname.size() > 200u) vname = "out";
+          FileReadEntry fre{std::move(pth), std::move(vname)};
+          if (!last_tname.empty()) {
+            auto it = targets->find(last_tname);
+            if (it != targets->end())
+              it->second.file_read_entries.push_back(std::move(fre));
+            else
+              res->package_file_read_entries.push_back(std::move(fre));
+          } else
+            res->package_file_read_entries.push_back(std::move(fre));
+        }
+      }
+    }
+
+    if (n == "add_custom_command" && block == 0) {
+      try_register_add_custom_command_outputs(c, this_dir, last_tname, vars, targets, res, listfile);
+      try_register_add_custom_command_depends(c, this_dir, last_tname, vars, targets, res, listfile);
+    }
+
+    if (n == "string" && block == 0 && c.args.size() >= 2) {
+      std::string ssub = c.args[0];
+      to_lower(&ssub);
+      if (ssub == "regex" || ssub == "append" || ssub == "replace" || ssub == "concat")
+        push_filegen_note(listfile, c, last_tname, targets, res);
+    }
+    // 当前命令已先使 block 递增: foreach/while 恰使 depth==1(顶层) 时登记; 嵌套时 depth>=2, 不登记
+    if (n == "foreach" && block == 1 && !c.args.empty()) push_filegen_note(listfile, c, last_tname, targets, res);
+    if (n == "while" && block == 1 && !c.args.empty()) push_filegen_note(listfile, c, last_tname, targets, res);
 
     if (n == "target_sources" && block == 0 && c.args.size() >= 2) {
       const std::string tname = expc(c.args[0], *vars);
@@ -809,6 +1134,20 @@ static void process_listfile(const fs::path &listfile, const std::vector<fs::pat
         for (const std::string &seg : split_list(expc(c.args[j], *vars))) {
           if (seg.empty() || seg.find("::") != std::string::npos) continue;
           if (seg.find("/") != std::string::npos) continue;  // 可能文件路径
+          it2->second.link_to.insert(seg);
+        }
+      }
+    }
+    if (n == "add_dependencies" && block == 0 && c.args.size() >= 2) {
+      const std::string tname = expc(c.args[0], *vars);
+      if (tname.find("::") != std::string::npos) continue;
+      auto it2 = targets->find(tname);
+      if (it2 == targets->end()) continue;
+      for (std::size_t j = 1; j < c.args.size(); ++j) {
+        if (c.args[j].find("$<") != std::string::npos) continue;
+        for (const std::string &seg : split_list(expc(c.args[j], *vars))) {
+          if (seg.empty() || seg.find("::") != std::string::npos) continue;
+          if (seg.find("/") != std::string::npos) continue;
           it2->second.link_to.insert(seg);
         }
       }

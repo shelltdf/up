@@ -4,7 +4,7 @@
 
 | target-id | 产物 | 说明 |
 |-----------|------|------|
-| [gz-cli](gz-cli/) | `gz` / `gz.exe` | 命令行主程序 |
+| [gz-cli](gz-cli/) | `gz` / `gz.exe` | 命令行主程序；**`gz configure`** 可执行 **内嵌 Lua**（`3rdparty/lua-5.5.0`）+ **`trigger=configure`** 与 **`gz.file`**（见 [gz-cli/spec.md](gz-cli/spec.md)） |
 | [gz-gui](gz-gui/) | `gz-gui` / `gz-gui.exe` | 图形外壳 |
 | [gz-reverse-cmake](gz-reverse-cmake/) | `gz_reverse_cmake` / `gz_reverse_cmake.exe` | 静态读 `CMakeLists.txt` 命令子集，生成 `package.xml` / `target.xml`（不跑 `cmake`）；可选 `--file-api` 摄入**用户**预置 File API 回复以对照，不替代主路径；与 `gz` / `gz-gui` 同属 **`gz_runtime`**，默认 `install.py` 装到 **`bin/`**（源码根 `gz_reverse_cmake/`） |
 

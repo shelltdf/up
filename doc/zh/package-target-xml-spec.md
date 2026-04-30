@@ -5,7 +5,7 @@
 
 本文档描述 **gz（GroundZero）** 当前实现对两种描述文件的**解析约定**与 **configure** 阶段的**语义约束**。实现采用轻量正则扫描（见 `GroundZero/lib/engine/xml/simple_xml.cpp`），**不是**完整 XML 校验器：建议仍写成良构 XML，并遵守下列可识别形态。
 
-**权威英文机器可比对文本** 为 **`gz spec`** 命令在标准输出打印的全文，版本以 `GroundZero/lib/engine/commands/spec.cpp` 中的 **`GZ_XML_SPEC_REVISION`** 为准（当前 **34**）。内嵌文本按 **DOM 树**（`package` / `target`）、**变量体系**（内置、合并、`when`、模板）、**脚本与 trigger**（细节另见 `script-messages.md`）三条主线组织。**本中文文档** 保留叙述、字段表、示例与交叉引用；若与 **`gz spec`** 或实现冲突，以 **`gz spec` 与源码** 为准。
+**权威英文机器可比对文本** 为 **`gz spec`** 命令在标准输出打印的全文，版本以 `GroundZero/lib/engine/commands/spec.cpp` 中的 **`GZ_XML_SPEC_REVISION`** 为准（当前 **36**）。内嵌文本按 **DOM 树**（`package` / `target`）、**变量体系**（内置、合并、`when`、模板）、**脚本与 trigger**（细节另见 `script-messages.md`）三条主线组织。**本中文文档** 保留叙述、字段表、示例与交叉引用；若与 **`gz spec`** 或实现冲突，以 **`gz spec` 与源码** 为准。
 
 ### 与其它文档的分工
 
@@ -17,7 +17,7 @@
 | **内置变量、`gz_cache.txt`、`GZ_*`、`CMAKE_PREFIX_PATH` 聚合** | [`internal-variables.md`](internal-variables.md) |
 | **本文**：`package.xml` / `target.xml` **字段、多块合并、`when`、依赖与类型约束** | （当前页）+ **`gz spec`** |
 
-### 与内嵌 `gz spec` 的对照（rev 34）
+### 与内嵌 `gz spec` 的对照（rev 35）
 
 | `gz spec` 中的节 | 本文与仓库中对应位置 |
 |------------------|------------------------|
@@ -231,7 +231,9 @@
 - **位置**：`package.xml` 与 **`target.xml`** 的 **`<vars>...</vars>`** 内均可声明，与标量 **`<var name="KEY" value="VAL"/>`** 混排。
 - **形状**：**`<var name="…" type="script" script_type="lua" trigger="…" value="…"/>`**（`script_type` 可省略，默认 `lua`；`trigger` 可省略，默认 **`manual`**）。
 - **合法 `trigger`、configure 派发点、与 `<preprocess command>` 的优先级、Dom 父链覆盖顺序**：见 **`script-messages.md`**（[`script-messages.md`](script-messages.md)；与实现 **`script_execution.cpp`** / **`configure.cpp`** 对齐）。
-- **重要**：当前实现将匹配到的 **`value` 作为 shell 命令字符串** 使用，**不**在宿主内执行 Lua 字节码；产品名中的「Lua」表示类型筛选与未来扩展槽位。
+- **重要**：
+  - **`trigger=configure`**：`value` 为 **Lua 源码**，在 **`gz configure` 时** 由内置 **Lua 5.5**（`3rdparty/lua-5.5.0`）执行；提供全局表 **`gz.file`**（`read` / `write` / `append`，路径白名单）与 **`GZ`** 字符串字段（如 `GZ_WORKSPACE` 等）。
+  - **其它** trigger 且与「空 `command` 的 preprocess/postprocess」配对时：行为同前，**`value` 仍为整行 shell 命令**；`script_type=lua` **不**自动切换为进程内 Lua。
 
 ### 3.5 变量合并、`@KEY@`、`config_files` 与 `when`
 

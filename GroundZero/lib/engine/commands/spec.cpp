@@ -9,7 +9,7 @@ namespace {
 // English-only: embedded spec for `gz spec` stdout. Aligned with doc/en/package-target-xml-spec.md; AI-oriented layout.
 // Split into chunks: MSVC ~16kB string literal limit.
 constexpr const char* kXmlSpecEnPart1 =
-  R"SPEC(GZ_XML_SPEC_REVISION=34
+  R"SPEC(GZ_XML_SPEC_REVISION=36
 
 # gz — package.xml and target.xml (machine-oriented summary)
 
@@ -102,6 +102,8 @@ target
 
 **Asset bundle** (`type` = `asset_bundle`): at least one of `sources` / `headers` / `assets` per type rules in §6.
 
+**Custom / ordering-only** (`type` = `custom_target`): no required native sources; used for build-order only (CMake `add_custom_target` and `add_dependencies` from `<dependency/>`). No linkable output (not in `target_link_libraries` as a linkable target).
+
 **Repeated balanced blocks (merge order)** under `<package>` / `<target>`:
 - **package.xml:** `<vars>`, `<defines>`, `<config_files>` — each may repeat; bodies **append** in file order to one logical list.
 - **target.xml:** `<sources>`, `<headers>`, `<assets>`, `<vars>`, `<defines>`, `<compile_flags>`, `<link_flags>`, `<config_files>` — same merge rule.
@@ -180,15 +182,21 @@ constexpr const char* kXmlSpecEnPart2 =
   R"SPEC(## 4. Scripts, triggers, preprocess / postprocess
 
 **`<var type="script" .../>`** in **`<vars>`** (package or target) declares a **message slot** (attribute **`trigger`**).
-**`script_type`** defaults to **`lua`**. The repo does **not** yet execute a **Lua VM** on `value`; the attribute name is
-historical. **Actual behavior:** for a given `trigger` on a `<preprocess>`/`<postprocess>` node, if **`<preprocess command="..."/>`**
-or **`<postprocess command="..."/>`** is **non-empty**, that string is used. If the command is **empty**, **`resolve_script_command`**
-walks from **current target** up the **parent chain to package**, collecting `<var type="script">` with the **same** `trigger`
-(see `script_execution.cpp`); **target-level before package-level**; **first non-empty `value`** wins as the **entire** shell
-line. Put **real shell** (or `lua -e '...'` if on PATH) in `value` if you need executable behavior today.
+**`script_type`** defaults to **`lua`**.
+
+- **`trigger=configure`**: the **`value`** string is run at **`gz configure` time** by the **embedded Lua 5.5** linked into `gz` (from
+  `3rdparty/lua-5.5.0`). The global table **`gz`** is defined with **`gz.file.read` / `gz.file.write` / `gz.file.append`**
+  (path sandbox: workspace, build root, package dir, generated root). A global table **`GZ`** is built with string fields such as
+  **`GZ_WORKSPACE`**, **`GZ_BUILD_ROOT`**, **`GZ_PACKAGE`**, **`GZ_ARCH`**. **Not** a shell line.
+- **All other** supported triggers: **actual behavior** for `<preprocess>`/`<postprocess>` is unchanged: if **`<preprocess command="..."/>`**
+  or **`<postprocess command="..."/>`** is **non-empty**, that string is used as the **entire** shell line. If the command is **empty**,
+  **`resolve_script_command`** walks from **current target** up the **parent chain to package**, collecting `<var type="script">` with the
+  **same** `trigger` (see `script_execution.cpp`); **target-level before package-level**; **first non-empty `value`** wins as the **entire** shell
+  line. Put **real shell** in `value` (or `lua -e '...'` on PATH) for those.
 
 | trigger | Meaning | Dispatched at configure? | Paired XML |
 |---------|---------|--------------------------|------------|
+| configure | Custom configure-time hook (Lua in `value`) | **Yes (embedded VM)** | None; `value` = Lua source |
 | sources.preprocess | Before each source compiles | Yes | `<preprocess command="..."/>` under `<sources>` `<file>`/`<glob>`; empty command uses script `value` |
 | sources.postprocess | After each source (backend-specific) | Yes | `<postprocess command="..."/>` |
 | headers.preprocess | Before header entry for compile+install | Yes | Under `<headers>` entries |
@@ -251,6 +259,7 @@ line. Put **real shell** (or `lua -e '...'` if on PATH) in `value` if you need e
 | static_library | required | no | Always static |
 | shared_library | required | no | Always shared |
 | asset_bundle | may be empty | no | Need at least one of sources / headers / assets |
+| custom_target | may be empty | no | Build-order only; CMake `add_custom_target` + `add_dependencies` |
 | prebuilt_static_library | not required | **required** | Paths relative to `target.xml` unless abs |
 | prebuilt_shared_library | not required | **required** | Win: dll + import .lib resolvable |
 
@@ -290,7 +299,7 @@ Unknown `type` = configure error (`unknown target type`).
 - Merge: repeated blocks append in file order.
 
 ### `<dependency/>`
-- Same package: `name` only. Cross: `Package:Target`. **visibility** `private|public|interface` (default private). `interface` **rejected** when consumer is **executable**. **Valid** ref targets: library-like (`static_library`, `shared_library`, `library`, `prebuilt_*`); `asset_bundle` in graph **validation**; configure **fails** if unresolved or non-library. CMake notes: `library` rewritten to static or shared before emission; exes in same package **implicit private-link** all in-package library targets if **no** explicit `<dependency/>` lines; with explicit lines, use visibility. Static-to-static **transitive** `target_link_libraries` may **not** be fully chained — final exe may need explicit deps.
+- Same package: `name` only. Cross: `Package:Target`. **visibility** `private|public|interface` (default private). `interface` **rejected** when consumer is **executable** **and** the ref target is a **link** library (`static_library`, `shared_library`, `library`, or `prebuilt_*`). **Valid** ref targets: those library types; `asset_bundle`; `custom_target`. Unresolved or invalid type = configure error. Exe → `asset_bundle` / `custom_target` edges are **order-only** (`add_dependencies`); not `target_link_libraries`. CMake: `custom_target` → `add_custom_target` then `add_dependencies` as needed. Exes in same package **implicit private-link** in-package library targets if **no** explicit `<dependency/>` lines. Static-to-static transitive `target_link_libraries` may **not** be fully chained — final exe may need explicit deps.
 
 ---
 
@@ -415,6 +424,8 @@ for all tags is in **§2** and the tables in **§5–6**.
 ```
 
 **asset_bundle:** at least one of sources / headers / assets per type rules in §6.
+
+**custom_target:** sources optional; ordering via `<dependency/>` (CMake `add_custom_target` and `add_dependencies`).
 
 ---
 

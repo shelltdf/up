@@ -60,3 +60,19 @@
 ## 安装路径计算（build）
 
 `install_prefix = default_install_root(cwd) / arch`，其中 `arch` 优先取 `gz_cache.txt` 中的 **`arch=`** 行取值，否则由选项推导（见 `build.cpp`）。
+
+---
+
+## 内嵌 Lua 与 `gz.file`（`configure` 阶段）
+
+**单一事实来源（与实现对齐）**：**行为与字段级约定**以仓库内嵌 **`gz spec`**（`GroundZero/lib/engine/commands/spec.cpp` 中 **`GZ_XML_SPEC_REVISION`**，含 **§4 Scripts** 表）与 **`doc/en|zh/package-target-xml-spec.md`** 为准；本小节只作物理层**索引**。
+
+- **运行时**：`gz` 链入 **`GroundZero/lib`** → **`lz_embed`** 静态库，源码为 **[`3rdparty/lua-5.5.0`](../../../3rdparty/lua-5.5.0)** 官方 `src/*.c`（**不含** `lua.c` / `luac.c` 独立可执行），**不**使用系统 `find_package(Lua)` 或外网拉取。
+- **触发**：`package.xml` / `target.xml` 中 **`<var name="…" type="script" script_type="lua" trigger="configure" value="…"/>`**；**`value`** 为 **Lua 源码**（与标量 `var` 的 `value` 一样经 XML 进入 DOM 的 **`ScriptValue::source` 串**）。在 **`run_configure`** 内、**写出 CMake/Ninja 后端之前**，对 DOM 中**每个包（含子包）与目标**上满足条件的 `var` 调用 **`run_gz_embedded_configure_lua`**（见 `configure.cpp`）；失败则 **`configure` 非零退出**。
+- **API**：全局表 **`gz.file`**：`read` / `write` / `append`；路径须在 **工作区、build 根、包目录、`.intermediate/generated/<arch>`** 的允许并集内（实现：`GroundZero/lib/engine/lua/gz_embedded_lua.*`）。全局 **`GZ`** 为字符串表（如 **`GZ_WORKSPACE`**、**`GZ_BUILD_ROOT`**、**`GZ_PACKAGE`**、**`GZ_ARCH`**）。
+- **与 shell 回退的边界**：**`trigger=configure`** **以外**的已支持 trigger，在与 **空** `preprocess`/`postprocess` **`command`** 配对时，**`value` 仍按整行 shell 命令**使用（**`resolve_script_command`** 与既有 Ninja/CMake **自定义命令** 生成链不变）。见内嵌 `gz spec` §4。
+
+### 与 `gz_reverse_cmake`（逆向）的分工
+
+- **正向（本目标 `gz` + `gz configure`）**：类 CMake **`file(READ|WRITE|…)`** 的**可维护替代**是 **`trigger=configure` + Lua + `gz.file`**；权威见上。
+- **逆向（[gz-reverse-cmake](gz_reverse_cmake)）**：**不**在工具内跑 CMake、**不**保证执行 `string(REGEX …)` / `foreach` 等全链条；**仅**静态登记 **`file(WRITE …)` 输出路径** 与 `source_path_for_gz_remap` 等，并可选 **stderr 注记** 与 **`scripts/gz_cmake_file_stub.lua`** 占位。细节见 **[`gz-reverse-cmake/spec.md`](../gz-reverse-cmake/spec.md)**。

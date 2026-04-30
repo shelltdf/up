@@ -5,7 +5,7 @@
 
 This document describes **gz (GroundZero)**’s current **parsing rules** for the two descriptor files and **configure-time semantic constraints**. The implementation uses a **lightweight regex scanner** (see `GroundZero/lib/engine/xml/simple_xml.cpp`), **not** a full XML validator: write well-formed XML and follow the recognizable shapes below.
 
-**Authoritative machine-oriented English** is the text printed by **`gz spec`** (stdout), versioned by **`GZ_XML_SPEC_REVISION`** inside `GroundZero/lib/engine/commands/spec.cpp` (currently **34**). That embedded text is organized for tooling around three pillars: **DOM-style trees** (`package` / `target`), **variables** (builtins, merge, `when`, templates), and **scripts / triggers** (with `script-messages.md` detail). **This file** keeps narrative prose, field tables, examples, and cross-links; if anything disagrees with **`gz spec`** or the implementation, **`gz spec` and source code** win.
+**Authoritative machine-oriented English** is the text printed by **`gz spec`** (stdout), versioned by **`GZ_XML_SPEC_REVISION`** inside `GroundZero/lib/engine/commands/spec.cpp` (currently **36**). That embedded text is organized for tooling around three pillars: **DOM-style trees** (`package` / `target`), **variables** (builtins, merge, `when`, templates), and **scripts / triggers** (with `script-messages.md` detail). **This file** keeps narrative prose, field tables, examples, and cross-links; if anything disagrees with **`gz spec`** or the implementation, **`gz spec` and source code** win.
 
 ### How this doc fits with others
 
@@ -17,7 +17,7 @@ This document describes **gz (GroundZero)**’s current **parsing rules** for th
 | **Built-ins, `gz_cache.txt`, `GZ_*`, `CMAKE_PREFIX_PATH` aggregation** | [`internal-variables.md`](internal-variables.md) |
 | **This file**: `package.xml` / `target.xml` **fields, repeated blocks, `when`, deps, type rules** | (this page) + **`gz spec`** |
 
-### Alignment with embedded `gz spec` (revision 34)
+### Alignment with embedded `gz spec` (revision 35)
 
 | Topic in `gz spec` | Where to read in this document and repo |
 |--------------------|----------------------------------------|
@@ -215,7 +215,11 @@ Where:
 - **Where**: **`package.xml`** and **`target.xml`** inside **`<vars>…</vars>`**, mixed with scalar **`<var name="KEY" value="VAL"/>`**.
 - **Shape**: **`<var name="…" type="script" script_type="lua" trigger="…" value="…"/>`** (`script_type` optional, default `lua`; `trigger` optional, default **`manual`**).
 - **Legal `trigger`**, configure dispatch points, precedence vs **`<preprocess command>`**, DOM parent walk: **`script-messages.md`** (aligned with **`script_execution.cpp`** / **`configure.cpp`**).
-- **Important**: **`value`** is used as a **shell command string** today; **no** Lua bytecode execution in-process; “Lua” is type filtering / future hook.
+- **Important**:
+  - For **`trigger=configure`**: **`value`** is **Lua source** executed in-process at **`gz configure` time** (embedded Lua 5.5 from
+    `3rdparty/lua-5.5.0`), with a **`gz.file`** table (`read` / `write` / `append`, path-allowlisted) and a global **`GZ`** string table.
+  - For **other** supported triggers paired with **empty** XML preprocess/postprocess `command=`: **`value`** remains the **entire
+    shell command string** (historical; “`lua`” in `script_type` does not switch execution mode for those).
 
 ### 3.5 Variable merge, `@KEY@`, `config_files`, and `when`
 

@@ -167,7 +167,7 @@ int write_ninja_file(const ConfigureGraphModel& model) {
   int cmd_idx = 0;
 
   for (const auto& t : model.targets) {
-    if (t.type == "asset_bundle")
+    if (t.type == "asset_bundle" || t.type == "custom_target")
       continue;
     std::vector<std::string> objs;
     for (size_t i = 0; i < t.source_paths.size(); ++i) {
@@ -288,7 +288,7 @@ int write_ninja_file(const ConfigureGraphModel& model) {
   }
   const auto install_lib = model.install_root / "lib";
   for (const auto& t : model.targets) {
-    if (t.type == "asset_bundle")
+    if (t.type == "asset_bundle" || t.type == "custom_target")
       continue;
     if (t.type == "static_library") {
 #if defined(_WIN32)

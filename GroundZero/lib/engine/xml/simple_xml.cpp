@@ -83,7 +83,7 @@ void maybe_enrich_layout_from_legacy_arch(GzBinaryLayout& b) {
 }
 
 bool is_supported_script_trigger(const std::string& trigger) {
-  return trigger == "manual" || trigger == "sources.preprocess" || trigger == "sources.postprocess" ||
+  return trigger == "manual" || trigger == "configure" || trigger == "sources.preprocess" || trigger == "sources.postprocess" ||
          trigger == "headers.preprocess" || trigger == "headers.postprocess" || trigger == "assets.preprocess" ||
          trigger == "assets.postprocess";
 }
@@ -184,7 +184,7 @@ bool parse_vars_body(const std::string& body,
       se.script_type = trim_copy(se.script_type);
       if (se.trigger.empty() || !is_supported_script_trigger(se.trigger)) {
         error = "<var type=\"script\"> trigger=\"" + se.trigger +
-                "\" is not supported (expected manual|sources.preprocess|sources.postprocess|"
+                "\" is not supported (expected manual|configure|sources.preprocess|sources.postprocess|"
                 "headers.preprocess|headers.postprocess|assets.preprocess|assets.postprocess)";
         return false;
       }

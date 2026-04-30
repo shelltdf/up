@@ -25,3 +25,6 @@
 | configure 缓存写入 | `GroundZero/lib/engine/commands/configure.cpp`（`write_gz_cache`） |
 | DOM 模型 / script 上下文 | `GroundZero/lib/engine/dom/dom_model.hpp`、`GroundZero/lib/engine/dom/dom_model.cpp` |
 | 后端选择 | `GroundZero/lib/engine/backends/core/backend_dispatch.cpp` |
+| 内嵌 Lua 5.5 静态库 | 根 `3rdparty/lua-5.5.0/CMakeLists.txt` 目标 **`lz_embed`**；`target_link_libraries(gz-lib PRIVATE lz_embed)` 见 `GroundZero/lib/CMakeLists.txt` |
+| `trigger=configure` 脚本、**`gz.file`** | `GroundZero/lib/engine/lua/gz_embedded_lua.cpp`、**`gz_embedded_lua.hpp`**；调度 **`run_dom_embedded_configure_lua`** 在 **`configure.cpp`**（写后端之前；DOM 含嵌套 `Package`） |
+| 合法 **`configure` trigger** | `GroundZero/lib/engine/xml/simple_xml.cpp` 中 **`is_supported_script_trigger`**；内嵌 spec §4 表 |

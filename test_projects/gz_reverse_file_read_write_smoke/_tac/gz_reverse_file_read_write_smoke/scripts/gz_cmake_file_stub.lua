@@ -1,0 +1,3 @@
+-- Stub from gz_reverse_cmake: file(READ)/file(WRITE) 和/或 string/foreach/while 弱注记.
+-- 见 package_filegen.lua、<target>_filegen.lua; 弱注记未执行, 与真 CMake 不必等价.
+-- In GroundZero: <var type="script" script_type="lua" trigger="configure" …/> + gz.file (allow-list)

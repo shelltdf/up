@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.20)
+project(gz_reverse_file_write_smoke C)
+# Minimal pattern: file(WRITE) to binary dir + library listing that file (no real compile needed for reverse tool)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/gen_fw.c" "/* generated */\n")
+add_library(fw_smoke STATIC "${CMAKE_CURRENT_BINARY_DIR}/gen_fw.c")

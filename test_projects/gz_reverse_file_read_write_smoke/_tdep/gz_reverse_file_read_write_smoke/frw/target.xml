@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<target name="frw" type="static_library">
+  <sources>
+    <file>../../../frw.c</file>
+    <file>../../../gen_frw.c</file>
+  </sources>
+  <dependency name="helper" visibility="private"/>
+</target>

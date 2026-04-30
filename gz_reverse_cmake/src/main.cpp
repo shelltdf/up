@@ -67,9 +67,10 @@ static void print_usage() {
       << "\n"
       << "说明: 不调用 cmake。将 Listfile 解析为命令流(语句级浅层 AST)后做静态子集重解释:\n"
       << "      project, set, include_directories, add_subdirectory, add_executable,\n"
-      << "      add_library(STATIC/SHARED/MODULE 等), target_sources, target_link_libraries,\n"
+      << "      add_library(STATIC/SHARED/MODULE 等), add_custom_target(SOURCES|DEPENDS 子集), target_sources, target_link_libraries, add_dependencies,\n"
       << "      target_include_directories, target_compile_options, target_link_options, set_target_properties(COMPILE_FLAGS|LINK_FLAGS),\n"
-      << "      configure_file(可映射为 <config_files>); 不执行 if/foreach 真值, function/macro 内对 add_* 与 configure_file 不解释;\n"
+      << "      configure_file(可映射为 <config_files>); file(WRITE/APPEND)/file(READ) 与 add_custom_command(OUTPUT) 只登记路径; 顶层 string…/foreach/while 行入弱注记(不执行);\n"
+      << "      不执行 if/foreach 真值, function/macro 内对 add_* 与 configure_file 不解释;\n"
       << "      生成器表达式 $<> 在相关实参上跳过。\n"
       << "      ${CMAKE_BINARY_DIR} 等按 GroundZero 与 gz 相同, 从 <source>/.intermediate/build/… 自动推算(见注)。\n"
       << "      可选: --file-api <path>  用户预置的 File API / codemodel 回复 JSON, 仅作 target 名对照 (不运行 cmake)。\n"
@@ -241,6 +242,16 @@ static bool is_covered_by_config_files(const fs::path &sp, const TargetModel &tm
   return false;
 }
 
+static bool is_registered_file_write(const fs::path &sp, const TargetModel &tm, const std::vector<fs::path> &package_fw) {
+  for (const auto &p : package_fw) {
+    if (same_canonical_path(p, sp)) return true;
+  }
+  for (const auto &p : tm.file_write_outputs_abs) {
+    if (same_canonical_path(p, sp)) return true;
+  }
+  return false;
+}
+
 static bool is_strict_subpath(const fs::path &root, const fs::path &p) {
   std::error_code ec;
   const fs::path rel = fs::relative(p, root, ec);
@@ -313,6 +324,51 @@ static std::string source_path_for_gz_remap(const fs::path &tdir, const fs::path
     // 相对 tdir 一律按「源树根 + rel」写(若缺文件, 需维护者自备或先跑上游 cmake 把生成物抄回 rel)
     return source_path_for_target_xml(tdir, try_src, source_root);
   }
+}
+
+/// Lua 初稿里 `gz.file.read` 建议的相对 `--source` 路径；否则注记为绝对路径
+static std::string lua_path_rel_source_for_read(const fs::path &path_abs, const fs::path &source_root) {
+  std::error_code er, es;
+  const fs::path p = fs::weakly_canonical(path_abs, er);
+  const fs::path s = fs::weakly_canonical(source_root, es);
+  if (er || es) return path_to_posix(p);
+  if (is_strict_subpath(s, p)) {
+    fs::path r = fs::relative(p, s, er);
+    if (!er) return path_to_posix(r);
+  }
+  return path_to_posix(p) + "  -- 不在 --source 下, 须对照 GZ 白名单或拷入工作区";
+}
+
+static void write_filegen_lua(std::ostream &o, const char *scope_label, const std::vector<FileReadEntry> &reads,
+                              const std::vector<fs::path> &writes, const std::vector<CmakeFilegenNote> &weak_notes,
+                              const fs::path &tdir, const fs::path &source_root, const std::string &gen_arch, const std::string &pkg_name,
+                              const std::string &tname_for_remap, const TargetModel &tm, const std::vector<ConfigFilePathPair> &package_cf) {
+  o << "-- gz_reverse_cmake: filegen draft for " << scope_label << "\n"
+    << "-- 下列 string(REGEX|APPEND|REPLACE|CONCAT)/foreach/while 为同 Listfile 弱注记, 未执行 CMake; 请手填等价 Lua.\n"
+    << "-- 正向: <var type=\"script\" script_type=\"lua\" trigger=\"configure\" …/> + gz.file (见 package-target-xml-spec / gz-cli spec)\n\n";
+  if (!weak_notes.empty()) {
+    o << "-- 同 Listfile 弱注记 (未执行):\n";
+    for (const auto &w : weak_notes) o << "--   [" << w.ref << "] " << w.one_line << "\n";
+    o << "\n";
+  }
+  if (!reads.empty()) {
+    o << "-- file(READ) 登记 (变量名 = CMake 侧 out-var):\n";
+    for (const auto &e : reads) {
+      const std::string rel = lua_path_rel_source_for_read(e.path_abs, source_root);
+      o << "--   " << e.out_var << " <- gz.file.read(\"" << rel << "\")\n";
+    }
+    o << "\n";
+  }
+  if (!writes.empty()) {
+    o << "-- file(WRITE) 建议相对路径(相对本 target 的 target.xml 目录, 同 gz 生成物映射规则):\n";
+    for (const auto &w : writes) {
+      const std::string rem = source_path_for_gz_remap(tdir, w, source_root, gen_arch, pkg_name, tname_for_remap, tm, package_cf);
+      o << "--   gz.file.write(\"" << rem << "\", content)  -- was " << path_to_posix(w) << "\n";
+    }
+    o << "\n";
+  }
+  o << "local GZ = rawget(_G, \"GZ\")  -- 内嵌时由 GZ 注入; 可删\n";
+  o << "-- TODO: 按弱注记/读入拼 content, 再 gz.file.write\n";
 }
 
 static bool string_has_cmake_deref(const std::string &s) { return s.find("${") != std::string::npos; }
@@ -475,13 +531,20 @@ int main(int argc, char **argv) {
     std::vector<std::pair<std::string, const TargetModel *>> loaded;
     for (const auto &kv : ir.targets) {
       if (is_skipped_utility_name(kv.first)) continue;
-      if (kv.second.kind != "executable" && kv.second.kind != "static_library" && kv.second.kind != "shared_library")
-        continue;
-      if (kv.second.source_paths_abs.empty()) continue;
+      const std::string &kd = kv.second.kind;
+      const bool is_ct = (kd == "custom_target");
+      if (kd != "executable" && kd != "static_library" && kd != "shared_library" && !is_ct) continue;
+      if (!is_ct && kv.second.source_paths_abs.empty()) continue;
+      if (is_ct) {
+        if (kv.second.source_paths_abs.empty() && kv.second.link_to.empty() && kv.second.file_read_entries.empty() && kv.second.file_write_outputs_abs.empty() &&
+            kv.second.filegen_cmake_notes.empty() && kv.second.config_files.empty() && kv.second.compile_flags.empty() && kv.second.link_flags.empty()) {
+          continue;  // 全空 add_custom_target: 不导出, 与 CMake 中纯占位、无源无依赖 一致
+        }
+      }
       loaded.push_back({kv.first, &kv.second});
     }
     if (loaded.empty()) {
-      std::cerr << "没有可导出的可执行/库目标 (或均在 function 内/未识别)\n";
+      std::cerr << "没有可导出的可执行/库/custom_target 目标 (或均在 function 内/未识别/仅空占位 add_custom_target)\n";
       return 1;
     }
 
@@ -539,6 +602,10 @@ int main(int argc, char **argv) {
           continue;
         }
         if (is_covered_by_config_files(sp, tm, ir.package_config_files)) continue;
+        if (is_registered_file_write(sp, tm, ir.package_file_write_outputs_abs)) {
+          std::cerr << "注: 源与 CMake file(WRITE) 登记一致; 正向上可用 package.xml 中 <var type=\"script\" trigger=configure> + gz.file: "
+                    << path_to_posix(sp) << "\n";
+        }
         const std::string ext = ext_to_lower(sp);
         if (ext == ".obj" || ext == ".o") {
           std::cerr << "注: 跳过 .obj/.o(编译产物, 非 add_library 源; 请改列 .c/.cpp/.rc): " << path_to_posix(sp) << "\n";
@@ -557,7 +624,7 @@ int main(int argc, char **argv) {
         } else
           source_files.push_back(std::move(rel));
       }
-      if (source_files.empty()) {
+      if (source_files.empty() && tm.kind != "custom_target") {
         std::cerr << "注: 目标 \"" << tname << "\" 在过滤后无 <sources> 可写(可能仅余含 ${} 的条目), 跳过\n";
         continue;
       }
@@ -639,6 +706,52 @@ int main(int argc, char **argv) {
       }
       f << "</target>\n";
       ++n_written;
+    }
+    {
+      bool any_file = !ir.package_file_write_outputs_abs.empty() || !ir.package_file_read_entries.empty() ||
+                      !ir.package_filegen_cmake_notes.empty();
+      for (const auto &ent : loaded) {
+        const TargetModel &tx = *ent.second;
+        if (!tx.file_write_outputs_abs.empty() || !tx.file_read_entries.empty() || !tx.filegen_cmake_notes.empty()) {
+          any_file = true;
+          break;
+        }
+      }
+      if (any_file) {
+        const fs::path sdir = pkg_root / "scripts";
+        std::error_code se;
+        fs::create_directories(sdir, se);
+        {
+          std::ofstream stub(sdir / "gz_cmake_file_stub.lua", std::ios::binary);
+          if (stub) {
+            stub << "-- Stub from gz_reverse_cmake: file(READ)/file(WRITE) 和/或 string/foreach/while 弱注记.\n"
+                    "-- 见 package_filegen.lua、<target>_filegen.lua; 弱注记未执行, 与真 CMake 不必等价.\n"
+                    "-- In GroundZero: <var type=\"script\" script_type=\"lua\" trigger=\"configure\" …/> + gz.file (allow-list)\n";
+          }
+        }
+        if (!ir.package_file_read_entries.empty() || !ir.package_file_write_outputs_abs.empty() || !ir.package_filegen_cmake_notes.empty()) {
+          const TargetModel empty_tm;
+          std::ofstream pf(sdir / "package_filegen.lua", std::ios::binary);
+          if (pf) {
+            write_filegen_lua(pf, "package scope (与 package.xml 同目录的 pkg_root 语义)", ir.package_file_read_entries,
+                                ir.package_file_write_outputs_abs, ir.package_filegen_cmake_notes, package_config_in_base, opt.source_dir,
+                                gen_arch, pkg_name, "", empty_tm, ir.package_config_files);
+          }
+        }
+        for (const auto &ent : loaded) {
+          const TargetModel &xrtm = *ent.second;
+          if (xrtm.file_read_entries.empty() && xrtm.file_write_outputs_abs.empty() && xrtm.filegen_cmake_notes.empty()) continue;
+          const std::string tfn = to_var_name(ent.first) + "_filegen.lua";
+          std::ofstream tfg(sdir / tfn, std::ios::binary);
+          if (tfg) {
+            std::string sc = "target \"";
+            sc += ent.first;
+            sc += "\"";
+            write_filegen_lua(tfg, sc.c_str(), xrtm.file_read_entries, xrtm.file_write_outputs_abs, xrtm.filegen_cmake_notes,
+                              pkg_root / ent.first, opt.source_dir, gen_arch, pkg_name, ent.first, xrtm, ir.package_config_files);
+          }
+        }
+      }
     }
     std::cout << "已写入: " << path_to_posix(pkg_root) << " (package.xml + " << n_written << " 个 target 目录)\n";
     for (const std::string &w : ir.errors) std::cerr << "注: " << w << "\n";

@@ -65,6 +65,8 @@ struct ConfigureTargetModel {
   std::vector<std::string> link_flags;
   /** CMake `target_link_libraries`: target name + visibility keyword (private|public|interface). */
   std::vector<std::pair<std::string, std::string>> links;
+  /** CMake `add_dependencies` only: native `<dependency/>` to `asset_bundle` / `custom_target` or custom→lib ordering. */
+  std::vector<std::string> order_only_dependencies;
   bool imported_prebuilt = false;
   // IMPORTED_LOCATION (shared: primary binary), IMPORTED_IMPLIB (Windows .lib)
   std::string imported_location;

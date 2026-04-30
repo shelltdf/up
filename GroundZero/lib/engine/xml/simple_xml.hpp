@@ -96,7 +96,7 @@ struct TargetDesc {
   };
 
   std::string name;
-  std::string type;  // executable | library | static_library | shared_library | asset_bundle |
+  std::string type;  // executable | library | static_library | shared_library | asset_bundle | custom_target |
                       // prebuilt_static_library | prebuilt_shared_library
   std::vector<std::string> sources;
   std::vector<SourceEntry> source_entries;

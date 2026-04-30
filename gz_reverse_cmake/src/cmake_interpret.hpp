@@ -19,10 +19,24 @@ struct ConfigFilePathPair {
   std::filesystem::path out_abs;
 };
 
+/// `file(READ path out_var …)` 静态登记：不读盘、不填充变量
+struct FileReadEntry {
+  std::filesystem::path path_abs;
+  /// CMake 侧接收内容的变量名（如 zip_h），供 Lua 初稿注记
+  std::string out_var;
+};
+
+/// `CMakeLists.txt` 中一行命令的弱注记 (供 `*_filegen.lua` 旁注, 非完整 CMake 重放)
+struct CmakeFilegenNote {
+  std::string ref;      // 如 `sub/CMakeLists.txt:12`
+  std::string one_line; // 实参拼成的一行, 已截断
+};
+
 struct TargetModel {
   std::string name;
-  std::string kind;  // executable | static_library | shared_library
+  std::string kind;  // executable | static_library | shared_library | custom_target
   std::vector<std::filesystem::path> source_paths_abs;
+  /// `target_link_libraries` 与 `add_dependencies` 合并 (反解均映为 `target.xml` 的 `<dependency>`)
   std::set<std::string> link_to;
   std::vector<std::filesystem::path> include_dir_abs;
   /// 归属本 target 的 configure_file(…) 对 (in/out 已相对 Listfile 目录解算为绝对)
@@ -31,6 +45,12 @@ struct TargetModel {
   std::vector<std::string> compile_flags;
   /// target_link_options / set_target_properties(LINK_FLAGS)
   std::vector<std::string> link_flags;
+  /// `file(WRITE|APPEND path …)` 与 `add_custom_command(OUTPUT…)` 解出的输出绝对路径 (不执行命令/不写盘)
+  std::vector<std::filesystem::path> file_write_outputs_abs;
+  /// `file(READ path var …)` 与 `add_custom_command(… DEPENDS …)` 解出的读入/依赖路径 (不读盘; DEPENDS 时 out_var 为 `depends`)
+  std::vector<FileReadEntry> file_read_entries;
+  /// 同 Listfile 内、与 `last_tname` 同启发式归属的 `string(REGEX|APPEND|REPLACE|CONCAT)` / 顶层 `foreach`/`while` 行摘要 (不执行)
+  std::vector<CmakeFilegenNote> filegen_cmake_notes;
 };
 
 struct InterpretResult {
@@ -38,6 +58,12 @@ struct InterpretResult {
   std::unordered_map<std::string, TargetModel> targets;
   /// Listfile 顶层/尚未遇到 add_* 时的 configure_file，用于 package.xml
   std::vector<ConfigFilePathPair> package_config_files;
+  /// 包级 `file(WRITE|APPEND …)` 与无归属 target 的 `add_custom_command(OUTPUT…)` 输出
+  std::vector<std::filesystem::path> package_file_write_outputs_abs;
+  /// 包级 `file(READ …)` / 无 target 归属的 `DEPENDS`
+  std::vector<FileReadEntry> package_file_read_entries;
+  /// 包级 `string`/`foreach` 弱注记 (无 `last_tname` 时)
+  std::vector<CmakeFilegenNote> package_filegen_cmake_notes;
   std::vector<std::string> errors;
   /// L1: 词法/解析提示
   std::vector<std::string> parse_diagnostics;

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<target name="gz_ct" type="custom_target">
+  <sources>
+  </sources>
+  <dependency name="helper" visibility="private"/>
+</target>

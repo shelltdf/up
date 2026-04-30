@@ -20,12 +20,14 @@
   engine/dom/dom_node_visitor.cpp
   engine/dom/dom_document.cpp
   engine/dom/script_execution.cpp
+  engine/lua/gz_embedded_lua.cpp
   engine/dom/dom_types.hpp
   engine/dom/dom_vars.hpp
   engine/dom/dom_nodes.hpp
   engine/dom/dom_node_visitor.hpp
   engine/dom/dom_document.hpp
   engine/dom/script_execution.hpp
+  engine/lua/gz_embedded_lua.hpp
   infra/platform/paths.cpp
   engine/commands/build.hpp
   engine/commands/configure.hpp
@@ -58,9 +60,12 @@ target_include_directories(gz-lib PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}/engine/backends"
   "${CMAKE_CURRENT_SOURCE_DIR}/engine/xml"
   "${CMAKE_CURRENT_SOURCE_DIR}/engine/dom"
+  "${CMAKE_CURRENT_SOURCE_DIR}/engine/lua"
   "${CMAKE_CURRENT_SOURCE_DIR}/infra/platform"
   "${CMAKE_CURRENT_SOURCE_DIR}/infra/i18n"
 )
+
+target_link_libraries(gz-lib PRIVATE lz_embed)
 
 if(MSVC)
   target_compile_definitions(gz-lib PRIVATE _CRT_SECURE_NO_WARNINGS)
