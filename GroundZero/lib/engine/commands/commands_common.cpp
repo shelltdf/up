@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <regex>
@@ -30,6 +32,67 @@ namespace gz {
 namespace {
 bool g_cli_verbose = false;
 }  // namespace
+
+bool gz_source_path_is_cmake_binary_dir(const std::string& s) {
+  const char* p = gz_cmake_binary_dir_source_prefix();
+  const size_t n = std::strlen(p);
+  return s.size() >= n && s.compare(0, n, p) == 0;
+}
+
+std::string gz_cmake_binary_dir_source_rel(const std::string& s) {
+  const char* p = gz_cmake_binary_dir_source_prefix();
+  const size_t n = std::strlen(p);
+  if (s.size() < n || s.compare(0, n, p) != 0)
+    return {};
+  return s.substr(n);
+}
+
+void collect_gz_desc_xml_files(const std::filesystem::path& root, std::vector<std::filesystem::path>& package_files,
+                               std::vector<std::filesystem::path>& target_files, const char* log_prefix) {
+  if (!std::filesystem::exists(root))
+    return;
+  const char* tag = (log_prefix && log_prefix[0]) ? log_prefix : "gz";
+  static const char* kSkipSubdirNames[] = {".git",        "node_modules", ".svn",        "__pycache__", ".vs",
+                                            "CMakeFiles", "bower_components", "vendor", "dist",        "out",
+                                            "vcpkg"};
+  const size_t pkg0 = package_files.size();
+  const size_t tgt0 = target_files.size();
+  std::uint64_t step = 0;
+  for (std::filesystem::recursive_directory_iterator it(
+           root, std::filesystem::directory_options::skip_permission_denied);
+       it != std::filesystem::recursive_directory_iterator(); ++it) {
+    ++step;
+    if (step == 1u || (step % 10000u) == 0u) {
+      std::cerr << tag << ": scanning… step=" << step << " in " << to_posix_path_string(root) << "\n" << std::flush;
+    }
+    if (it->is_directory()) {
+      const std::filesystem::path fn = it->path().filename();
+      if (fn == ".intermediate") {
+        it.disable_recursion_pending();
+        continue;
+      }
+      for (const char* skip : kSkipSubdirNames) {
+        if (fn == skip) {
+          it.disable_recursion_pending();
+          break;
+        }
+      }
+      continue;
+    }
+    if (!it->is_regular_file())
+      continue;
+    const auto p = it->path();
+    if (p.filename() == "package.xml")
+      package_files.push_back(p);
+    else if (p.filename() == "target.xml")
+      target_files.push_back(p);
+  }
+  const size_t d_pkg = package_files.size() - pkg0;
+  const size_t d_tgt = target_files.size() - tgt0;
+  std::cerr << tag << ": done " << to_posix_path_string(root) << " (" << step << " step(s), +" << d_pkg
+            << " package.xml, +" << d_tgt << " target.xml)\n"
+            << std::flush;
+}
 
 bool gz_mergeable_option_key(const std::string& k) {
   if (k.empty())
@@ -306,6 +369,38 @@ void gz_filter_scan_roots_skip_under_intermediate(const std::filesystem::path& c
     kept.push_back(cwd);
   }
   roots = std::move(kept);
+}
+
+void gz_dedupe_scan_roots_subsumed(std::vector<std::filesystem::path>& roots) {
+  if (roots.size() <= 1)
+    return;
+  std::vector<std::filesystem::path> can;
+  can.reserve(roots.size());
+  for (const auto& r : roots) {
+    std::error_code er;
+    can.push_back(std::filesystem::weakly_canonical(std::filesystem::absolute(r), er));
+  }
+  std::vector<bool> drop(roots.size(), false);
+  for (size_t i = 0; i < roots.size(); ++i) {
+    for (size_t j = 0; j < roots.size(); ++j) {
+      if (i == j) continue;
+      if (can[i] == can[j] && j < i) {
+        drop[i] = true;
+        break;
+      }
+      if (i != j && can[i] != can[j] && gz_path_is_same_or_under(roots[j], roots[i])) {
+        drop[i] = true;
+        break;
+      }
+    }
+  }
+  std::vector<std::filesystem::path> out;
+  out.reserve(roots.size());
+  for (size_t k = 0; k < roots.size(); ++k) {
+    if (!drop[k])
+      out.push_back(roots[k]);
+  }
+  roots = std::move(out);
 }
 
 }  // namespace gz

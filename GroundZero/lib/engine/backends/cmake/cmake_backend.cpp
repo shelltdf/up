@@ -19,38 +19,44 @@ namespace gz {
 
 namespace {
 
-bool path_starts_with(const std::filesystem::path& prefix_raw, const std::filesystem::path& p_raw) {
-  std::error_code ec;
-  std::filesystem::path prefix = std::filesystem::weakly_canonical(prefix_raw, ec);
-  if (ec)
-    prefix = std::filesystem::absolute(prefix_raw);
-  std::filesystem::path full = std::filesystem::weakly_canonical(p_raw, ec);
-  if (ec)
-    full = std::filesystem::absolute(p_raw);
-  const std::string pre = prefix.generic_string();
-  const std::string s = full.generic_string();
-  if (pre.size() > s.size())
-    return false;
-  if (s.compare(0, pre.size(), pre) != 0)
-    return false;
-  if (pre.size() == s.size())
+// O(1) "is p under (or same as) base" using lexical relative path — no I/O. Requires paths already
+// from weakly_canonical for consistent root/spelling (same as original path_starts_with, but
+// that did two weakly_canonical **per test**, which for infer_common_source_root meant millions of
+// stat calls for projects with many sources).
+static bool path_is_descendant_of_or_equal(const std::filesystem::path& base, const std::filesystem::path& p) {
+  if (p == base)
     return true;
-  return s[pre.size()] == '/';
+  const std::filesystem::path rel = p.lexically_relative(base);
+  for (const auto& seg : rel) {
+    if (seg == std::filesystem::path(".."))
+      return false;
+  }
+  return !rel.empty();
 }
 
 std::optional<std::filesystem::path> infer_common_source_root(const ConfigureGraphModel& model) {
-  std::vector<std::filesystem::path> paths;
+  std::vector<std::filesystem::path> raw;
   for (const auto& t : model.targets) {
     if (t.imported_prebuilt)
       continue;
     for (const auto& sp : t.source_paths)
-      paths.emplace_back(sp);
+      raw.push_back(sp);
   }
-  if (paths.empty())
+  if (raw.empty())
     return std::nullopt;
-  std::filesystem::path common = paths[0];
-  for (size_t i = 1; i < paths.size(); ++i) {
-    while (!common.empty() && !path_starts_with(common, paths[i]))
+  // One weakly_canonical per source; then only lexical parent() / lexically_relative (no disk).
+  std::vector<std::filesystem::path> canon;
+  canon.reserve(raw.size());
+  for (const auto& p : raw) {
+    std::error_code ec;
+    std::filesystem::path c = std::filesystem::weakly_canonical(std::filesystem::absolute(p), ec);
+    if (ec)
+      c = std::filesystem::absolute(p).lexically_normal();
+    canon.push_back(std::move(c));
+  }
+  std::filesystem::path common = canon[0];
+  for (size_t i = 1; i < canon.size(); ++i) {
+    while (!common.empty() && !path_is_descendant_of_or_equal(common, canon[i]))
       common = common.parent_path();
   }
   if (common.empty())
@@ -107,9 +113,26 @@ std::string abs_path_string_for_cmake(const std::string& s) {
 std::string list_path_from_cmake_source(const std::string& src_raw, const std::filesystem::path& build_root) {
   if (src_raw.empty())
     return {};
-  std::error_code ec;
-  const std::filesystem::path br = std::filesystem::weakly_canonical(std::filesystem::absolute(build_root), ec);
-  if (ec || br.empty())
+  if (gz_source_path_is_cmake_binary_dir(src_raw)) {
+    const std::string rel = gz_cmake_binary_dir_source_rel(src_raw);
+    if (rel.empty())
+      return {};
+    return std::string("${CMAKE_CURRENT_BINARY_DIR}/") + normalize_path_slashes_for_cmake(rel);
+  }
+  // write_cmake_lists can call this thousands of times; build_root is fixed — avoid repeated
+  // weakly_canonical on the same path.
+  static std::string s_br_cache_key;
+  static std::filesystem::path s_br;
+  static std::error_code s_br_ec;
+  {
+    const std::string k = to_posix_path_string(std::filesystem::absolute(build_root).lexically_normal());
+    if (s_br_cache_key != k) {
+      s_br_cache_key = k;
+      s_br = std::filesystem::weakly_canonical(std::filesystem::absolute(build_root), s_br_ec);
+    }
+  }
+  const std::filesystem::path& br = s_br;
+  if (s_br_ec || br.empty())
     return abs_path_string_for_cmake(std::filesystem::path(src_raw));
 
   const std::filesystem::path p(src_raw);
@@ -120,6 +143,7 @@ std::string list_path_from_cmake_source(const std::string& src_raw, const std::f
     return std::string("${CMAKE_SOURCE_DIR}/") + s;
   }
 
+  std::error_code ec;
   const std::filesystem::path abs_p = std::filesystem::absolute(p, ec);
   if (ec)
     return abs_path_string_for_cmake(p);
@@ -186,6 +210,68 @@ void append_preamble(std::ostringstream& o, const std::string& package_name) {
   o << "\n";
 }
 
+// GZ: `gz build` passes -DCMAKE_PREFIX_PATH=...; add standard `include/` and flat `zlib.h` roots.
+void append_cmake_prefix_path_includes_block(std::ostringstream& o) {
+  o << "# GZ: CMAKE_PREFIX_PATH roots: add include/ (find_package layout) and prefix itself if zlib.h is at root.\n";
+  o << "if(CMAKE_PREFIX_PATH)\n";
+  o << "  foreach(_gz_pfx IN LISTS CMAKE_PREFIX_PATH)\n";
+  o << "    if(_gz_pfx)\n";
+  o << "      if(EXISTS \"${_gz_pfx}/include\")\n";
+  o << "        include_directories(SYSTEM \"${_gz_pfx}/include\")\n";
+  o << "      endif()\n";
+  o << "      if(EXISTS \"${_gz_pfx}/zlib.h\")\n";
+  o << "        include_directories(SYSTEM \"${_gz_pfx}\")\n";
+  o << "      endif()\n";
+  o << "    endif()\n";
+  o << "  endforeach()\n";
+  o << "endif()\n";
+  o << "\n";
+}
+
+// GZ: libzip `lib/compat.h` requires SIZEOF_OFF_T (from config.h or cmake). A minimal/stub config.h
+// with those macros missing triggers `#error: unsupported size of off_t` at the final #else.
+void append_msvc_libzip_type_size_fallback_block(std::ostringstream& o) {
+  o << "# GZ: MSVC fallback for libzip-style `compat.h` when SIZEOF_OFF_T is not set (no/empty config.h).\n";
+  o << "if(MSVC)\n";
+  o << "  add_compile_definitions(SIZEOF_OFF_T=8 SIZEOF_SIZE_T=8)\n";
+  o << "endif()\n";
+  o << "\n";
+}
+
+void append_gz_workspace_root_block(std::ostringstream& o, const std::string& abs_workspace_posix) {
+  if (abs_workspace_posix.empty())
+    return;
+  o << "# GroundZero: `gz configure` cwd = real project tree. Generated CMakeLists is under -S, so "
+       "CMAKE_SOURCE_DIR is not the upstream tree; use GZ_WORKSPACE_ROOT for file(READ) to lib/ and similar.\n";
+  o << "set(GZ_WORKSPACE_ROOT \"" << cmake_escape_string_value(normalize_path_slashes_for_cmake(abs_workspace_posix))
+    << "\")\n\n";
+}
+
+void rewrite_prelude_paths_for_gz_workspace(std::string& prelude) {
+  const std::string to = "${GZ_WORKSPACE_ROOT}/";
+  static const char* from[] = {"${PROJECT_SOURCE_DIR}/", "${CMAKE_SOURCE_DIR}/"};
+  for (const char* f : from) {
+    const std::string froms(f);
+    for (size_t pos = 0; (pos = prelude.find(froms, pos)) != std::string::npos;) {
+      prelude.replace(pos, froms.size(), to);
+      pos += to.size();
+    }
+  }
+}
+
+void append_cmake_prelude_block(std::ostringstream& o, const ConfigureGraphModel& model) {
+  if (model.cmake_prelude.empty())
+    return;
+  std::string p = model.cmake_prelude;
+  if (!model.gz_workspace_root.empty())
+    rewrite_prelude_paths_for_gz_workspace(p);
+  o << "# --- from package.xml <cmake_prelude> (before targets; e.g. file(READ)/file(WRITE) for generated sources)\n";
+  o << p;
+  if (p.back() != '\n')
+    o << "\n";
+  o << "\n";
+}
+
 void append_prebuilt_imported(
     std::ostringstream& o,
     const ConfigureGraphModel& m,
@@ -226,6 +312,32 @@ void append_prebuilt_imported(
     o << "\n";
   }
   o << "\n";
+}
+
+// When some sources live under e.g. upstream lib/ and generated files under build/out/lib/, infer_common_source_root
+// is the package root only — too shallow for #include "zipint.h" (next to the .c in lib/). Add each source file's
+// parent directory so internal headers next to sources resolve (libzip, etc.).
+void append_include_parent_dirs_of_sources(std::ostringstream& o, const ConfigureTargetModel& t,
+                                           const ConfigureGraphModel& m) {
+  std::set<std::string> uniq;
+  for (const auto& s : t.source_paths) {
+    if (s.empty() || gz_source_path_is_cmake_binary_dir(s))
+      continue;
+    std::filesystem::path p(s);
+    if (!p.has_parent_path())
+      continue;
+    std::error_code ec;
+    const std::filesystem::path par = std::filesystem::absolute(p.parent_path(), ec);
+    if (ec)
+      continue;
+    uniq.insert(to_posix_path_string(par.lexically_normal()));
+  }
+  if (uniq.empty())
+    return;
+  o << "target_include_directories(" << t.name << " PUBLIC\n";
+  for (const auto& dir : uniq)
+    o << kInd << "\"" << cmake_escape_string_value(list_path_from_cmake_source(dir, m.build_root)) << "\"\n";
+  o << ")\n";
 }
 
 void append_source_rules_for_target(
@@ -276,6 +388,7 @@ void append_native_libraries(
          << kInd << "\"" << cmake_escape_string_value(list_path_from_cmake_source(*pkg_root, m.build_root))
          << "\"\n)\n";
     }
+    append_include_parent_dirs_of_sources(o, t, m);
     if (!t.compile_definitions.empty()) {
       o << "target_compile_definitions(" << t.name << " PRIVATE\n";
       for (const auto& d : t.compile_definitions)
@@ -414,6 +527,7 @@ void append_executables(
          << kInd << "\"" << cmake_escape_string_value(list_path_from_cmake_source(*pkg_root, m.build_root))
          << "\"\n)\n";
     }
+    append_include_parent_dirs_of_sources(o, t, m);
     if (!t.compile_definitions.empty()) {
       o << "target_compile_definitions(" << t.name << " PRIVATE\n";
       for (const auto& d : t.compile_definitions)
@@ -627,12 +741,18 @@ std::string build_cmake_configure_command(const ConfigureBackendContext& ctx) {
 }
 
 int write_cmake_lists(const ConfigureGraphModel& model) {
+  std::cerr << "configure: [gen cmake] assembling fragments (common root, prebuilt, libs, executables, install)…\n"
+            << std::flush;
   std::ostringstream cm;
   int command_idx = 0;
   const auto pkg_root = infer_common_source_root(model);
   const PrebuiltLinkIndex prebuilt_link = make_prebuilt_index(model);
 
   append_preamble(cm, model.package_name);
+  append_gz_workspace_root_block(cm, model.gz_workspace_root);
+  append_cmake_prelude_block(cm, model);
+  append_cmake_prefix_path_includes_block(cm);
+  append_msvc_libzip_type_size_fallback_block(cm);
   append_prebuilt_imported(cm, model, pkg_root);
   append_native_libraries(cm, model, pkg_root, command_idx);
   append_custom_targets(cm, model);
@@ -641,12 +761,14 @@ int write_cmake_lists(const ConfigureGraphModel& model) {
   append_test_block(cm, model);
   append_install(cm, model, command_idx);
 
+  std::cerr << "configure: [gen cmake] rendering (may take a moment for very large project trees)…\n" << std::flush;
   const std::string rendered = cm.str();
   const auto out_cmake = model.build_root / "CMakeLists.txt";
   std::ofstream f(out_cmake);
   if (!f) {
     return 5;
   }
+  std::cerr << "configure: [gen cmake] writing " << to_posix_path_string(out_cmake) << "…\n" << std::flush;
   f << rendered;
   std::cout << "Wrote " << to_posix_path_string(out_cmake) << std::endl;
   return 0;

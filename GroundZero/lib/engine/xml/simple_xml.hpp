@@ -56,6 +56,9 @@ struct PackageDesc {
   /** `<defines>`; applied to every native compile target in this package (before each target's own `<defines>`). */
   std::vector<DefineEntry> defines;
   std::vector<ConfigFileEntry> config_files;
+  /// Optional: raw CMake lines emitted at top-level after `project()` and before any target, for configure-time
+  /// `file(READ)` / `file(WRITE)` (see `write_cmake_lists` / `cmake_backend`).
+  std::string cmake_prelude;
 };
 
 struct TargetDesc {

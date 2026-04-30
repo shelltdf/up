@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <fstream>
 #include <ostream>
 #include <regex>
@@ -24,12 +25,59 @@ std::string read_all(const std::filesystem::path& path, std::string& error) {
   return ss.str();
 }
 
+// Minimal XML 1.0 entity decoding for double-quoted attribute values (e.g. `#include &lt;stdint.h&gt;`).
+static void xml_unescape_attr_value(std::string& s) {
+  for (;;) {
+    bool changed = false;
+    for (size_t i = 0; i < s.size();) {
+      if (s[i] != '&') {
+        ++i;
+        continue;
+      }
+      if (s.compare(i, 4, "&lt;") == 0) {
+        s.replace(i, 4, "<");
+        i += 1;
+        changed = true;
+        continue;
+      }
+      if (s.compare(i, 4, "&gt;") == 0) {
+        s.replace(i, 4, ">");
+        i += 1;
+        changed = true;
+        continue;
+      }
+      if (s.compare(i, 6, "&quot;") == 0) {
+        s.replace(i, 6, "\"");
+        i += 1;
+        changed = true;
+        continue;
+      }
+      if (s.compare(i, 5, "&apos;") == 0) {
+        s.replace(i, 5, "'");
+        i += 1;
+        changed = true;
+        continue;
+      }
+      if (s.compare(i, 5, "&amp;") == 0) {
+        s.replace(i, 5, "&");
+        i += 1;
+        changed = true;
+        continue;
+      }
+      ++i;
+    }
+    if (!changed)
+      break;
+  }
+}
+
 bool attr_string(const std::string& xml, const char* name, std::string& out) {
   std::regex re(std::string(R"rx(\b)rx") + name + R"rx(\s*=\s*"([^"]*)")rx");
   std::smatch m;
   if (!std::regex_search(xml, m, re))
     return false;
   out = m[1].str();
+  xml_unescape_attr_value(out);
   return true;
 }
 
@@ -41,6 +89,60 @@ std::string trim_copy(std::string s) {
   while (e > b && std::isspace(static_cast<unsigned char>(s[e - 1])))
     --e;
   return s.substr(b, e - b);
+}
+
+// s[open_lt] is '<' of a void element. Returns index one past the closing '>' of `.../>` (or `... />`).
+// Respects only double-quoted attributes; '/' inside values (e.g. "a/b") is ignored.
+static size_t self_closing_void_end(const std::string& s, size_t open_lt) {
+  if (open_lt >= s.size() || s[open_lt] != '<')
+    return std::string::npos;
+  bool in_dq = false;
+  for (size_t i = open_lt + 1; i < s.size(); ++i) {
+    const char c = s[i];
+    if (c == '"') {
+      in_dq = !in_dq;
+      continue;
+    }
+    if (in_dq)
+      continue;
+    if (c == '/' && i + 1 < s.size() && s[i + 1] == '>')
+      return i + 2;
+  }
+  return std::string::npos;
+}
+
+// True if s[open_lt] is '<' and the element is a self-closing `tag .../>` (not `tag>text</tag>`: after the name, not `>`).
+static bool void_tag_starts(const std::string& s, size_t open_lt, const char* tag) {
+  if (open_lt >= s.size() || s[open_lt] != '<')
+    return false;
+  size_t t = open_lt + 1;
+  while (t < s.size() && (s[t] == ' ' || s[t] == '\t' || s[t] == '\n' || s[t] == '\r' || s[t] == '\f' || s[t] == '\v'))
+    ++t;
+  const size_t tlen = std::strlen(tag);
+  if (s.size() - t < tlen)
+    return false;
+  for (size_t i = 0; i < tlen; ++i) {
+    if (s[t + i] != tag[i])
+      return false;
+  }
+  t += tlen;
+  if (t < s.size() && (std::isalnum(static_cast<unsigned char>(s[t])) != 0 || s[t] == '_' || s[t] == '-'))
+    return false;
+  while (t < s.size() && (s[t] == ' ' || s[t] == '\t' || s[t] == '\n' || s[t] == '\r' || s[t] == '\f' || s[t] == '\v'))
+    ++t;
+  if (t < s.size() && s[t] == '>')
+    return false; // e.g. <file> path </file> — not `.../>`
+  return true;
+}
+
+static bool is_comment_open(const std::string& s, size_t i) {
+  return i + 3 < s.size() && s[i] == '<' && s[i + 1] == '!' && s[i + 2] == '-' && s[i + 3] == '-';
+}
+static size_t after_comment(const std::string& s, size_t i) {
+  const size_t e = s.find("-->", i + 4);
+  if (e == std::string::npos)
+    return s.size();
+  return e + 3;
 }
 
 void parse_gz_binary_layout_attrs(const std::string& head, GzBinaryLayout& b) {
@@ -150,22 +252,40 @@ bool parse_vars_body(const std::string& body,
                      std::vector<std::pair<std::string, std::string>>& out,
                      std::vector<ScriptEntry>& scripts,
                      std::string& error) {
-  std::regex var_re(R"rx(<\s*var\s+([^>]+)/\s*>)rx");
-  for (std::sregex_iterator it(body.begin(), body.end(), var_re), end; it != end; ++it) {
-    const std::string attrs = (*it)[1].str();
+  // Do not use a single-line regex for void `<var .../>` — a greedy `[^>]+` (or a broken alternation) can
+  // consume the closing `"/` and match zero `var` rows, leaving package `<vars>` empty. Scan with
+  // quote-aware `self_closing_void_end` and parse attributes from the full tag fragment.
+  for (size_t p = 0; p < body.size();) {
+    const size_t lt = body.find('<', p);
+    if (lt == std::string::npos)
+      break;
+    if (is_comment_open(body, lt)) {
+      p = after_comment(body, lt);
+      continue;
+    }
+    if (!void_tag_starts(body, lt, "var")) {
+      p = lt + 1;
+      continue;
+    }
+    const size_t end = self_closing_void_end(body, lt);
+    if (end == std::string::npos) {
+      error = "unclosed <var .../> in <vars> block (missing `/>`?)";
+      return false;
+    }
+    const std::string frag = body.substr(lt, end - lt);
     std::string n;
-    if (!attr_string(attrs, "name", n)) {
+    if (!attr_string(frag, "name", n)) {
       error = "<var> requires name=\"...\"";
       return false;
     }
     n = trim_copy(n);
     std::string v;
-    if (!attr_string(attrs, "value", v))
+    if (!attr_string(frag, "value", v))
       v.clear();
     else
       v = trim_copy(v);
     std::string var_type;
-    if (attr_string(attrs, "type", var_type))
+    if (attr_string(frag, "type", var_type))
       var_type = trim_copy(var_type);
     if (n.empty()) {
       error = "<var> name cannot be empty";
@@ -174,10 +294,10 @@ bool parse_vars_body(const std::string& body,
     if (var_type == "script") {
       ScriptEntry se;
       se.name = n;
-      if (!attr_string(attrs, "trigger", se.trigger))
+      if (!attr_string(frag, "trigger", se.trigger))
         se.trigger = "manual";
-      if (!attr_string(attrs, "script_type", se.script_type)) {
-        if (!attr_string(attrs, "lang", se.script_type))
+      if (!attr_string(frag, "script_type", se.script_type)) {
+        if (!attr_string(frag, "lang", se.script_type))
           se.script_type = "lua";
       }
       se.trigger = trim_copy(se.trigger);
@@ -193,6 +313,7 @@ bool parse_vars_body(const std::string& body,
     } else {
       out.emplace_back(std::move(n), std::move(v));
     }
+    p = end;
   }
   return true;
 }
@@ -200,16 +321,31 @@ bool parse_vars_body(const std::string& body,
 bool parse_defines_body(const std::string& body, std::vector<DefineEntry>& out, std::string& error, const char* ctx) {
   static const std::regex define_name_ok(R"rx(^[A-Za-z_][A-Za-z0-9_]*$)rx");
   static const std::regex define_value_ok(R"rx(^[A-Za-z0-9_.+\-/]*$)rx");
-  std::regex def_re(R"rx(<\s*define\s+([^>]+)/\s*>)rx");
-  for (std::sregex_iterator it(body.begin(), body.end(), def_re), end; it != end; ++it) {
+  for (size_t p = 0; p < body.size();) {
+    const size_t lt = body.find('<', p);
+    if (lt == std::string::npos)
+      break;
+    if (is_comment_open(body, lt)) {
+      p = after_comment(body, lt);
+      continue;
+    }
+    if (!void_tag_starts(body, lt, "define")) {
+      p = lt + 1;
+      continue;
+    }
+    const size_t end = self_closing_void_end(body, lt);
+    if (end == std::string::npos) {
+      error = std::string(ctx) + ": unclosed <define .../> (missing `/>`?)";
+      return false;
+    }
+    const std::string frag = body.substr(lt, end - lt);
     DefineEntry de;
-    const std::string attrs = (*it)[1].str();
-    if (!attr_string(attrs, "name", de.name)) {
+    if (!attr_string(frag, "name", de.name)) {
       error = std::string(ctx) + ": <define> requires name=\"...\" attribute";
       return false;
     }
     de.name = trim_copy(de.name);
-    if (!attr_string(attrs, "value", de.value))
+    if (!attr_string(frag, "value", de.value))
       de.value.clear();
     else
       de.value = trim_copy(de.value);
@@ -226,6 +362,7 @@ bool parse_defines_body(const std::string& body, std::vector<DefineEntry>& out, 
       return false;
     }
     out.push_back(std::move(de));
+    p = end;
   }
   return true;
 }
@@ -241,16 +378,31 @@ bool parse_flag_arg_body(const std::string& body, std::vector<std::string>& out,
 }
 
 bool parse_config_files_body(const std::string& body, std::vector<ConfigFileEntry>& out, std::string& error) {
-  std::regex cf_re(R"rx(<\s*file\s+([^>]+)/\s*>)rx");
-  for (std::sregex_iterator it(body.begin(), body.end(), cf_re), end; it != end; ++it) {
+  for (size_t p = 0; p < body.size();) {
+    const size_t lt = body.find('<', p);
+    if (lt == std::string::npos)
+      break;
+    if (is_comment_open(body, lt)) {
+      p = after_comment(body, lt);
+      continue;
+    }
+    if (!void_tag_starts(body, lt, "file")) {
+      p = lt + 1;
+      continue;
+    }
+    const size_t end = self_closing_void_end(body, lt);
+    if (end == std::string::npos) {
+      error = "<config_files> unclosed <file .../> (missing `/>`?)";
+      return false;
+    }
+    const std::string frag = body.substr(lt, end - lt);
     ConfigFileEntry e;
-    const std::string attrs = (*it)[1].str();
-    if (!attr_string(attrs, "in", e.in)) {
+    if (!attr_string(frag, "in", e.in)) {
       error = "<config_files> <file> requires in=\"...\"";
       return false;
     }
     e.in = trim_copy(e.in);
-    if (!attr_string(attrs, "to", e.to)) {
+    if (!attr_string(frag, "to", e.to)) {
       error = "<config_files> <file> requires to=\"...\" (safe relative path under generated/<pkg>/_package/ or "
               "generated/<pkg>/<target>/)";
       return false;
@@ -261,6 +413,7 @@ bool parse_config_files_body(const std::string& body, std::vector<ConfigFileEntr
       return false;
     }
     out.push_back(std::move(e));
+    p = end;
   }
   return true;
 }
@@ -321,17 +474,37 @@ bool append_sources_from_body(const std::string& body, TargetDesc& out, std::str
   };
   std::vector<SourcePending> ordered;
   ordered.reserve(8);
-  std::regex src_void_re(R"rx(<\s*(file|glob)\s+([^>]+)/\s*>)rx");
-  for (std::sregex_iterator it(body.begin(), body.end(), src_void_re), end; it != end; ++it) {
+  for (size_t p = 0; p < body.size();) {
+    const size_t lt = body.find('<', p);
+    if (lt == std::string::npos)
+      break;
+    if (is_comment_open(body, lt)) {
+      p = after_comment(body, lt);
+      continue;
+    }
+    const char* kind = nullptr;
+    if (void_tag_starts(body, lt, "file"))
+      kind = "file";
+    else if (void_tag_starts(body, lt, "glob"))
+      kind = "glob";
+    if (!kind) {
+      p = lt + 1;
+      continue;
+    }
+    const size_t end = self_closing_void_end(body, lt);
+    if (end == std::string::npos) {
+      error = "sources: unclosed <" + std::string(kind) + " .../> (missing `/>`?)";
+      return false;
+    }
+    const std::string frag = body.substr(lt, end - lt);
     TargetDesc::SourceEntry se;
-    se.kind = trim_copy((*it)[1].str());
-    const std::string attrs = (*it)[2].str();
-    if (!attr_string(attrs, "from", se.from)) {
+    se.kind = kind;
+    if (!attr_string(frag, "from", se.from)) {
       error = "sources <" + se.kind + " .../> requires from=\"...\"";
       return false;
     }
     se.from = trim_copy(se.from);
-    if (!attr_string(attrs, "when", se.when))
+    if (!attr_string(frag, "when", se.when))
       se.when.clear();
     else
       se.when = trim_copy(se.when);
@@ -339,7 +512,8 @@ bool append_sources_from_body(const std::string& body, TargetDesc& out, std::str
       error = "sources entry from cannot be empty";
       return false;
     }
-    ordered.push_back({static_cast<size_t>(std::distance(body.begin(), (*it)[0].first)), std::move(se)});
+    ordered.push_back({lt, std::move(se)});
+    p = end;
   }
   std::regex src_re(R"rx(<\s*(file|glob)\s*([^>]*)>([\s\S]*?)</\s*\1\s*>)rx");
   for (std::sregex_iterator it(body.begin(), body.end(), src_re), end; it != end; ++it) {
@@ -473,6 +647,24 @@ void parse_all_prebuilt_void_tags(const std::string& raw, TargetDesc& out) {
 
 }  // namespace
 
+static std::string extract_cmake_prelude_body(std::string body) {
+  auto trim_edges = [](std::string& s) {
+    size_t a = 0;
+    while (a < s.size() && (s[a] == ' ' || s[a] == '\t' || s[a] == '\r' || s[a] == '\n')) a++;
+    size_t b = s.size();
+    while (b > a && (s[b - 1] == ' ' || s[b - 1] == '\t' || s[b - 1] == '\r' || s[b - 1] == '\n')) b--;
+    s = s.substr(a, b - a);
+  };
+  trim_edges(body);
+  if (body.size() >= 9 && body.compare(0, 9, "<![CDATA[") == 0) {
+    const size_t cend = body.find("]]>");
+    if (cend != std::string::npos && cend > 9)
+      body = body.substr(9, cend - 9);
+  }
+  trim_edges(body);
+  return body;
+}
+
 bool load_package_xml(const std::filesystem::path& path, PackageDesc& out, std::string& error) {
   const std::string raw = read_all(path, error);
   if (raw.empty() && !error.empty())
@@ -518,6 +710,19 @@ bool load_package_xml(const std::filesystem::path& path, PackageDesc& out, std::
   if (!for_each_balanced_children(
           raw, "config_files",
           [&](const std::string& body, std::string& err) { return parse_config_files_body(body, out.config_files, err); },
+          error))
+    return false;
+  if (!for_each_balanced_children(
+          raw, "cmake_prelude",
+          [&](const std::string& body, std::string&) {
+            const std::string piece = extract_cmake_prelude_body(body);
+            if (piece.empty())
+              return true;
+            if (!out.cmake_prelude.empty())
+              out.cmake_prelude += "\n\n";
+            out.cmake_prelude += piece;
+            return true;
+          },
           error))
     return false;
 
@@ -659,6 +864,9 @@ bool write_package_xml(std::ostream& out, const PackageDesc& pkg) {
     for (const auto& cf : pkg.config_files)
       out << "    <file in=\"" << xml_escape_text(cf.in) << "\" to=\"" << xml_escape_text(cf.to) << "\"/>\n";
     out << "  </config_files>\n";
+  }
+  if (!pkg.cmake_prelude.empty()) {
+    out << "  <cmake_prelude><![CDATA[" << pkg.cmake_prelude << "]]></cmake_prelude>\n";
   }
   out << "</package>\n";
   return static_cast<bool>(out);

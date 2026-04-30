@@ -17,6 +17,9 @@ bool gz_path_is_same_or_under(const std::filesystem::path& root, const std::file
 void gz_filter_scan_roots_skip_under_intermediate(const std::filesystem::path& cwd,
                                                   std::vector<std::filesystem::path>& roots,
                                                   const char* tool_label_for_warnings);
+/** Remove scan roots that are the same as or a strict subdirectory of another root (avoids scanning e.g. libzip twice
+ * when a parent 3rdparty is already a root). */
+void gz_dedupe_scan_roots_subsumed(std::vector<std::filesystem::path>& roots);
 
 /** True for keys allowed in the configure/build options map from `gz_cache.txt` / `--opt` (excludes structural lines). */
 bool gz_mergeable_option_key(const std::string& k);
@@ -41,5 +44,23 @@ unsigned parallel_jobs_for_build(const std::map<std::string, std::string>& opts)
 unsigned default_parallel_jobs_hardware();
 /** If no valid GZ_BUILD_PARALLEL / GZ_BUILD_JOBS in opts, sets GZ_BUILD_PARALLEL to default_parallel_jobs_hardware(). */
 void ensure_default_build_parallel_options(std::map<std::string, std::string>& opts);
+
+/**
+ * `target.xml` <sources> token: path is created under the top generated CMake's `CMAKE_CURRENT_BINARY_DIR`
+ * (e.g. configure-time `file(WRITE …)` from gz_reverse with <cmake_prelude>); not a path under the source tree.
+ * Prefix must match gz_reverse_cmake output exactly.
+ */
+inline constexpr const char* gz_cmake_binary_dir_source_prefix() { return "__GZ_CMAKE_BINARY_DIR__/"; }
+bool gz_source_path_is_cmake_binary_dir(const std::string& s);
+/** Strips the prefix; returns empty if `s` is not a binary-dir source token. */
+std::string gz_cmake_binary_dir_source_rel(const std::string& s);
+
+/**
+ * Recursively find `package.xml` / `target.xml` under `root`. Skips `.intermediate` and other bulky directory
+ * names (see implementation) so large `--scan` trees do not block for minutes with no output.
+ * Progress lines use `log_prefix` (e.g. `"configure"` or `"list"`).
+ */
+void collect_gz_desc_xml_files(const std::filesystem::path& root, std::vector<std::filesystem::path>& package_files,
+                               std::vector<std::filesystem::path>& target_files, const char* log_prefix);
 
 }  // namespace gz

@@ -289,13 +289,16 @@ static std::optional<std::string> package_config_in_for_package_xml(const fs::pa
   return path_to_posix(rel);
 }
 
-/// `<sources>`: `configure_file` 等仍映射到 `generated/…`；对落在 **GZ 估计的 build 根** 下的路径, 不再
-/// 假写到 `generated/<包>/<目标>/…` (gz 不跑对方 add_custom_command). 反解将写 **与 build 根相对路径同形** 的
-/// `--source` 下路径(如 `lib/foo.c`), 相对 `target.xml` 目录; **不会**再写成穿越到 `.intermediate/build/…`
-/// 的相对路径(该处文件常由上游首次 configure 才生成, 在反解时尚不存在).
+/// 与 GroundZero `commands_common.hpp` 中声明一致, 供 `gz configure` + `cmake_backend` 识别
+static constexpr const char kGzCmakeBinaryDir[] = "__GZ_CMAKE_BINARY_DIR__/";
+
+/// `<sources>`: `configure_file` 等仍映射到 `generated/…`；对 **file(WRITE) 登记** 且落在 GZ 估计的 build 根下
+/// 的路径, 写为 `__GZ_CMAKE_BINARY_DIR__/<相对构建根>`(正向 `${CMAKE_CURRENT_BINARY_DIR}/...`), 与上游
+/// `CMAKE_CURRENT_BINARY_DIR` 生成物一致, 避免误映到源码树 `lib/…`。
+/// 其它落在 build 根下、非 file(WRITE) 的路径: 仍映到 `--source` 下与 build 相对路径同形(历史行为).
 static std::string source_path_for_gz_remap(const fs::path &tdir, const fs::path &sp, const fs::path &source_root, const std::string &gen_arch,
                                             const std::string &pkg_name, const std::string &tname, const TargetModel &tm,
-                                            const std::vector<ConfigFilePathPair> &package_cf) {
+                                            const std::vector<fs::path> &package_file_writes, const std::vector<ConfigFilePathPair> &package_cf) {
   std::error_code ec;
   const fs::path wc = fs::weakly_canonical(sp, ec);
   if (ec) return source_path_for_target_xml(tdir, sp, source_root);
@@ -316,7 +319,12 @@ static std::string source_path_for_gz_remap(const fs::path &tdir, const fs::path
   const fs::path broot = infer_gz_default_cmake_binary_root(top_parent);
   std::error_code ec2;
   const fs::path brc = fs::weakly_canonical(broot, ec2);
-  if (ec2 || !is_strict_subpath(brc, wc)) return source_path_for_target_xml(tdir, sp, source_root);
+  if (ec2) return source_path_for_target_xml(tdir, sp, source_root);
+  if (is_strict_subpath(brc, wc) && is_registered_file_write(wc, tm, package_file_writes)) {
+    const fs::path rel = fs::relative(wc, brc, ec2);
+    if (!ec2 && !rel.is_absolute()) return std::string(kGzCmakeBinaryDir) + path_to_posix(rel.lexically_normal());
+  }
+  if (!is_strict_subpath(brc, wc)) return source_path_for_target_xml(tdir, sp, source_root);
   {
     const fs::path rel = fs::relative(wc, brc, ec2);
     if (ec2) return source_path_for_target_xml(tdir, sp, source_root);
@@ -324,6 +332,73 @@ static std::string source_path_for_gz_remap(const fs::path &tdir, const fs::path
     // 相对 tdir 一律按「源树根 + rel」写(若缺文件, 需维护者自备或先跑上游 cmake 把生成物抄回 rel)
     return source_path_for_target_xml(tdir, try_src, source_root);
   }
+}
+
+static std::string extract_lib_cmake_zip_err_prelude(const fs::path &source_dir, const std::string &rel_out_posix) {
+  const fs::path listf = source_dir / "lib" / "CMakeLists.txt";
+  std::error_code ec;
+  if (!fs::is_regular_file(listf, ec)) return {};
+  std::ifstream in(listf, std::ios::binary);
+  if (!in) return {};
+  std::string raw((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  const std::string kStart = "file(READ ${PROJECT_SOURCE_DIR}/lib/zip.h";
+  const size_t pos = raw.find(kStart);
+  if (pos == std::string::npos) return {};
+  size_t best_fw = std::string::npos;
+  for (size_t at = pos;;) {
+    at = raw.find("file(WRITE", at);
+    if (at == std::string::npos) break;
+    const size_t ne = raw.find('\n', at);
+    const size_t llen = (ne == std::string::npos ? raw.size() : ne) - at;
+    const std::string ln = raw.substr(at, llen);
+    if (ln.find("zip_err_str.c") != std::string::npos) best_fw = at;
+    at += 1;
+  }
+  if (best_fw == std::string::npos) return {};
+  const size_t line_end = raw.find('\n', best_fw);
+  if (line_end == std::string::npos) return {};
+  std::string block = raw.substr(pos, line_end - pos);
+  for (char &c : block)
+    if (c == '\r') c = '\n';
+  const std::string from = "${CMAKE_CURRENT_BINARY_DIR}/zip_err_str.c";
+  const std::string to = std::string("\"${CMAKE_CURRENT_BINARY_DIR}/") + rel_out_posix + "\"";
+  for (;;) {
+    size_t at = block.find(from);
+    if (at == std::string::npos) break;
+    block.replace(at, from.size(), to);
+  }
+  return block;
+}
+
+static std::string try_auto_cmake_prelude(const fs::path &source_dir, const InterpretResult &ir) {
+  const fs::path *wc_p = nullptr;
+  for (const auto &kv : ir.targets) {
+    for (const auto &p : kv.second.file_write_outputs_abs) {
+      if (p.filename() == "zip_err_str.c") {
+        wc_p = &p;
+        break;
+      }
+    }
+    if (wc_p) break;
+  }
+  if (!wc_p) {
+    for (const auto &p : ir.package_file_write_outputs_abs) {
+      if (p.filename() == "zip_err_str.c") {
+        wc_p = &p;
+        break;
+      }
+    }
+  }
+  if (!wc_p) return {};
+  std::error_code ec, ec2;
+  const fs::path broot = infer_gz_default_cmake_binary_root(source_dir);
+  const fs::path brc = fs::weakly_canonical(broot, ec);
+  const fs::path wc = fs::weakly_canonical(*wc_p, ec2);
+  if (ec || ec2 || !is_strict_subpath(brc, wc)) return {};
+  const fs::path rel = fs::relative(wc, brc, ec2);
+  if (ec2 || rel.is_absolute()) return {};
+  const std::string rel_s = path_to_posix(rel.lexically_normal());
+  return extract_lib_cmake_zip_err_prelude(source_dir, rel_s);
 }
 
 /// Lua 初稿里 `gz.file.read` 建议的相对 `--source` 路径；否则注记为绝对路径
@@ -342,7 +417,8 @@ static std::string lua_path_rel_source_for_read(const fs::path &path_abs, const 
 static void write_filegen_lua(std::ostream &o, const char *scope_label, const std::vector<FileReadEntry> &reads,
                               const std::vector<fs::path> &writes, const std::vector<CmakeFilegenNote> &weak_notes,
                               const fs::path &tdir, const fs::path &source_root, const std::string &gen_arch, const std::string &pkg_name,
-                              const std::string &tname_for_remap, const TargetModel &tm, const std::vector<ConfigFilePathPair> &package_cf) {
+                              const std::string &tname_for_remap, const TargetModel &tm, const std::vector<fs::path> &package_file_writes,
+                              const std::vector<ConfigFilePathPair> &package_cf) {
   o << "-- gz_reverse_cmake: filegen draft for " << scope_label << "\n"
     << "-- 下列 string(REGEX|APPEND|REPLACE|CONCAT)/foreach/while 为同 Listfile 弱注记, 未执行 CMake; 请手填等价 Lua.\n"
     << "-- 正向: <var type=\"script\" script_type=\"lua\" trigger=\"configure\" …/> + gz.file (见 package-target-xml-spec / gz-cli spec)\n\n";
@@ -362,7 +438,8 @@ static void write_filegen_lua(std::ostream &o, const char *scope_label, const st
   if (!writes.empty()) {
     o << "-- file(WRITE) 建议相对路径(相对本 target 的 target.xml 目录, 同 gz 生成物映射规则):\n";
     for (const auto &w : writes) {
-      const std::string rem = source_path_for_gz_remap(tdir, w, source_root, gen_arch, pkg_name, tname_for_remap, tm, package_cf);
+      const std::string rem = source_path_for_gz_remap(tdir, w, source_root, gen_arch, pkg_name, tname_for_remap, tm, package_file_writes,
+                                                         package_cf);
       o << "--   gz.file.write(\"" << rem << "\", content)  -- was " << path_to_posix(w) << "\n";
     }
     o << "\n";
@@ -554,6 +631,9 @@ int main(int argc, char **argv) {
     fs::path package_config_in_base = fs::weakly_canonical(pkg_root, ec_pbase);
     if (ec_pbase) package_config_in_base = pkg_root;
     std::cerr << "   包级 in= 相对 (gz: package.xml 父目录) = " << path_to_posix(package_config_in_base) << "  (= <out>/<包名>)\n";
+    const std::string auto_cmake_prelude = try_auto_cmake_prelude(opt.source_dir, ir);
+    if (!auto_cmake_prelude.empty())
+      std::cerr << "注: 已从 lib/CMakeLists.txt 抽取 zip_err_str 的 file(READ)…file(WRITE) 块写入 package.xml <cmake_prelude>\n";
     {
       std::ofstream f(pkg_root / "package.xml", std::ios::binary);
       f << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<package name=\"" << pkg_name << "\" version=\"" << opt.package_version
@@ -582,6 +662,7 @@ int main(int argc, char **argv) {
           f << "  </config_files>\n";
         }
       }
+      if (!auto_cmake_prelude.empty()) f << "  <cmake_prelude><![CDATA[" << auto_cmake_prelude << "]]></cmake_prelude>\n";
       f << "</package>\n";
     }
 
@@ -603,15 +684,16 @@ int main(int argc, char **argv) {
         }
         if (is_covered_by_config_files(sp, tm, ir.package_config_files)) continue;
         if (is_registered_file_write(sp, tm, ir.package_file_write_outputs_abs)) {
-          std::cerr << "注: 源与 CMake file(WRITE) 登记一致; 正向上可用 package.xml 中 <var type=\"script\" trigger=configure> + gz.file: "
-                    << path_to_posix(sp) << "\n";
+          std::cerr
+              << "注: 源与 CMake file(WRITE) 登记一致; 已标为 " << kGzCmakeBinaryDir << "… 或已尝试抽取 <cmake_prelude> (见 package.xml)\n";
         }
         const std::string ext = ext_to_lower(sp);
         if (ext == ".obj" || ext == ".o") {
           std::cerr << "注: 跳过 .obj/.o(编译产物, 非 add_library 源; 请改列 .c/.cpp/.rc): " << path_to_posix(sp) << "\n";
           continue;
         }
-        std::string rel = source_path_for_gz_remap(tdir, sp, opt.source_dir, gen_arch, pkg_name, tname, tm, ir.package_config_files);
+        std::string rel = source_path_for_gz_remap(tdir, sp, opt.source_dir, gen_arch, pkg_name, tname, tm, ir.package_file_write_outputs_abs,
+                                                   ir.package_config_files);
         if (string_has_cmake_deref(rel)) {
           std::cerr << "注: 跳过(相对路径中含 ${...} 未展开): " << rel << "\n";
           continue;
@@ -735,7 +817,7 @@ int main(int argc, char **argv) {
           if (pf) {
             write_filegen_lua(pf, "package scope (与 package.xml 同目录的 pkg_root 语义)", ir.package_file_read_entries,
                                 ir.package_file_write_outputs_abs, ir.package_filegen_cmake_notes, package_config_in_base, opt.source_dir,
-                                gen_arch, pkg_name, "", empty_tm, ir.package_config_files);
+                                gen_arch, pkg_name, "", empty_tm, ir.package_file_write_outputs_abs, ir.package_config_files);
           }
         }
         for (const auto &ent : loaded) {
@@ -748,7 +830,8 @@ int main(int argc, char **argv) {
             sc += ent.first;
             sc += "\"";
             write_filegen_lua(tfg, sc.c_str(), xrtm.file_read_entries, xrtm.file_write_outputs_abs, xrtm.filegen_cmake_notes,
-                              pkg_root / ent.first, opt.source_dir, gen_arch, pkg_name, ent.first, xrtm, ir.package_config_files);
+                              pkg_root / ent.first, opt.source_dir, gen_arch, pkg_name, ent.first, xrtm, ir.package_file_write_outputs_abs,
+                              ir.package_config_files);
           }
         }
       }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<target name="fw_smoke" type="static_library">
+  <sources>
+    <file>__GZ_CMAKE_BINARY_DIR__/gen_fw.c</file>
+  </sources>
+</target>

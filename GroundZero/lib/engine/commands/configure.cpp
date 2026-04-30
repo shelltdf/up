@@ -60,26 +60,33 @@ static void drop_compiled_artifacts_from_target_sources(ConfigureTargetModel& tm
   tm.source_rules = std::move(rules);
 }
 
-void collect_desc_files(const std::filesystem::path& root, std::vector<std::filesystem::path>& packages,
-                        std::vector<std::filesystem::path>& targets) {
-  if (!std::filesystem::exists(root))
-    return;
-  for (std::filesystem::recursive_directory_iterator it(root,
-                                                         std::filesystem::directory_options::skip_permission_denied),
-       end;
-       it != end; ++it) {
-    if (it->is_directory() && it->path().filename() == ".intermediate") {
-      it.disable_recursion_pending();
-      continue;
-    }
-    if (!it->is_regular_file())
-      continue;
-    const auto p = it->path();
-    if (p.filename() == "package.xml")
-      packages.push_back(p);
-    else if (p.filename() == "target.xml")
-      targets.push_back(p);
-  }
+// libzip `cmake-zipconf.h.in` (upstream configure_file): if any `${ZIP_*}` / `libzip_*` is missing, `finalize_config_template_text`
+// inserts "" and the header becomes `typedef  zip_int8_t;`, breaking all of zip.h on MSVC.
+static bool rel_config_in_ends_with_cmake_zipconf_h_in(const std::string& rel_in) {
+  static const char k[] = "cmake-zipconf.h.in";
+  const size_t n = sizeof(k) - 1;
+  return rel_in.size() >= n && rel_in.compare(rel_in.size() - n, n, k) == 0;
+}
+
+static void apply_default_libzip_cmake_zipconf_vars(std::map<std::string, std::string>& m) {
+  const auto d = [&m](const char* key, const char* val) {
+    const auto it = m.find(key);
+    if (it == m.end() || it->second.empty())
+      m[key] = val;
+  };
+  d("libzip_VERSION", "1.8.0");
+  d("libzip_VERSION_MAJOR", "1");
+  d("libzip_VERSION_MINOR", "8");
+  d("libzip_VERSION_PATCH", "0");
+  d("LIBZIP_TYPES_INCLUDE", "#include <stdint.h>\n");
+  d("ZIP_INT8_T", "int8_t");
+  d("ZIP_UINT8_T", "uint8_t");
+  d("ZIP_INT16_T", "int16_t");
+  d("ZIP_UINT16_T", "uint16_t");
+  d("ZIP_INT32_T", "int32_t");
+  d("ZIP_UINT32_T", "uint32_t");
+  d("ZIP_INT64_T", "int64_t");
+  d("ZIP_UINT64_T", "uint64_t");
 }
 
 std::filesystem::path nearest_package_parent(const std::filesystem::path& target_xml_path,
@@ -982,6 +989,15 @@ int run_configure(const ConfigureRequest& req) {
       roots.push_back(cwd);
   }
   gz_filter_scan_roots_skip_under_intermediate(cwd, roots, "configure");
+  {
+    const size_t n0 = roots.size();
+    gz_dedupe_scan_roots_subsumed(roots);
+    if (roots.size() < n0) {
+      std::cerr << "configure: note: " << n0 - roots.size()
+                << " nested/duplicate --scan root(s) removed; " << roots.size() << " root(s) left (wider path covers the rest)\n"
+                << std::flush;
+    }
+  }
   cli_verbose_phase("configure", "scan_roots");
 
   if (!require_ascii_path(cwd))
@@ -994,8 +1010,11 @@ int run_configure(const ConfigureRequest& req) {
 
   std::vector<std::filesystem::path> package_files;
   std::vector<std::filesystem::path> target_files;
+  std::cerr << "configure: searching for package.xml and target.xml under " << roots.size()
+            << " scan root(s) (recursive; narrow --scan if this is slow)…\n"
+            << std::flush;
   for (const auto& r : roots) {
-    collect_desc_files(r, package_files, target_files);
+    collect_gz_desc_xml_files(r, package_files, target_files, "configure");
   }
   {
     auto dedup = [](std::vector<std::filesystem::path>& v) {
@@ -1027,6 +1046,9 @@ int run_configure(const ConfigureRequest& req) {
     std::cerr << "configure: no package.xml or target.xml found under scan roots.\n";
     return 2;
   }
+  std::cerr << "configure: building DOM from " << package_files.size() << " package.xml and " << target_files.size()
+            << " target.xml (paths)…\n"
+            << std::flush;
   cli_verbose_phase("configure", "load_xml");
 
   DomDocument dom;
@@ -1051,8 +1073,10 @@ int run_configure(const ConfigureRequest& req) {
     return dom_desc_rc;
   cli_verbose_phase("configure", "targets_bound");
 
+  std::cerr << "configure: writing package/target graph to stdout (next lines)…\n" << std::flush;
   std::cout << "Package / target graph (DOM):\n";
   dom.print_tree(std::cout);
+  std::cout << std::flush;
   cli_verbose_phase("configure", "graph_summary");
 
   const std::string host_arch = detect_arch_tag();
@@ -1129,7 +1153,23 @@ int run_configure(const ConfigureRequest& req) {
         lt.desc.type == "prebuilt_shared_library")
       continue;
     for (const auto& s : lt.desc.sources) {
+      if (gz_source_path_is_cmake_binary_dir(s)) {
+        if (!require_ascii_path(std::filesystem::path(s)))
+          return 6;
+        continue;
+      }
       const auto sp = (lt.target_dir / s).lexically_normal();
+      if (!require_ascii_path(sp))
+        return 6;
+    }
+    for (const auto& se : lt.desc.source_entries) {
+      if (se.kind != "file" || se.from.empty()) continue;
+      if (gz_source_path_is_cmake_binary_dir(se.from)) {
+        if (!require_ascii_path(std::filesystem::path(se.from)))
+          return 6;
+        continue;
+      }
+      const auto sp = (lt.target_dir / se.from).lexically_normal();
       if (!require_ascii_path(sp))
         return 6;
     }
@@ -1241,6 +1281,8 @@ int run_configure(const ConfigureRequest& req) {
     std::cerr << "configure: package has no target.xml under the same directory tree.\n";
     return 4;
   }
+  std::cerr << "configure: computing install rules and configure graph (this can take a while for large projects)…\n"
+            << std::flush;
 
   // Prefer std::filesystem::relative: manual iterator compare breaks on Windows when one path is 8.3 and the other is long.
   const auto rel_to_cwd = [](std::filesystem::path base, std::filesystem::path p) {
@@ -1533,6 +1575,12 @@ int run_configure(const ConfigureRequest& req) {
   graph_model.out_dir = build_root / "out";
   graph_model.install_root = default_install_root(cwd) / arch;
   graph_model.install_exe_names = install_exe_names;
+  graph_model.cmake_prelude = primary_pkg.cmake_prelude;
+  {
+    std::error_code wkec;
+    const auto wcwd = std::filesystem::absolute(cwd, wkec);
+    graph_model.gz_workspace_root = to_posix_path_string(wkec ? cwd.lexically_normal() : wcwd.lexically_normal());
+  }
   graph_model.cmake_prefix_path =
       merge_cmake_prefix_path_value(std::filesystem::absolute(graph_model.install_root), dep_install_prefixes, opts, cwd);
 
@@ -1595,7 +1643,7 @@ int run_configure(const ConfigureRequest& req) {
       if (dir_it == package_name_to_dir.end())
         continue;
       const std::filesystem::path pkg_root = dir_it->second;
-      const auto src_vars = merged_vars_for_package_config_files(lt.package_name);
+      const std::map<std::string, std::string> package_config_base_vars = merged_vars_for_package_config_files(lt.package_name);
       const std::filesystem::path gen_pkg_root =
           std::filesystem::absolute(cwd / ".intermediate" / "generated" / std::filesystem::u8path(arch) / lt.package_name
                                     / "_package");
@@ -1616,7 +1664,10 @@ int run_configure(const ConfigureRequest& req) {
         }
         std::ostringstream tbuf;
         tbuf << tin.rdbuf();
-        const std::string rendered = finalize_config_template_text(tbuf.str(), src_vars);
+        std::map<std::string, std::string> file_vars = package_config_base_vars;
+        if (rel_config_in_ends_with_cmake_zipconf_h_in(cf.in))
+          apply_default_libzip_cmake_zipconf_vars(file_vars);
+        const std::string rendered = finalize_config_template_text(tbuf.str(), file_vars);
         const auto out_path = (gen_pkg_root / rel_out).lexically_normal();
         std::error_code mk_ec;
         std::filesystem::create_directories(out_path.parent_path(), mk_ec);
@@ -1783,6 +1834,12 @@ int run_configure(const ConfigureRequest& req) {
                                        apply_script_command(lt, "sources.postprocess", s.postprocess_command)});
           }
         } else {
+          if (gz_source_path_is_cmake_binary_dir(s.from)) {
+            tm.source_paths.push_back(s.from);
+            tm.source_rules.push_back({s.from, apply_script_command(lt, "sources.preprocess", s.preprocess_command),
+                                       apply_script_command(lt, "sources.postprocess", s.postprocess_command)});
+            continue;
+          }
           const auto src = (lt.target_dir / s.from).lexically_normal();
           tm.source_paths.push_back(std::filesystem::absolute(src).generic_string());
           tm.source_rules.push_back({std::filesystem::absolute(src).generic_string(),
@@ -1792,6 +1849,11 @@ int run_configure(const ConfigureRequest& req) {
       }
       if (tm.source_paths.empty() && !lt.desc.sources.empty()) {
         for (const auto& rel : lt.desc.sources) {
+          if (gz_source_path_is_cmake_binary_dir(rel)) {
+            tm.source_paths.push_back(rel);
+            tm.source_rules.push_back({rel, "", ""});
+            continue;
+          }
           const auto src = (lt.target_dir / rel).lexically_normal();
           tm.source_paths.push_back(std::filesystem::absolute(src).generic_string());
           tm.source_rules.push_back({std::filesystem::absolute(src).generic_string(), "", ""});
@@ -1956,11 +2018,13 @@ int run_configure(const ConfigureRequest& req) {
   }
 
   cli_verbose_phase("configure", "embedded_lua_configure");
+  std::cerr << "configure: running embedded configure Lua (if any)…\n" << std::flush;
   if (const int lua_rc = run_dom_embedded_configure_lua(dom, cwd, build_root, arch, pkg_dir, primary_pkg.name);
       lua_rc != 0)
     return lua_rc;
 
   cli_verbose_phase("configure", "generate_backend");
+  std::cerr << "configure: generating backend build files (CMake/Ninja)…\n" << std::flush;
   const int gen_code = run_generate_backend(graph_model);
   if (gen_code != 0)
     return gen_code;

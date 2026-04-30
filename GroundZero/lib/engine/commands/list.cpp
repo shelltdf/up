@@ -13,27 +13,6 @@
 namespace gz {
 namespace {
 
-void collect_desc_files(const std::filesystem::path& root,
-                        std::vector<std::filesystem::path>& packages,
-                        std::vector<std::filesystem::path>& targets) {
-  if (!std::filesystem::exists(root))
-    return;
-  for (std::filesystem::recursive_directory_iterator it(root, std::filesystem::directory_options::skip_permission_denied), end;
-       it != end; ++it) {
-    if (it->is_directory() && it->path().filename() == ".intermediate") {
-      it.disable_recursion_pending();
-      continue;
-    }
-    if (!it->is_regular_file())
-      continue;
-    const auto p = it->path();
-    if (p.filename() == "package.xml")
-      packages.push_back(p);
-    else if (p.filename() == "target.xml")
-      targets.push_back(p);
-  }
-}
-
 bool require_ascii_path(const std::filesystem::path& p) {
   if (path_has_non_ascii(p)) {
     std::cerr << "list: path contains non-ASCII characters (not supported): " << to_posix_path_string(p) << "\n";
@@ -95,6 +74,7 @@ int parse_list_cli_args(const std::filesystem::path& cwd, const std::vector<std:
       out.roots.push_back(cwd);
   }
   gz_filter_scan_roots_skip_under_intermediate(cwd, out.roots, "list");
+  gz_dedupe_scan_roots_subsumed(out.roots);
   return 0;
 }
 
@@ -103,7 +83,7 @@ int run_list(const ListRequest& req) {
   std::vector<std::filesystem::path> package_files;
   std::vector<std::filesystem::path> target_files;
   for (const auto& r : req.roots)
-    collect_desc_files(r, package_files, target_files);
+    collect_gz_desc_xml_files(r, package_files, target_files, "list");
   {
     auto dedup = [](std::vector<std::filesystem::path>& v) {
       std::set<std::string> seen;

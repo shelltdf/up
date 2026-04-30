@@ -171,6 +171,11 @@ int write_ninja_file(const ConfigureGraphModel& model) {
       continue;
     std::vector<std::string> objs;
     for (size_t i = 0; i < t.source_paths.size(); ++i) {
+      if (gz_source_path_is_cmake_binary_dir(t.source_paths[i])) {
+        std::cerr << "configure: ninja backend: <sources> entry \"" << t.source_paths[i]
+                  << "\" is a configure-time generated file (use GZ_TARGET_BUILD_SYSTEM=cmake and <cmake_prelude>).\n";
+        return 9;
+      }
       const auto src = std::filesystem::path(t.source_paths[i]);
       const std::string obj_name = sanitize_name(t.name) + "_" + std::to_string(i)
 #if defined(_WIN32)

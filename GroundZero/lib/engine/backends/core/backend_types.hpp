@@ -105,6 +105,11 @@ struct ConfigureGraphModel {
   std::vector<ConfigureInstallFileRule> asset_file_rules;
   std::string cmake_prefix_path;
   bool cmake_parent_multi_config = false;
+  /// From `package.xml` `<cmake_prelude>`: emitted after `project()` in generated `CMakeLists.txt` (CMake mode).
+  std::string cmake_prelude;
+  /// Absolute `configure` cwd (POSIX slashes): top-of-tree sources; not the same as `CMAKE_SOURCE_DIR` when `-S` is
+  /// `.intermediate/build/...` (see `cmake_prelude` rewrites for ``${PROJECT_SOURCE_DIR}``/``${CMAKE_SOURCE_DIR}``).
+  std::string gz_workspace_root;
 };
 
 }  // namespace gz

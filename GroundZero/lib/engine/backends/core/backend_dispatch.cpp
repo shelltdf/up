@@ -159,6 +159,7 @@ int run_generate_backend(const ConfigureGraphModel& model) {
 int run_configure_backend(const ConfigureBackendContext& ctx) {
   std::cout << std::flush;
   const std::string command = build_cmake_configure_command(ctx);
+  std::cerr << "configure: running CMake: " << command << "\n" << std::flush;
   const int code = std::system(command.c_str());
   if (code != 0) {
     std::cerr << "configure: cmake configure failed with code " << code << "\n";

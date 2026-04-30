@@ -13,6 +13,7 @@
 #include "spec.hpp"
 #include "test.hpp"
 
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -39,6 +40,13 @@ void init_console_utf8_best_effort() {
 #endif
 }
 
+// When stdout is a pipe (e.g. gz-gui capturing output), the CRT may fully buffer stdout; graph/CMake text then
+// appears only in large chunks or at exit — looking like a hang. Line-buffer for incremental visibility.
+void init_pipe_friendly_stdout() {
+  std::ios::sync_with_stdio(true);
+  (void)std::setvbuf(stdout, nullptr, _IOLBF, 4096);
+}
+
 bool env_verbose_enabled() {
   const char* e = std::getenv("GZ_VERBOSE");
   if (!e || e[0] == '\0')
@@ -51,6 +59,7 @@ bool env_verbose_enabled() {
 
 int run_gz_cli(int argc, char** argv) {
   init_console_utf8_best_effort();
+  init_pipe_friendly_stdout();
   const std::filesystem::path cwd = std::filesystem::current_path();
   std::vector<std::string> args;
   for (int i = 1; i < argc; ++i)
